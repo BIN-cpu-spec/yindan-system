@@ -3375,33 +3375,49 @@ def api_diagonal_delete(sku):
 def get_sheets_client():
     """建立 Google Sheets 連線"""
     try:
-        import gspread, base64
+        import gspread, base64, re
         from google.oauth2.service_account import Credentials
 
-        # 優先從環境變數讀取，其次從本地檔案讀取
-        cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-        if cred_json:
-            # 嘗試 Base64 解碼
+        cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT", "")
+        if not cred_json:
+            return None, "未設定 GOOGLE_SERVICE_ACCOUNT 環境變數"
+
+        cred_dict = None
+
+        # 方法1: Base64 解碼
+        try:
+            cred_dict = json.loads(base64.b64decode(cred_json + "==").decode("utf-8"))
+        except Exception:
+            pass
+
+        # 方法2: 強制修復換行後直接解析
+        if not cred_dict:
             try:
-                cred_dict = json.loads(base64.b64decode(cred_json).decode())
+                fixed = cred_json.replace(chr(13)+chr(10), chr(92)+"n").replace(chr(13), chr(92)+"n").replace(chr(10), chr(92)+"n")
+                cred_dict = json.loads(fixed)
             except Exception:
-                try:
-                    cred_dict = json.loads(cred_json)
-                except Exception as e:
-                    return None, f"JSON 解析失敗: {e}"
-        else:
-            # 從本地 service_account.json 檔案讀取
-            key_path = os.path.join(os.path.dirname(__file__), "service_account.json")
-            if not os.path.exists(key_path):
-                return None, "未設定 GOOGLE_SERVICE_ACCOUNT 且找不到 service_account.json"
-            with open(key_path, "r", encoding="utf-8") as f:
-                cred_dict = json.load(f)
-        scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+                pass
+
+        # 方法3: 直接解析
+        if not cred_dict:
+            try:
+                cred_dict = json.loads(cred_json)
+            except Exception as e:
+                return None, f"JSON 解析失敗: {str(e)[:100]}"
+
+        if not cred_dict:
+            return None, "無法解析 GOOGLE_SERVICE_ACCOUNT"
+
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
         creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
         client = gspread.authorize(creds)
         return client, None
     except Exception as e:
         return None, str(e)
+
 
 def load_customs_db():
     """從 Google Sheets 載入商品報關資料庫，回傳 {sku: {...}} dict"""
