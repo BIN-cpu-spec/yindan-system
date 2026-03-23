@@ -3377,17 +3377,25 @@ def get_sheets_client():
     try:
         import gspread, base64
         from google.oauth2.service_account import Credentials
+
+        # 優先從環境變數讀取，其次從本地檔案讀取
         cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-        if not cred_json:
-            return None, "未設定 GOOGLE_SERVICE_ACCOUNT 環境變數"
-        # 支援 Base64 編碼格式（避免 Railway 環境變數特殊字元問題）
-        try:
-            cred_dict = json.loads(base64.b64decode(cred_json).decode())
-        except Exception:
+        if cred_json:
+            # 嘗試 Base64 解碼
             try:
-                cred_dict = json.loads(cred_json)
-            except Exception as e:
-                return None, f"JSON 解析失敗: {e}"
+                cred_dict = json.loads(base64.b64decode(cred_json).decode())
+            except Exception:
+                try:
+                    cred_dict = json.loads(cred_json)
+                except Exception as e:
+                    return None, f"JSON 解析失敗: {e}"
+        else:
+            # 從本地 service_account.json 檔案讀取
+            key_path = os.path.join(os.path.dirname(__file__), "service_account.json")
+            if not os.path.exists(key_path):
+                return None, "未設定 GOOGLE_SERVICE_ACCOUNT 且找不到 service_account.json"
+            with open(key_path, "r", encoding="utf-8") as f:
+                cred_dict = json.load(f)
         scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
         client = gspread.authorize(creds)
