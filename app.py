@@ -3622,6 +3622,11 @@ function processFile(file) {
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d.ok) { showMsg('&#128561; ' + d.msg, false); return; }
+      if(d.db_err) {
+        showMsg('&#9888; 無法連接商品報關資料庫：' + d.db_err + '，所有商品將顯示為查無資料', false);
+      } else {
+        showMsg('&#10003; 資料庫載入成功（共 ' + d.db_count + ' 筆商品）', true);
+      }
       allRows = d.rows;
       customsDb = d.db;
       checkMissing();
@@ -3924,6 +3929,8 @@ def api_customs_upload():
         if db_err:
             log(f"載入報關資料庫失敗：{db_err}")
 
+        log(f"報關資料庫載入：{len(db)} 筆，SKU清單：{list(db.keys())[:10]}")
+
         rows = []
         errors = []
         for r in range(data_start, max_row+1):
@@ -3967,7 +3974,7 @@ def api_customs_upload():
         if errors:
             log(f"欄位警告：{errors}")
 
-        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors})
+        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors, "db_count": len(db), "db_err": db_err})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"讀取失敗：{e}"})
 
