@@ -3590,7 +3590,8 @@ function processFile(file) {
   // 檔案大小警告（超過 2MB）
   if(file.size > 2 * 1024 * 1024) {
     var sizeMB = (file.size / 1024 / 1024).toFixed(1);
-    if(!confirm('&#9888; 您的檔案有 ' + sizeMB + ' MB，可能包含圖片！\n\n建議先在 Excel 刪除圖片再上傳，可節省流量費用。\n\n要繼續上傳嗎？')) {
+    var NL = String.fromCharCode(10);
+    if(!confirm('&#9888; 您的檔案有 ' + sizeMB + ' MB，可能包含圖片！' + NL + NL + '建議先在 Excel 刪除圖片再上傳，可節省流量費用。' + NL + NL + '要繼續上傳嗎？')) {
       return;
     }
   }
