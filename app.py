@@ -3508,6 +3508,25 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
 </div>
 
 <div id="preview-section">
+  <!-- 櫃號/封號/日期填寫區 -->
+  <div class="card">
+    <h2>&#128230; 填寫櫃號資訊</h2>
+    <p style="font-size:12px;color:#888;margin-bottom:14px">此資訊會顯示在匯出的報關單第5列</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div>
+        <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">櫃號</label>
+        <input type="text" id="cabinet-no" placeholder="例：TCKU3456789" style="width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">封號</label>
+        <input type="text" id="seal-no" placeholder="例：CN12345678" style="width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">出貨日期</label>
+        <input type="date" id="ship-date" style="width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px">
+      </div>
+    </div>
+  </div>
   <div class="card">
     <h2>&#128270; 預覽結果</h2>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -3532,6 +3551,7 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
     </div>
   </div>
 </div>
+
 
 <!-- 新品建檔 Modal -->
 <div class="modal" id="new-item-modal">
@@ -3737,15 +3757,30 @@ function renderPreview() {
 }
 
 function exportExcel() {
+  var cabinetNo = document.getElementById('cabinet-no').value.trim();
+  var sealNo    = document.getElementById('seal-no').value.trim();
+  var shipDate  = document.getElementById('ship-date').value;
+  // 日期格式轉換 yyyy-mm-dd → yyyy年mm月dd日
+  var shipDateStr = '';
+  if(shipDate) {
+    var parts = shipDate.split('-');
+    shipDateStr = parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
+  }
   showMsg('&#8987; 正在產生 Excel...', true);
   fetch('/api/customs/export', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({rows: allRows})
+    body: JSON.stringify({
+      rows: allRows,
+      cabinet_no: cabinetNo,
+      seal_no:    sealNo,
+      ship_date:  shipDateStr
+    })
   }).then(function(r){return r.blob();}).then(function(blob){
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = '本次報關清單_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    var fname = '報關清單' + (cabinetNo ? '_' + cabinetNo : '') + '_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    a.download = fname;
     a.click();
     showMsg('&#127881; 匯出成功！', true);
   });
@@ -3833,12 +3868,14 @@ def api_customs_upload():
         def has_data_in_row(r):
             return any(cv(r, c) for c in range(1, 5))
 
-        # 找資料開始列
-        data_start = 2
-        for r in range(1, min(10, max_row+1)):
-            val = cv(r, 1)
-            if val and val not in ["類型", "类型", "嘜頭"]:
-                data_start = r
+        # 找標題列：掃描前15列，找到含「箱號」或「PCS」的列就是標題，下一列才是資料
+        HEADER_KEYWORDS = ["箱號", "箱号", "PCS", "品名", "材質", "材质"]
+        data_start = 2  # 預設
+        for r in range(1, min(15, max_row+1)):
+            row_vals = [cv(r, c) for c in range(1, min(20, (ws_xls.ncols if use_xls else ws.max_column)+1))]
+            row_text = " ".join(row_vals)
+            if any(kw in row_text for kw in HEADER_KEYWORDS):
+                data_start = r + 1  # 標題列的下一列才是資料
                 break
 
         # 載入資料庫
@@ -3908,35 +3945,66 @@ def api_customs_new_item():
 def api_customs_export():
     try:
         import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Font, PatternFill, Alignment
         data = request.get_json()
-        rows = data.get("rows", [])
+        rows       = data.get("rows", [])
+        cabinet_no = data.get("cabinet_no", "")
+        seal_no    = data.get("seal_no", "")
+        ship_date  = data.get("ship_date", "")
 
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "本次報關清單"
 
-        headers = ["類型","產品尺寸","材質","品名","箱號","PCS/件","件數","總PCS",
-                   "單位","單價","總金額RMB","毛重","長","寬","高","材積","總重量","圖片URL"]
-        header_fill = PatternFill("solid", fgColor="FFF4A100")
-        header_font = Font(bold=True, color="FFFFFFFF")
+        # ── 第1~4列：義烏公司固定資訊 ──────────────────────
+        ws.cell(1, 1, "ORAL TRADING CO., LTD.")
+        ws.cell(1, 1).font = Font(bold=True, size=11)
 
+        ws.cell(2, 1, "貿易條件：CFR")
+
+        ws.cell(1, 14, "義烏:")
+        ws.cell(1, 14).font = Font(bold=True)
+        ws.cell(1, 15, "地址:浙江省義烏市江東街道青口東洲路1017號（東山路與東洲路交叉口）")
+
+        ws.cell(2, 15, "電話:0579-85202818     傳真:0579-85202819")
+
+        # ── 第3列空白 ──
+        ws.cell(3, 1, "")
+
+        # ── 第4列：貿易條件 ──
+        ws.cell(4, 1, "貿易條件：CFR")
+
+        # ── 第5列：櫃號/封號/出貨日期 ──────────────────────
+        cabinet_text = f"櫃號: {cabinet_no}      封號：{seal_no}"
+        ws.cell(5, 1, cabinet_text)
+        ws.cell(5, 1).font = Font(bold=True)
+        if ship_date:
+            ws.cell(5, 16, f"出貨日期:{ship_date}")
+            ws.cell(5, 16).font = Font(bold=True)
+
+        # ── 第6列：欄位標題 ──────────────────────────────────
+        HEADER_ROW = 6
+        headers = ["類型","產品尺寸","材質","品名","箱號","PCS/件","件數","總PCS",
+                   "單位","單價","總金額RMB","毛重","長","寬","高","材積","總重量","圖片"]
+        header_fill = PatternFill("solid", fgColor="FF1565C0")
         for c, h in enumerate(headers, 1):
-            cell = ws.cell(1, c, h)
+            cell = ws.cell(HEADER_ROW, c, h)
             cell.fill = header_fill
-            cell.font = Font(bold=True)
+            cell.font = Font(bold=True, color="FFFFFFFF")
             cell.alignment = Alignment(horizontal="center")
 
-        for r, row in enumerate(rows, 2):
-            ws.cell(r, 1, row.get("type",""))
-            ws.cell(r, 2, row.get("product_size_orig",""))
-            ws.cell(r, 3, row.get("material",""))
-            ws.cell(r, 4, row.get("customs_name",""))
-            ws.cell(r, 5, row.get("box_no",""))
-            ws.cell(r, 6, row.get("pcs_per",""))
-            ws.cell(r, 7, row.get("qty",""))
-            ws.cell(r, 8, row.get("total_pcs",""))
-            ws.cell(r, 9, row.get("unit",""))
+        # ── 第7列起：商品資料 ──────────────────────────────
+        miss_fill = PatternFill("solid", fgColor="FFFFEBEE")
+        for r, row in enumerate(rows, HEADER_ROW + 1):
+            ws.cell(r, 1,  row.get("type",""))
+            ws.cell(r, 2,  row.get("product_size_orig",""))
+            ws.cell(r, 3,  row.get("material",""))
+            ws.cell(r, 4,  row.get("customs_name",""))
+            ws.cell(r, 5,  row.get("box_no",""))
+            ws.cell(r, 6,  row.get("pcs_per",""))
+            ws.cell(r, 7,  row.get("qty",""))
+            ws.cell(r, 8,  row.get("total_pcs",""))
+            ws.cell(r, 9,  row.get("unit",""))
             ws.cell(r, 10, row.get("price",""))
             ws.cell(r, 11, row.get("total_rmb",""))
             ws.cell(r, 12, row.get("gross_weight",""))
@@ -3946,21 +4014,23 @@ def api_customs_export():
             ws.cell(r, 16, row.get("volume",""))
             ws.cell(r, 17, row.get("total_weight",""))
             ws.cell(r, 18, row.get("image",""))
-            # 標記未找到的列
             if row.get("status") != "ok":
                 for c in range(1, 19):
-                    ws.cell(r, c).fill = PatternFill("solid", fgColor="FFFFEBEE")
+                    ws.cell(r, c).fill = miss_fill
 
         # 自動調整欄寬
         for col in ws.columns:
             max_len = max((len(str(cell.value or "")) for cell in col), default=0)
-            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 30)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
 
+        fname = f"報關清單{'_'+cabinet_no if cabinet_no else ''}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        as_attachment=True, download_name="本次報關清單.xlsx")
+        return send_file(buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=fname)
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
