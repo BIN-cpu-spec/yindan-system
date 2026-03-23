@@ -3375,26 +3375,19 @@ def api_diagonal_delete(sku):
 def get_sheets_client():
     """建立 Google Sheets 連線"""
     try:
-        import gspread
+        import gspread, base64
         from google.oauth2.service_account import Credentials
         cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-        log(f"[DEBUG] GOOGLE_SERVICE_ACCOUNT 長度: {len(cred_json) if cred_json else 'None'}")
-        log(f"[DEBUG] 所有環境變數key: {[k for k in os.environ.keys() if 'GOOGLE' in k]}")
         if not cred_json:
             return None, "未設定 GOOGLE_SERVICE_ACCOUNT 環境變數"
-        # 修正 Railway 環境變數可能把 \n 轉成真實換行的問題
-        cred_json = cred_json.replace('\n', '\\n')
-        # 但 private_key 的換行要保留，先解析再處理
+        # 支援 Base64 編碼格式（避免 Railway 環境變數特殊字元問題）
         try:
-            cred_dict = json.loads(cred_json)
-        except json.JSONDecodeError:
-            # 嘗試直接讀取原始 JSON 檔案
+            cred_dict = json.loads(base64.b64decode(cred_json).decode())
+        except Exception:
             try:
-                cred_dict = json.loads(cred_json.encode('utf-8').decode('unicode_escape'))
-            except:
-                # 最後嘗試：把實際換行改回 \n
-                cred_json2 = cred_json.replace('\\n', '\n')
-                cred_dict = json.loads(cred_json2)
+                cred_dict = json.loads(cred_json)
+            except Exception as e:
+                return None, f"JSON 解析失敗: {e}"
         scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
         client = gspread.authorize(creds)
