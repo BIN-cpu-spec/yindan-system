@@ -7,7 +7,7 @@
 
 import sys, csv, io, os, re, json, threading, time, hashlib, secrets
 from datetime import datetime
-from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
 
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -2567,6 +2567,7 @@ tr.dr:hover td{background:#fafcff}
   <div class="logo"><span>{{ company }}</span> 分單系統</div>
   <span style="font-size:11px;color:#778">{{ last_update }}</span>
   <a href="/settings/diagonal" style="color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #444;border-radius:5px">特殊可出超材品設定</a>
+  <a href="/customs" style="color:#f4a100;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #f4a100;border-radius:5px">&#128230; 報關清單</a>
   <button class="btn btn-white" onclick="window.print()">列印全部</button>
 </div>
 
@@ -3285,6 +3286,567 @@ def api_diagonal_delete(sku):
         save_settings()
         log(f"刪除特殊可出超材品設定：{sku}")
     return jsonify({"ok": True})
+
+# ============================================================
+# 報關模組
+# ============================================================
+
+def get_sheets_client():
+    """建立 Google Sheets 連線"""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
+        if not cred_json:
+            return None, "未設定 GOOGLE_SERVICE_ACCOUNT 環境變數"
+        cred_dict = json.loads(cred_json)
+        scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        return client, None
+    except Exception as e:
+        return None, str(e)
+
+def load_customs_db():
+    """從 Google Sheets 載入商品報關資料庫，回傳 {sku: {...}} dict"""
+    client, err = get_sheets_client()
+    if err:
+        return {}, err
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet("商品報關資料庫")
+        rows = ws.get_all_records()
+        db = {}
+        for row in rows:
+            sku = str(row.get("SKU編碼", "")).strip()
+            if sku:
+                db[sku] = {
+                    "sku":        sku,
+                    "name":       row.get("系統名稱", ""),
+                    "style":      row.get("樣式", ""),
+                    "size":       row.get("尺寸", ""),
+                    "material":   row.get("材質", ""),
+                    "customs_name": row.get("報關品名", ""),
+                    "price":      row.get("單價", ""),
+                    "unit":       row.get("單位", ""),
+                    "product_size": row.get("商品尺寸", ""),
+                    "image":      row.get("圖片", ""),
+                }
+        return db, None
+    except Exception as e:
+        return {}, str(e)
+
+def append_to_customs_db(new_item):
+    """新增一筆資料到 Google Sheets 商品報關資料庫"""
+    client, err = get_sheets_client()
+    if err:
+        return err
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet("商品報關資料庫")
+        ws.append_row([
+            new_item.get("sku", ""),
+            new_item.get("name", ""),
+            new_item.get("style", ""),
+            new_item.get("size", ""),
+            new_item.get("material", ""),
+            new_item.get("customs_name", ""),
+            new_item.get("price", ""),
+            new_item.get("unit", ""),
+            new_item.get("product_size", ""),
+            new_item.get("image", ""),
+        ])
+        return None
+    except Exception as e:
+        return str(e)
+
+CUSTOMS_HTML = """<!DOCTYPE html>
+<html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<title>報關清單系統</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13px;color:#1a1a1a}
+.topbar{background:#0f1923;color:#fff;height:52px;padding:0 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:300}
+.logo{font-size:15px;font-weight:600;margin-right:auto}.logo span{color:#f4a100}
+.btn{padding:7px 16px;border-radius:5px;border:none;font-size:13px;cursor:pointer;font-weight:500}
+.btn-yellow{background:#f4a100;color:#fff}.btn-green{background:#2e7d32;color:#fff}
+.btn-blue{background:#1a5fa8;color:#fff}.btn-red{background:#b71c1c;color:#fff}
+.btn-gray{background:#666;color:#fff}.btn:hover{opacity:.85}
+.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:20px}
+.card h2{font-size:14px;font-weight:500;color:#555;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #eee}
+.upload-area{border:2px dashed #ddd;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .2s}
+.upload-area:hover{border-color:#f4a100}
+.upload-area.drag{border-color:#f4a100;background:#fffbf0}
+label{font-size:12px;color:#666;display:block;margin-bottom:4px}
+input[type=text],input[type=number],select{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:#f4a100}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:#f5f5f5;padding:8px 6px;text-align:left;font-weight:500;color:#555;border-bottom:1.5px solid #ddd;white-space:nowrap}
+td{padding:6px;border-bottom:.5px solid #eee;vertical-align:middle}
+tr.ok{background:#f1f8e9}
+tr.missing{background:#ffebee}
+tr.missing td:first-child::after{content:" &#128560;";color:#b71c1c}
+.tag-ok{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;background:#e8f5e9;color:#2e7d32}
+.tag-miss{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;background:#ffebee;color:#b71c1c}
+.msg{padding:8px 14px;border-radius:5px;font-size:12px;margin:10px 20px}
+.msg-ok{background:#e8f5e9;color:#2e7d32}.msg-err{background:#ffebee;color:#b71c1c}
+.msg-warn{background:#fff8e1;color:#e65100}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal-box{background:#fff;border-radius:10px;padding:28px;width:520px;max-height:90vh;overflow-y:auto}
+.modal-box h3{font-size:15px;font-weight:600;margin-bottom:16px;color:#e65100}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.form-group{display:flex;flex-direction:column;gap:4px}
+img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #eee}
+#preview-section{display:none}
+</style></head><body>
+
+<div class="topbar">
+  <div class="logo"><span>&#128230;</span> 報關清單系統</div>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#8592; 返回分單頁面</a>
+  <a href="/logout" style="color:#aaa;font-size:12px;text-decoration:none">登出</a>
+</div>
+
+<div id="msg-area"></div>
+
+<div class="card">
+  <h2>&#128228; 上傳倉庫進貨清單</h2>
+  <p style="font-size:12px;color:#888;margin-bottom:16px">
+    請先在 Excel 的 <strong>R 欄</strong>填入 SKU 編碼，再上傳檔案。<br>
+    系統會自動對應商品報關資料庫，帶入材質、品名、單價等資料。
+  </p>
+  <div class="upload-area" id="drop-zone" onclick="document.getElementById('xlsx-in').click()">
+    <div style="font-size:36px;margin-bottom:8px">&#128196;</div>
+    <div style="font-weight:500;margin-bottom:4px">點擊或拖曳上傳 Excel 檔案</div>
+    <div style="font-size:12px;color:#aaa">支援 .xlsx 格式</div>
+  </div>
+  <input type="file" id="xlsx-in" accept=".xlsx" style="display:none" onchange="uploadFile(this)">
+</div>
+
+<div id="preview-section">
+  <div class="card">
+    <h2>&#128270; 預覽結果</h2>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span id="stat-total" style="font-size:12px;color:#555"></span>
+      <span id="stat-ok" style="font-size:12px;color:#2e7d32"></span>
+      <span id="stat-miss" style="font-size:12px;color:#b71c1c"></span>
+    </div>
+    <div style="overflow-x:auto">
+      <table id="preview-table">
+        <thead><tr>
+          <th>SKU</th><th>類型</th><th>產品尺寸</th><th>材質</th><th>報關品名</th>
+          <th>箱號</th><th>PCS/件</th><th>件數</th><th>總PCS</th><th>單位</th>
+          <th>單價</th><th>總金額RMB</th><th>毛重</th><th>長</th><th>寬</th><th>高</th>
+          <th>材積</th><th>總重量</th><th>圖片</th><th>狀態</th>
+        </tr></thead>
+        <tbody id="preview-body"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:10px">
+      <button class="btn btn-green" onclick="exportExcel()">&#128229; 匯出報關 Excel</button>
+      <button class="btn btn-gray" onclick="resetPage()">&#128260; 重新上傳</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新品建檔 Modal -->
+<div class="modal" id="new-item-modal">
+  <div class="modal-box">
+    <h3>&#127381; 發現新商品！請建立報關資料</h3>
+    <p style="font-size:12px;color:#888;margin-bottom:16px">
+      SKU「<strong id="modal-sku"></strong>」在資料庫中查無資料，<br>
+      請填入報關資料後儲存，系統會自動更新商品報關資料庫。
+    </p>
+    <div class="form-grid">
+      <div class="form-group"><label>SKU編碼</label><input type="text" id="f-sku" readonly style="background:#f5f5f5"></div>
+      <div class="form-group"><label>系統名稱</label><input type="text" id="f-name" placeholder="例：針織手提袋"></div>
+      <div class="form-group"><label>樣式</label><input type="text" id="f-style" placeholder="例：格子款"></div>
+      <div class="form-group"><label>尺寸</label><input type="text" id="f-size" placeholder="例：F"></div>
+      <div class="form-group"><label>材質 *</label><input type="text" id="f-material" placeholder="例：滌綸"></div>
+      <div class="form-group"><label>報關品名 *</label><input type="text" id="f-customs-name" placeholder="例：手提袋"></div>
+      <div class="form-group"><label>單價 *</label><input type="number" id="f-price" placeholder="例：3.4" step="0.01"></div>
+      <div class="form-group"><label>單位</label><input type="text" id="f-unit" placeholder="例：個"></div>
+      <div class="form-group"><label>商品尺寸</label><input type="text" id="f-product-size" placeholder="例：20*35*10"></div>
+      <div class="form-group"><label>圖片網址</label><input type="text" id="f-image" placeholder="貼上圖片URL（選填）"></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-gray" onclick="skipNewItem()">跳過此筆</button>
+      <button class="btn btn-yellow" onclick="saveNewItem()">&#128190; 儲存並繼續</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var allRows = [];
+var missingSkus = [];
+var currentMissingIdx = 0;
+var customsDb = {};
+var processedRows = [];
+
+// 拖曳上傳
+var dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+dz.addEventListener('drop', function(e){
+  e.preventDefault(); dz.classList.remove('drag');
+  var f = e.dataTransfer.files[0];
+  if(f) processFile(f);
+});
+
+function uploadFile(input) {
+  var f = input.files[0];
+  if(f) processFile(f);
+}
+
+function processFile(file) {
+  if(!file.name.endsWith('.xlsx')) {
+    showMsg('&#128561; 哎呀！這不是 .xlsx 檔案，請重新選擇！', false);
+    return;
+  }
+  showMsg('&#8987; 正在讀取檔案並對應資料庫...', true);
+  var fd = new FormData();
+  fd.append('file', file);
+  fetch('/api/customs/upload', {method:'POST', body:fd})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d.ok) { showMsg('&#128561; ' + d.msg, false); return; }
+      allRows = d.rows;
+      customsDb = d.db;
+      checkMissing();
+    });
+}
+
+function checkMissing() {
+  missingSkus = [];
+  allRows.forEach(function(row, i){
+    if(row.status === 'missing') missingSkus.push(i);
+  });
+  if(missingSkus.length > 0) {
+    currentMissingIdx = 0;
+    showMsg('&#128561; 發現 ' + missingSkus.length + ' 個新商品需要建檔，請逐一填入資料！', false);
+    showNewItemModal(missingSkus[0]);
+  } else {
+    renderPreview();
+  }
+}
+
+function showNewItemModal(rowIdx) {
+  var row = allRows[rowIdx];
+  document.getElementById('modal-sku').textContent = row.sku;
+  document.getElementById('f-sku').value = row.sku;
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-style').value = '';
+  document.getElementById('f-size').value = '';
+  document.getElementById('f-material').value = '';
+  document.getElementById('f-customs-name').value = '';
+  document.getElementById('f-price').value = '';
+  document.getElementById('f-unit').value = '';
+  document.getElementById('f-product-size').value = '';
+  document.getElementById('f-image').value = '';
+  document.getElementById('new-item-modal').classList.add('show');
+}
+
+function saveNewItem() {
+  var sku = document.getElementById('f-sku').value.trim();
+  var material = document.getElementById('f-material').value.trim();
+  var customsName = document.getElementById('f-customs-name').value.trim();
+  var price = document.getElementById('f-price').value.trim();
+  if(!material || !customsName || !price) {
+    showMsg('&#9888; 材質、報關品名、單價為必填！', false);
+    return;
+  }
+  var newItem = {
+    sku: sku,
+    name: document.getElementById('f-name').value.trim(),
+    style: document.getElementById('f-style').value.trim(),
+    size: document.getElementById('f-size').value.trim(),
+    material: material,
+    customs_name: customsName,
+    price: parseFloat(price),
+    unit: document.getElementById('f-unit').value.trim(),
+    product_size: document.getElementById('f-product-size').value.trim(),
+    image: document.getElementById('f-image').value.trim(),
+  };
+  fetch('/api/customs/new-item', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(newItem)
+  }).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok) { showMsg('&#128561; 儲存失敗：' + d.msg, false); return; }
+    // 更新本地資料
+    customsDb[sku] = newItem;
+    var rowIdx = missingSkus[currentMissingIdx];
+    allRows[rowIdx].status = 'ok';
+    allRows[rowIdx].material = newItem.material;
+    allRows[rowIdx].customs_name = newItem.customs_name;
+    allRows[rowIdx].price = newItem.price;
+    allRows[rowIdx].unit = newItem.unit;
+    allRows[rowIdx].image = newItem.image;
+    allRows[rowIdx].total_rmb = (parseFloat(allRows[rowIdx].total_pcs) * newItem.price).toFixed(2);
+    document.getElementById('new-item-modal').classList.remove('show');
+    currentMissingIdx++;
+    if(currentMissingIdx < missingSkus.length) {
+      showNewItemModal(missingSkus[currentMissingIdx]);
+    } else {
+      showMsg('&#127881; 所有新品建檔完成！', true);
+      renderPreview();
+    }
+  });
+}
+
+function skipNewItem() {
+  document.getElementById('new-item-modal').classList.remove('show');
+  currentMissingIdx++;
+  if(currentMissingIdx < missingSkus.length) {
+    showNewItemModal(missingSkus[currentMissingIdx]);
+  } else {
+    renderPreview();
+  }
+}
+
+function renderPreview() {
+  var total = allRows.length;
+  var ok = allRows.filter(function(r){return r.status==='ok';}).length;
+  var miss = total - ok;
+  document.getElementById('stat-total').textContent = '共 ' + total + ' 筆';
+  document.getElementById('stat-ok').textContent = '&#10003; 對應成功 ' + ok + ' 筆';
+  document.getElementById('stat-miss').textContent = miss > 0 ? '&#9888; 未建檔 ' + miss + ' 筆' : '';
+  var tbody = document.getElementById('preview-body');
+  tbody.innerHTML = allRows.map(function(r){
+    var cls = r.status === 'ok' ? 'ok' : 'missing';
+    var statusTag = r.status === 'ok'
+      ? '<span class="tag-ok">&#10003; 已對應</span>'
+      : '<span class="tag-miss">&#128560; 查無資料</span>';
+    var img = r.image ? '<img class="thumb" src="' + r.image + '" onerror="this.style.display=\'none\'">' : '—';
+    return '<tr class="' + cls + '">' +
+      '<td>' + (r.sku||'—') + '</td>' +
+      '<td>' + (r.type||'') + '</td>' +
+      '<td>' + (r.product_size_orig||'') + '</td>' +
+      '<td>' + (r.material||'') + '</td>' +
+      '<td>' + (r.customs_name||'') + '</td>' +
+      '<td>' + (r.box_no||'') + '</td>' +
+      '<td>' + (r.pcs_per||'') + '</td>' +
+      '<td>' + (r.qty||'') + '</td>' +
+      '<td>' + (r.total_pcs||'') + '</td>' +
+      '<td>' + (r.unit||'') + '</td>' +
+      '<td>' + (r.price||'') + '</td>' +
+      '<td>' + (r.total_rmb||'') + '</td>' +
+      '<td>' + (r.gross_weight||'') + '</td>' +
+      '<td>' + (r.len||'') + '</td>' +
+      '<td>' + (r.wid||'') + '</td>' +
+      '<td>' + (r.hei||'') + '</td>' +
+      '<td>' + (r.volume||'') + '</td>' +
+      '<td>' + (r.total_weight||'') + '</td>' +
+      '<td>' + img + '</td>' +
+      '<td>' + statusTag + '</td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('preview-section').style.display = 'block';
+  window.scrollTo(0, document.getElementById('preview-section').offsetTop);
+}
+
+function exportExcel() {
+  showMsg('&#8987; 正在產生 Excel...', true);
+  fetch('/api/customs/export', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({rows: allRows})
+  }).then(function(r){return r.blob();}).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '本次報關清單_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    a.click();
+    showMsg('&#127881; 匯出成功！', true);
+  });
+}
+
+function resetPage() {
+  allRows = []; missingSkus = []; currentMissingIdx = 0;
+  document.getElementById('preview-section').style.display = 'none';
+  document.getElementById('xlsx-in').value = '';
+  showMsg('', true);
+}
+
+function showMsg(msg, ok) {
+  var area = document.getElementById('msg-area');
+  if(!msg) { area.innerHTML = ''; return; }
+  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '">' + msg + '</div>';
+}
+</script>
+</body></html>"""
+
+@app.route("/customs")
+@login_required
+def customs_page():
+    return render_template_string(CUSTOMS_HTML)
+
+@app.route("/api/customs/upload", methods=["POST"])
+@login_required
+def api_customs_upload():
+    try:
+        import openpyxl
+    except ImportError:
+        return jsonify({"ok": False, "msg": "請安裝 openpyxl"})
+
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"ok": False, "msg": "未收到檔案"})
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(f.read()), data_only=True)
+        ws = wb.active
+
+        # 讀取標題列，找到資料開始的列
+        headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column+2)]
+
+        # 欄位對應（A~R，1-indexed）
+        # A=類型, B=產品尺寸, C=材質, D=品名, E=箱號, F=PCS/件, G=件數,
+        # H=總PCS, I=單位, J=單價, K=總金額RMB, L=毛重, M=長, N=寬, O=高, P=材積, Q=總重量, R=SKU
+        COL = {"type":1,"prod_size":2,"material":3,"name":4,"box_no":5,"pcs_per":6,
+               "qty":7,"total_pcs":8,"unit":9,"price":10,"total_rmb":11,"gross_weight":12,
+               "len":13,"wid":14,"hei":15,"volume":16,"total_weight":17,"sku":18,"image":17}
+
+        # 找資料開始列（跳過標題/空白列，找第一列有資料的）
+        data_start = 2
+        for r in range(1, min(10, ws.max_row+1)):
+            val = ws.cell(r, 1).value
+            if val and str(val).strip() not in ["", "類型", "类型"]:
+                data_start = r
+                break
+
+        # 載入資料庫
+        db, db_err = load_customs_db()
+        if db_err:
+            log(f"載入報關資料庫失敗：{db_err}")
+
+        # 驗證欄位數量
+        rows = []
+        errors = []
+        for r in range(data_start, ws.max_row+1):
+            sku = str(ws.cell(r, 18).value or "").strip()  # R欄
+            if not sku:
+                # 檢查這列是否有任何資料
+                has_data = any(ws.cell(r, c).value for c in range(1, 5))
+                if not has_data:
+                    continue
+                errors.append(f"第 {r} 列缺少 SKU（R欄）")
+
+            def cv(col):
+                v = ws.cell(r, col).value
+                return str(v).strip() if v is not None else ""
+
+            total_pcs = cv(8)
+            price_db = db.get(sku, {}).get("price", "") if sku in db else ""
+            try:
+                total_rmb = round(float(total_pcs) * float(price_db), 2) if total_pcs and price_db else ""
+            except:
+                total_rmb = ""
+
+            row = {
+                "sku":             sku,
+                "type":            cv(1),
+                "product_size_orig": cv(2),
+                "material":        db.get(sku, {}).get("material", cv(3)) if sku in db else cv(3),
+                "customs_name":    db.get(sku, {}).get("customs_name", cv(4)) if sku in db else "",
+                "box_no":          cv(5),
+                "pcs_per":         cv(6),
+                "qty":             cv(7),
+                "total_pcs":       total_pcs,
+                "unit":            db.get(sku, {}).get("unit", cv(9)) if sku in db else cv(9),
+                "price":           price_db if sku in db else cv(10),
+                "total_rmb":       str(total_rmb) if total_rmb != "" else cv(11),
+                "gross_weight":    cv(12),
+                "len":             cv(13),
+                "wid":             cv(14),
+                "hei":             cv(15),
+                "volume":          cv(16),
+                "total_weight":    cv(17),
+                "image":           db.get(sku, {}).get("image", "") if sku in db else "",
+                "status":          "ok" if sku in db else ("missing" if sku else "no_sku"),
+            }
+            rows.append(row)
+
+        if errors:
+            log(f"欄位警告：{errors}")
+
+        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"讀取失敗：{e}"})
+
+@app.route("/api/customs/new-item", methods=["POST"])
+@login_required
+def api_customs_new_item():
+    data = request.get_json()
+    err = append_to_customs_db(data)
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    log(f"新品建檔：{data.get('sku')} {data.get('customs_name')}")
+    return jsonify({"ok": True})
+
+@app.route("/api/customs/export", methods=["POST"])
+@login_required
+def api_customs_export():
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        data = request.get_json()
+        rows = data.get("rows", [])
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "本次報關清單"
+
+        headers = ["類型","產品尺寸","材質","品名","箱號","PCS/件","件數","總PCS",
+                   "單位","單價","總金額RMB","毛重","長","寬","高","材積","總重量","圖片URL"]
+        header_fill = PatternFill("solid", fgColor="FFF4A100")
+        header_font = Font(bold=True, color="FFFFFFFF")
+
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(1, c, h)
+            cell.fill = header_fill
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        for r, row in enumerate(rows, 2):
+            ws.cell(r, 1, row.get("type",""))
+            ws.cell(r, 2, row.get("product_size_orig",""))
+            ws.cell(r, 3, row.get("material",""))
+            ws.cell(r, 4, row.get("customs_name",""))
+            ws.cell(r, 5, row.get("box_no",""))
+            ws.cell(r, 6, row.get("pcs_per",""))
+            ws.cell(r, 7, row.get("qty",""))
+            ws.cell(r, 8, row.get("total_pcs",""))
+            ws.cell(r, 9, row.get("unit",""))
+            ws.cell(r, 10, row.get("price",""))
+            ws.cell(r, 11, row.get("total_rmb",""))
+            ws.cell(r, 12, row.get("gross_weight",""))
+            ws.cell(r, 13, row.get("len",""))
+            ws.cell(r, 14, row.get("wid",""))
+            ws.cell(r, 15, row.get("hei",""))
+            ws.cell(r, 16, row.get("volume",""))
+            ws.cell(r, 17, row.get("total_weight",""))
+            ws.cell(r, 18, row.get("image",""))
+            # 標記未找到的列
+            if row.get("status") != "ok":
+                for c in range(1, 19):
+                    ws.cell(r, c).fill = PatternFill("solid", fgColor="FFFFEBEE")
+
+        # 自動調整欄寬
+        for col in ws.columns:
+            max_len = max((len(str(cell.value or "")) for cell in col), default=0)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 30)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        as_attachment=True, download_name="本次報關清單.xlsx")
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
 
 if __name__ == "__main__":
     load_settings()
