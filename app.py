@@ -2436,33 +2436,102 @@ app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 LOGIN_USER = os.environ.get("LOGIN_USER", "admin")
 LOGIN_PASS = os.environ.get("LOGIN_PASS", "admin123")
 
+SYSTEM_NAME = "&#x1F3ED; 超人特工倉"
+SYSTEM_SUBTITLE = "Super Warehouse Agent System"
+
 LOGIN_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
-<meta charset="UTF-8"><title>登入 - 分單系統</title>
+<meta charset="UTF-8"><title>登入 - 超人特工倉</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.box{background:#fff;border-radius:10px;padding:40px;width:340px;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-h2{font-size:18px;font-weight:600;color:#1a1a1a;margin-bottom:8px;text-align:center}
-p{font-size:12px;color:#888;text-align:center;margin-bottom:28px}
-label{font-size:12px;color:#555;display:block;margin-bottom:4px}
-input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:5px;font-size:14px;margin-bottom:16px;font-family:inherit}
-input:focus{outline:none;border-color:#1a5fa8}
-button{width:100%;padding:11px;background:#1a5fa8;color:#fff;border:none;border-radius:5px;font-size:14px;font-weight:500;cursor:pointer}
-button:hover{background:#1450a0}
-.err{color:#b71c1c;font-size:12px;text-align:center;margin-bottom:12px;background:#ffebee;padding:8px;border-radius:4px}
+body{font-family:"Microsoft JhengHei",sans-serif;background:linear-gradient(135deg,#0f1923 0%,#1a2f45 100%);display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#fff;border-radius:16px;padding:44px 40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.logo{text-align:center;margin-bottom:24px}
+.logo-icon{font-size:48px;display:block;margin-bottom:8px}
+.logo h1{font-size:20px;font-weight:700;color:#1a1a1a;margin-bottom:4px}
+.logo p{font-size:11px;color:#aaa;letter-spacing:1px}
+label{font-size:12px;color:#555;display:block;margin-bottom:4px;font-weight:500}
+input{width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;margin-bottom:14px;font-family:inherit;transition:border-color .2s}
+input:focus{outline:none;border-color:#1a5fa8;box-shadow:0 0 0 3px rgba(26,95,168,.1)}
+button{width:100%;padding:12px;background:linear-gradient(135deg,#1a5fa8,#0d4a8a);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;transition:opacity .2s}
+button:hover{opacity:.88}
+.err{color:#b71c1c;font-size:12px;text-align:center;margin-bottom:12px;background:#ffebee;padding:8px;border-radius:6px}
 </style></head><body>
 <div class="box">
-  <h2>&#128230; 分單系統</h2>
-  <p>請輸入帳號密碼登入</p>
+  <div class="logo">
+    <span class="logo-icon">&#x1F3ED;</span>
+    <h1>超人特工倉</h1>
+    <p>SUPER WAREHOUSE AGENT SYSTEM</p>
+  </div>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <form method="POST" action="/login">
     <label>帳號</label>
-    <input type="text" name="username" placeholder="帳號" autofocus>
+    <input type="text" name="username" placeholder="請輸入帳號" autofocus>
     <label>密碼</label>
-    <input type="password" name="password" placeholder="密碼">
-    <button type="submit">登入</button>
+    <input type="password" name="password" placeholder="請輸入密碼">
+    <button type="submit">&#x1F680; 進入系統</button>
   </form>
+</div>
+</body></html>"""
+
+HOME_HTML = """<!DOCTYPE html>
+<html lang="zh-TW"><head>
+<meta charset="UTF-8"><title>超人特工倉 - 首頁</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:100vh;color:#fff}
+.topbar{background:rgba(255,255,255,.05);backdrop-filter:blur(10px);height:56px;padding:0 32px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.08)}
+.logo{font-size:16px;font-weight:700;margin-right:auto;letter-spacing:.5px}
+.logo span{color:#f4a100}
+.logout{color:#aaa;font-size:12px;text-decoration:none;padding:6px 12px;border:1px solid #333;border-radius:5px}
+.logout:hover{border-color:#666;color:#fff}
+.hero{text-align:center;padding:60px 20px 40px}
+.hero h1{font-size:32px;font-weight:700;margin-bottom:8px}
+.hero h1 span{color:#f4a100}
+.hero p{font-size:14px;color:#888;letter-spacing:1px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:960px;margin:0 auto;padding:0 24px 60px}
+.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:32px 28px;text-decoration:none;color:#fff;transition:all .25s;cursor:pointer;position:relative;overflow:hidden}
+.card:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.2);transform:translateY(-4px);box-shadow:0 16px 40px rgba(0,0,0,.3)}
+.card-icon{font-size:44px;margin-bottom:16px;display:block}
+.card-title{font-size:18px;font-weight:700;margin-bottom:6px}
+.card-desc{font-size:13px;color:#888;line-height:1.7}
+.card-badge{position:absolute;top:16px;right:16px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
+.badge-ready{background:rgba(46,125,50,.3);color:#81c784;border:1px solid rgba(46,125,50,.4)}
+.badge-soon{background:rgba(100,100,100,.2);color:#888;border:1px solid rgba(100,100,100,.3)}
+.card-split{border-color:rgba(26,95,168,.4)}
+.card-split:hover{border-color:rgba(26,95,168,.8);box-shadow:0 16px 40px rgba(26,95,168,.15)}
+.card-customs{border-color:rgba(244,161,0,.3)}
+.card-customs:hover{border-color:rgba(244,161,0,.7);box-shadow:0 16px 40px rgba(244,161,0,.12)}
+.card-tools{border-color:rgba(0,150,136,.3)}
+.card-tools:hover{border-color:rgba(0,150,136,.7);box-shadow:0 16px 40px rgba(0,150,136,.12)}
+</style></head><body>
+<div class="topbar">
+  <div class="logo">&#x1F3ED; <span>超人特工倉</span></div>
+  <a href="/logout" class="logout">&#x1F6AA; 登出</a>
+</div>
+<div class="hero">
+  <h1>歡迎回來，<span>特工！</span></h1>
+  <p>SUPER WAREHOUSE AGENT SYSTEM &nbsp;|&nbsp; 選擇你的任務</p>
+</div>
+<div class="cards">
+  <a href="/split" class="card card-split">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <span class="card-icon">&#x1F4E6;</span>
+    <div class="card-title">分單中心</div>
+    <div class="card-desc">上傳 4Sale 訂單 CSV，自動依通路和倉庫區域分單，一鍵複製交易序號到 4Sale 暫存區。</div>
+  </a>
+  <a href="/customs" class="card card-customs">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <span class="card-icon">&#x1F4CB;</span>
+    <div class="card-title">報關助手</div>
+    <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
+  </a>
+  <div class="card card-tools" style="opacity:.6;cursor:default">
+    <span class="card-badge badge-soon">&#x23F3; 即將上線</span>
+    <span class="card-icon">&#x1F527;</span>
+    <div class="card-title">工具箱</div>
+    <div class="card-desc">更多倉庫小工具陸續開發中，敬請期待！有好點子歡迎告知特工開發團隊。</div>
+  </div>
 </div>
 </body></html>"""
 
@@ -2484,13 +2553,24 @@ def login():
         if u == LOGIN_USER and p == LOGIN_PASS:
             session["logged_in"] = True
             return redirect("/")
-        error = "帳號或密碼錯誤"
+        error = "帳號或密碼錯誤，特工請再試一次！"
     return render_template_string(LOGIN_HTML, error=error)
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
+
+@app.route("/")
+@login_required
+def home():
+    return render_template_string(HOME_HTML)
+
+@app.route("/split")
+@login_required
+def split_page():
+    return redirect("/split_app")
+
 
 
 HTML = """<!DOCTYPE html>
@@ -2564,11 +2644,12 @@ tr.dr:hover td{background:#fafcff}
 </style></head><body>
 
 <div class="topbar">
-  <div class="logo"><span>{{ company }}</span> 分單系統</div>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none;margin-right:8px">&#x1F3ED;</a>
+  <div class="logo"><span>分單中心</span></div>
   <span style="font-size:11px;color:#778">{{ last_update }}</span>
   <a href="/settings/diagonal" style="color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #444;border-radius:5px">特殊可出超材品設定</a>
-  <a href="/customs" style="color:#f4a100;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #f4a100;border-radius:5px">&#128230; 報關清單</a>
   <button class="btn btn-white" onclick="window.print()">列印全部</button>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #444;border-radius:5px">&#x2302; 首頁</a>
 </div>
 
 <div class="statusbar">
@@ -3078,7 +3159,7 @@ if(lg)lg.scrollTop=lg.scrollHeight;
 </script>
 </body></html>"""
 
-@app.route("/")
+@app.route("/split_app")
 @login_required
 def index():
     try:
@@ -3153,7 +3234,7 @@ td{padding:8px 10px;border-bottom:.5px solid #eee}
 </style></head><body>
 <div class="topbar">
   <div class="logo"><span>特殊可出超材品</span> 設定</div>
-  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#8592; 返回分單頁面</a>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#x2302; 返回首頁</a>
 </div>
 <div id="msg-area"></div>
 <div class="card">
@@ -3406,7 +3487,7 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
 
 <div class="topbar">
   <div class="logo"><span>&#128230;</span> 報關清單系統</div>
-  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#8592; 返回分單頁面</a>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#x2302; 返回首頁</a>
   <a href="/logout" style="color:#aaa;font-size:12px;text-decoration:none">登出</a>
 </div>
 
@@ -3421,9 +3502,9 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
   <div class="upload-area" id="drop-zone" onclick="document.getElementById('xlsx-in').click()">
     <div style="font-size:36px;margin-bottom:8px">&#128196;</div>
     <div style="font-weight:500;margin-bottom:4px">點擊或拖曳上傳 Excel 檔案</div>
-    <div style="font-size:12px;color:#aaa">支援 .xlsx 格式</div>
+    <div style="font-size:12px;color:#aaa">支援 .xlsx 及 .xls 格式，圖片會自動忽略不影響上傳</div>
   </div>
-  <input type="file" id="xlsx-in" accept=".xlsx" style="display:none" onchange="uploadFile(this)">
+  <input type="file" id="xlsx-in" accept=".xlsx,.xls" style="display:none" onchange="uploadFile(this)">
 </div>
 
 <div id="preview-section">
@@ -3502,9 +3583,16 @@ function uploadFile(input) {
 }
 
 function processFile(file) {
-  if(!file.name.endsWith('.xlsx')) {
-    showMsg('&#128561; 哎呀！這不是 .xlsx 檔案，請重新選擇！', false);
+  if(!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+    showMsg('&#128561; 哎呀！這不是 Excel 檔案，請選擇 .xlsx 或 .xls 格式！', false);
     return;
+  }
+  // 檔案大小警告（超過 2MB）
+  if(file.size > 2 * 1024 * 1024) {
+    var sizeMB = (file.size / 1024 / 1024).toFixed(1);
+    if(!confirm('&#9888; 您的檔案有 ' + sizeMB + ' MB，可能包含圖片！\n\n建議先在 Excel 刪除圖片再上傳，可節省流量費用。\n\n要繼續上傳嗎？')) {
+      return;
+    }
   }
   showMsg('&#8987; 正在讀取檔案並對應資料庫...', true);
   var fd = new FormData();
@@ -3695,25 +3783,60 @@ def api_customs_upload():
         return jsonify({"ok": False, "msg": "未收到檔案"})
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(f.read()), data_only=True)
-        ws = wb.active
+        file_bytes = f.read()
+        fname = f.filename.lower()
 
-        # 讀取標題列，找到資料開始的列
-        headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column+2)]
+        if fname.endswith('.xls'):
+            # 舊版 xls → 用 xlrd 讀取
+            try:
+                import xlrd
+                wb_xls = xlrd.open_workbook(file_contents=file_bytes)
+                ws_xls = wb_xls.sheet_by_index(0)
+                # 轉成統一格式處理
+                def cv_xls(r, c):
+                    try:
+                        v = ws_xls.cell_value(r, c)
+                        return str(v).strip() if v != '' else ""
+                    except:
+                        return ""
+                max_row = ws_xls.nrows
+                use_xls = True
+            except ImportError:
+                return jsonify({"ok": False, "msg": "&#128561; 哎呀！.xls 格式需要安裝 xlrd，請另存為 .xlsx 再上傳！"})
+        elif fname.endswith('.xlsx'):
+            import openpyxl
+            # keep_vba=False, 不載入圖片避免記憶體爆炸
+            wb = openpyxl.load_workbook(
+                io.BytesIO(file_bytes),
+                data_only=True,
+                keep_vba=False
+            )
+            ws = wb.active
+            use_xls = False
+            max_row = ws.max_row
+        else:
+            return jsonify({"ok": False, "msg": "&#128561; 哎呀！只支援 .xlsx 或 .xls 格式，請確認檔案類型！"})
 
-        # 欄位對應（A~R，1-indexed）
-        # A=類型, B=產品尺寸, C=材質, D=品名, E=箱號, F=PCS/件, G=件數,
-        # H=總PCS, I=單位, J=單價, K=總金額RMB, L=毛重, M=長, N=寬, O=高, P=材積, Q=總重量, R=SKU
-        COL = {"type":1,"prod_size":2,"material":3,"name":4,"box_no":5,"pcs_per":6,
-               "qty":7,"total_pcs":8,"unit":9,"price":10,"total_rmb":11,"gross_weight":12,
-               "len":13,"wid":14,"hei":15,"volume":16,"total_weight":17,"sku":18,"image":17}
+        # 統一的讀取函數
+        def cv(r, c):
+            if use_xls:
+                try:
+                    v = ws_xls.cell_value(r-1, c-1)  # xls 是 0-indexed
+                    return str(v).strip() if v != '' else ""
+                except:
+                    return ""
+            else:
+                v = ws.cell(r, c).value
+                return str(v).strip() if v is not None else ""
 
-        # 找資料開始列（跳過標題/空白列，找第一列有資料的）
+        def has_data_in_row(r):
+            return any(cv(r, c) for c in range(1, 5))
+
+        # 找資料開始列
         data_start = 2
-        for r in range(1, min(10, ws.max_row+1)):
-            val = ws.cell(r, 1).value
-            if val and str(val).strip() not in ["", "類型", "类型"]:
+        for r in range(1, min(10, max_row+1)):
+            val = cv(r, 1)
+            if val and val not in ["類型", "类型", "嘜頭"]:
                 data_start = r
                 break
 
@@ -3722,50 +3845,43 @@ def api_customs_upload():
         if db_err:
             log(f"載入報關資料庫失敗：{db_err}")
 
-        # 驗證欄位數量
         rows = []
         errors = []
-        for r in range(data_start, ws.max_row+1):
-            sku = str(ws.cell(r, 18).value or "").strip()  # R欄
+        for r in range(data_start, max_row+1):
+            sku = cv(r, 18)  # R欄
             if not sku:
-                # 檢查這列是否有任何資料
-                has_data = any(ws.cell(r, c).value for c in range(1, 5))
-                if not has_data:
+                if not has_data_in_row(r):
                     continue
                 errors.append(f"第 {r} 列缺少 SKU（R欄）")
 
-            def cv(col):
-                v = ws.cell(r, col).value
-                return str(v).strip() if v is not None else ""
-
-            total_pcs = cv(8)
-            price_db = db.get(sku, {}).get("price", "") if sku in db else ""
+            total_pcs = cv(r, 8)
+            price_db = str(db.get(sku, {}).get("price", "")) if sku in db else ""
             try:
                 total_rmb = round(float(total_pcs) * float(price_db), 2) if total_pcs and price_db else ""
             except:
                 total_rmb = ""
 
             row = {
-                "sku":             sku,
-                "type":            cv(1),
-                "product_size_orig": cv(2),
-                "material":        db.get(sku, {}).get("material", cv(3)) if sku in db else cv(3),
-                "customs_name":    db.get(sku, {}).get("customs_name", cv(4)) if sku in db else "",
-                "box_no":          cv(5),
-                "pcs_per":         cv(6),
-                "qty":             cv(7),
-                "total_pcs":       total_pcs,
-                "unit":            db.get(sku, {}).get("unit", cv(9)) if sku in db else cv(9),
-                "price":           price_db if sku in db else cv(10),
-                "total_rmb":       str(total_rmb) if total_rmb != "" else cv(11),
-                "gross_weight":    cv(12),
-                "len":             cv(13),
-                "wid":             cv(14),
-                "hei":             cv(15),
-                "volume":          cv(16),
-                "total_weight":    cv(17),
-                "image":           db.get(sku, {}).get("image", "") if sku in db else "",
-                "status":          "ok" if sku in db else ("missing" if sku else "no_sku"),
+                "sku":               sku,
+                "type":              cv(r, 1),
+                "product_size_orig": cv(r, 2),
+                "material":          db.get(sku, {}).get("material", cv(r, 3)) if sku in db else cv(r, 3),
+                "customs_name":      db.get(sku, {}).get("customs_name", "") if sku in db else "",
+                "box_no":            cv(r, 5),
+                "pcs_per":           cv(r, 6),
+                "qty":               cv(r, 7),
+                "total_pcs":         total_pcs,
+                "unit":              db.get(sku, {}).get("unit", cv(r, 9)) if sku in db else cv(r, 9),
+                "price":             price_db if sku in db else cv(r, 10),
+                "total_rmb":         str(total_rmb) if total_rmb != "" else cv(r, 11),
+                "gross_weight":      cv(r, 12),
+                "len":               cv(r, 13),
+                "wid":               cv(r, 14),
+                "hei":               cv(r, 15),
+                "volume":            cv(r, 16),
+                "total_weight":      cv(r, 17),
+                "image":             db.get(sku, {}).get("image", "") if sku in db else "",
+                "status":            "ok" if sku in db else ("missing" if sku else "no_sku"),
             }
             rows.append(row)
 
