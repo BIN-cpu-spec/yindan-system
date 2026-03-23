@@ -3708,7 +3708,7 @@ function renderPreview() {
     var statusTag = r.status === 'ok'
       ? '<span class="tag-ok">&#10003; 已對應</span>'
       : '<span class="tag-miss">&#128560; 查無資料</span>';
-    var img = r.image ? '<img class="thumb" src="' + r.image + '" onerror="this.style.display=\'none\'">' : '—';
+    var img = r.image ? '<img class="thumb" src="' + r.image + '">' : '—';
     return '<tr class="' + cls + '">' +
       '<td>' + (r.sku||'—') + '</td>' +
       '<td>' + (r.type||'') + '</td>' +
