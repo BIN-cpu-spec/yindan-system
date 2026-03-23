@@ -3868,15 +3868,56 @@ def api_customs_upload():
         def has_data_in_row(r):
             return any(cv(r, c) for c in range(1, 5))
 
-        # 找標題列：掃描前15列，找到含「箱號」或「PCS」的列就是標題，下一列才是資料
+        # 找標題列並建立欄位對應
         HEADER_KEYWORDS = ["箱號", "箱号", "PCS", "品名", "材質", "材质"]
-        data_start = 2  # 預設
+        HEADER_MAP = {
+            "類型": "type", "类型": "type", "嘜頭": "type",
+            "產品尺寸": "product_size_orig", "产品尺寸": "product_size_orig",
+            "材質": "material", "材质": "material",
+            "品名": "customs_name_raw",
+            "箱號": "box_no", "箱号": "box_no",
+            "PCS/件": "pcs_per", "PCS": "pcs_per",
+            "件數": "qty", "件数": "qty",
+            "總PCS": "total_pcs", "总PCS": "total_pcs",
+            "單位": "unit", "单位": "unit",
+            "單價": "price", "单价": "price",
+            "總金額RMB": "total_rmb", "总金额RMB": "total_rmb",
+            "毛重": "gross_weight",
+            "長": "len", "长": "len",
+            "寬": "wid", "宽": "wid",
+            "高": "hei",
+            "材積": "volume", "材积": "volume",
+            "總重量": "total_weight", "总重量": "total_weight",
+            "SKU": "sku", "SKU編碼": "sku",
+        }
+
+        header_row = None
+        col_map = {}  # field_name -> col_index (1-based)
+        data_start = 2
+
         for r in range(1, min(15, max_row+1)):
-            row_vals = [cv(r, c) for c in range(1, min(20, (ws_xls.ncols if use_xls else ws.max_column)+1))]
+            row_vals = [cv(r, c) for c in range(1, min(25, (ws_xls.ncols if use_xls else ws.max_column)+1))]
             row_text = " ".join(row_vals)
             if any(kw in row_text for kw in HEADER_KEYWORDS):
-                data_start = r + 1  # 標題列的下一列才是資料
+                header_row = r
+                data_start = r + 1
+                # 建立欄位對應
+                for c, val in enumerate(row_vals, 1):
+                    val = val.strip()
+                    if val in HEADER_MAP:
+                        col_map[HEADER_MAP[val]] = c
+                log(f"找到標題列第{r}列，欄位對應：{col_map}")
                 break
+
+        def get_col(row_r, field, default_col=None):
+            """用欄位名稱取值，找不到時用預設欄位號"""
+            c = col_map.get(field, default_col)
+            if c:
+                return cv(row_r, c)
+            return ""
+
+        # SKU 欄：優先用偵測到的，否則預設第18欄
+        sku_col = col_map.get("sku", 18)
 
         # 載入資料庫
         db, db_err = load_customs_db()
@@ -3886,14 +3927,14 @@ def api_customs_upload():
         rows = []
         errors = []
         for r in range(data_start, max_row+1):
-            sku = cv(r, 18)  # R欄
+            sku = cv(r, sku_col)
             if not sku:
                 if not has_data_in_row(r):
                     continue
-                errors.append(f"第 {r} 列缺少 SKU（R欄）")
+                errors.append(f"第 {r} 列缺少 SKU（第{sku_col}欄）")
 
-            total_pcs = cv(r, 8)
-            price_db = str(db.get(sku, {}).get("price", "")) if sku in db else ""
+            total_pcs = get_col(r, "total_pcs", 8)
+            price_db  = str(db.get(sku, {}).get("price", "")) if sku in db else ""
             try:
                 total_rmb = round(float(total_pcs) * float(price_db), 2) if total_pcs and price_db else ""
             except:
@@ -3901,23 +3942,23 @@ def api_customs_upload():
 
             row = {
                 "sku":               sku,
-                "type":              cv(r, 1),
-                "product_size_orig": cv(r, 2),
-                "material":          db.get(sku, {}).get("material", cv(r, 3)) if sku in db else cv(r, 3),
+                "type":              get_col(r, "type", 1),
+                "product_size_orig": get_col(r, "product_size_orig", 2),
+                "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if sku in db else get_col(r, "material", 3),
                 "customs_name":      db.get(sku, {}).get("customs_name", "") if sku in db else "",
-                "box_no":            cv(r, 5),
-                "pcs_per":           cv(r, 6),
-                "qty":               cv(r, 7),
+                "box_no":            get_col(r, "box_no", 5),
+                "pcs_per":           get_col(r, "pcs_per", 6),
+                "qty":               get_col(r, "qty", 7),
                 "total_pcs":         total_pcs,
-                "unit":              db.get(sku, {}).get("unit", cv(r, 9)) if sku in db else cv(r, 9),
-                "price":             price_db if sku in db else cv(r, 10),
-                "total_rmb":         str(total_rmb) if total_rmb != "" else cv(r, 11),
-                "gross_weight":      cv(r, 12),
-                "len":               cv(r, 13),
-                "wid":               cv(r, 14),
-                "hei":               cv(r, 15),
-                "volume":            cv(r, 16),
-                "total_weight":      cv(r, 17),
+                "unit":              db.get(sku, {}).get("unit", get_col(r, "unit", 9)) if sku in db else get_col(r, "unit", 9),
+                "price":             price_db if sku in db else get_col(r, "price", 10),
+                "total_rmb":         str(total_rmb) if total_rmb != "" else get_col(r, "total_rmb", 11),
+                "gross_weight":      get_col(r, "gross_weight", 12),
+                "len":               get_col(r, "len", 13),
+                "wid":               get_col(r, "wid", 14),
+                "hei":               get_col(r, "hei", 15),
+                "volume":            get_col(r, "volume", 16),
+                "total_weight":      get_col(r, "total_weight", 17),
                 "image":             db.get(sku, {}).get("image", "") if sku in db else "",
                 "status":            "ok" if sku in db else ("missing" if sku else "no_sku"),
             }
