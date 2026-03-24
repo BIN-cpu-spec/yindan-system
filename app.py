@@ -4640,7 +4640,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
     <p style="font-size:12px;color:#666;margin-bottom:10px">&#x8F38;&#x5165;&#x8CA8;&#x865F;&#x5F8C;&#x6309; + &#x52A0;&#x5165;&#xFF0C;&#x540C;&#x4E00;&#x8CA8;&#x865F;&#x91CD;&#x8907;&#x5247;&#x6578;&#x91CF;+1</p>
     <div class="input-row">
       <input type="text" id="sku-input" class="inp" placeholder="&#x8F38;&#x5165;&#x8CA8;&#x865F;...">
-      <button class="btn btn-cam" id="cam-sku-btn">&#x1F4F7;</button>
+      <button class="btn btn-cam" id="cam-sku-btn" onclick="openCam('sku')">&#x1F4F7;</button>
       <button class="btn btn-yellow" id="add-sku-btn">+</button>
     </div>
     <div id="sku-list" class="sku-list"><div class="empty-hint">&#x5C1A;&#x672A;&#x52A0;&#x5165;&#x4EFB;&#x4F55;&#x8CA8;&#x865F;</div></div>
@@ -4650,7 +4650,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
     <p style="font-size:12px;color:#666;margin-bottom:10px">&#x683C;&#x5F0F;: RACK-A-1&#xFF0C;&#x78BA;&#x8A8D;&#x5F8C;&#x51FA;&#x73FE;&#x5927;&#x5B57;&#x4E8C;&#x6B21;&#x78BA;&#x8A8D;</p>
     <div class="input-row">
       <input type="text" id="rack-input" class="inp" placeholder="&#x4F8B;: RACK-A-1">
-      <button class="btn btn-cam" id="cam-rack-btn">&#x1F4F7;</button>
+      <button class="btn btn-cam" id="cam-rack-btn" onclick="openCam('rack')">&#x1F4F7;</button>
     </div>
     <button class="btn-block" id="confirm-rack-btn">&#x1F50D; &#x78BA;&#x8A8D;&#x5132;&#x4F4D;</button>
   </div>
@@ -4660,7 +4660,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
     <div class="card-title">&#x67E5;&#x627E;&#x5546;&#x54C1;&#x5728;&#x54EA;&#x500B;&#x5132;&#x4F4D;</div>
     <div class="search-box">
       <input type="text" id="search-sku" class="inp" placeholder="&#x8F38;&#x5165;&#x8CA8;&#x865F;...">
-      <button class="btn btn-cam" id="cam-search-btn">&#x1F4F7;</button>
+      <button class="btn btn-cam" id="cam-search-btn" onclick="openCam('search')">&#x1F4F7;</button>
       <button class="btn btn-yellow" id="do-search-btn">&#x67E5;&#x627E;</button>
     </div>
     <div id="search-result"></div>
@@ -4703,8 +4703,8 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
     <video id="cam-video" class="cam-video" autoplay playsinline muted></video>
     <div class="cam-line"></div>
   </div>
-  <div class="cam-hint">&#x5C07;&#x689D;&#x78BC; / QR Code &#x5C0D;&#x6E96;&#x63CF;&#x63C3;&#x7DDA;</div>
-  <button class="btn btn-red" id="cam-close-btn" style="margin-top:16px;padding:12px 32px">&#x274C; &#x95DC;&#x9589;&#x76F8;&#x6A5F;</button>
+  <div class="cam-hint" id="cam-hint">&#x5C07;&#x689D;&#x78BC; / QR Code &#x5C0D;&#x6E96;&#x63CF;&#x63C3;&#x7DDA;</div>
+  <button class="btn btn-red" id="cam-close-btn" onclick="closeCam()" style="margin-top:16px;padding:12px 32px">&#x274C; &#x95DC;&#x9589;&#x76F8;&#x6A5F;</button>
 </div>
 
 <script>
@@ -4920,10 +4920,6 @@ window.addEventListener('DOMContentLoaded', function() {
   document.getElementById('do-rack-btn').addEventListener('click', doRackSearch);
   document.getElementById('search-rack').addEventListener('keydown', function(e){ if(e.key==='Enter') doRackSearch(); });
   document.getElementById('refresh-btn').addEventListener('click', loadRecords);
-  document.getElementById('cam-sku-btn').addEventListener('click', function(){ openCam('sku'); });
-  document.getElementById('cam-rack-btn').addEventListener('click', function(){ openCam('rack'); });
-  document.getElementById('cam-search-btn').addEventListener('click', function(){ openCam('search'); });
-  document.getElementById('cam-close-btn').addEventListener('click', closeCam);
   document.getElementById('sku-input').focus();
 });
 </script>
