@@ -4719,8 +4719,8 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
   <button class="btn btn-red" id="cam-close-btn" style="margin-top:16px;padding:12px 32px">&#x274C; 關閉相機</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script>
+// 不依賴外部 CDN，使用瀏覽器原生 BarcodeDetector API
 // ── 狀態 ──
 var skuList = [];
 var camTarget = null; // 'sku' | 'rack' | 'search'
