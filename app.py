@@ -9,6 +9,18 @@ import sys, csv, io, os, re, json, threading, time, hashlib, secrets
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
 
+# ── 圖片URL解析：將 =IMAGE("url") 公式轉成純 URL ──
+def parse_image_url(cell_value):
+    if not cell_value:
+        return ""
+    s = str(cell_value).strip()
+    m = re.search(r'=IMAGE\("([^"]+)"', s, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    return ""
+
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if sys.stderr.encoding != 'utf-8':
@@ -3443,7 +3455,7 @@ def load_customs_db():
                     "price":      row.get("單價", ""),
                     "unit":       row.get("單位", ""),
                     "product_size": row.get("商品尺寸", ""),
-                    "image":      row.get("圖片", ""),
+                    "image":      parse_image_url(row.get("圖片", "")),
                 }
         return db, None
     except Exception as e:
@@ -3541,8 +3553,18 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
 <div id="preview-section">
   <!-- 櫃號/封號/日期填寫區 -->
   <div class="card">
-    <h2>&#128230; 填寫櫃號資訊</h2>
-    <p style="font-size:12px;color:#888;margin-bottom:14px">此資訊會顯示在匯出的報關單第5列</p>
+    <h2>&#128230; 填寫報關資訊</h2>
+    <p style="font-size:12px;color:#888;margin-bottom:14px">此資訊會顯示在匯出的報關單標題區</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">出口商（A1）</label>
+        <input type="text" id="exporter" placeholder="例：ORAL TRADING CO., LTD." style="width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">進口商（A2）</label>
+        <input type="text" id="importer" placeholder="例：台灣進口商名稱" style="width:100%;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px">
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
       <div>
         <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">櫃號</label>
@@ -3796,6 +3818,8 @@ function exportExcel() {
   var cabinetNo = document.getElementById('cabinet-no').value.trim();
   var sealNo    = document.getElementById('seal-no').value.trim();
   var shipDate  = document.getElementById('ship-date').value;
+  var exporter  = document.getElementById('exporter').value.trim();
+  var importer  = document.getElementById('importer').value.trim();
   // 日期格式轉換 yyyy-mm-dd → yyyy年mm月dd日
   var shipDateStr = '';
   if(shipDate) {
@@ -3809,7 +3833,9 @@ function exportExcel() {
       rows: allRows,
       cabinet_no: cabinetNo,
       seal_no:    sealNo,
-      ship_date:  shipDateStr
+      ship_date:  shipDateStr,
+      exporter:   exporter,
+      importer:   importer
     })
   }).then(function(r){return r.blob();}).then(function(blob){
     var url = URL.createObjectURL(blob);
@@ -4035,23 +4061,29 @@ def api_customs_export():
         ws = wb.active
         ws.title = "本次報關清單"
 
-        # ── 第1~4列：義烏公司固定資訊 ──────────────────────
-        ws.cell(1, 1, "ORAL TRADING CO., LTD.")
+        exporter  = data.get("exporter", "")
+        importer  = data.get("importer", "")
+
+        # ── 第1~4列：標題資訊 ──────────────────────────────
+        # A1：出口商（可填寫）
+        ws.cell(1, 1, exporter if exporter else "")
         ws.cell(1, 1).font = Font(bold=True, size=11)
 
-        ws.cell(2, 1, "貿易條件：CFR")
+        # A2：進口商（可填寫）
+        ws.cell(2, 1, importer if importer else "")
+        ws.cell(2, 1).font = Font(size=11)
+
+        # A3：固定 CFR
+        ws.cell(3, 1, "CFR")
+        ws.cell(3, 1).font = Font(bold=True)
 
         ws.cell(1, 14, "義烏:")
         ws.cell(1, 14).font = Font(bold=True)
         ws.cell(1, 15, "地址:浙江省義烏市江東街道青口東洲路1017號（東山路與東洲路交叉口）")
-
         ws.cell(2, 15, "電話:0579-85202818     傳真:0579-85202819")
 
-        # ── 第3列空白 ──
-        ws.cell(3, 1, "")
-
-        # ── 第4列：貿易條件 ──
-        ws.cell(4, 1, "貿易條件：CFR")
+        # ── 第4列空白 ──
+        ws.cell(4, 1, "")
 
         # ── 第5列：櫃號/封號/出貨日期 ──────────────────────
         cabinet_text = f"櫃號: {cabinet_no}      封號：{seal_no}"
@@ -4072,6 +4104,17 @@ def api_customs_export():
             cell.font = Font(bold=True, color="FFFFFFFF")
             cell.alignment = Alignment(horizontal="center")
 
+        # 數字格式定義
+        fmt_int   = '0'        # 整數（無小數點）→ F、G、H 欄（第6、7、8欄）
+        fmt_2dec  = '0.00'     # 兩位小數 → P、Q 欄（第16、17欄）
+
+        def to_num(val):
+            """安全轉為數字，失敗回傳原字串"""
+            try:
+                return float(str(val).replace(',', '')) if val not in ('', None) else ''
+            except:
+                return val
+
         # ── 第7列起：商品資料 ──────────────────────────────
         miss_fill = PatternFill("solid", fgColor="FFFFEBEE")
         for r, row in enumerate(rows, HEADER_ROW + 1):
@@ -4080,18 +4123,29 @@ def api_customs_export():
             ws.cell(r, 3,  row.get("material",""))
             ws.cell(r, 4,  row.get("customs_name",""))
             ws.cell(r, 5,  row.get("box_no",""))
-            ws.cell(r, 6,  row.get("pcs_per",""))
-            ws.cell(r, 7,  row.get("qty",""))
-            ws.cell(r, 8,  row.get("total_pcs",""))
+
+            # F欄(6) PCS/件、G欄(7) 件數、H欄(8) 總PCS → 整數無小數點
+            for col, key in [(6,"pcs_per"),(7,"qty"),(8,"total_pcs")]:
+                v = to_num(row.get(key,""))
+                c = ws.cell(r, col, int(v) if isinstance(v, float) else v)
+                if isinstance(v, float):
+                    c.number_format = fmt_int
+
             ws.cell(r, 9,  row.get("unit",""))
-            ws.cell(r, 10, row.get("price",""))
-            ws.cell(r, 11, row.get("total_rmb",""))
-            ws.cell(r, 12, row.get("gross_weight",""))
-            ws.cell(r, 13, row.get("len",""))
-            ws.cell(r, 14, row.get("wid",""))
-            ws.cell(r, 15, row.get("hei",""))
-            ws.cell(r, 16, row.get("volume",""))
-            ws.cell(r, 17, row.get("total_weight",""))
+            ws.cell(r, 10, to_num(row.get("price","")))
+            ws.cell(r, 11, to_num(row.get("total_rmb","")))
+            ws.cell(r, 12, to_num(row.get("gross_weight","")))
+            ws.cell(r, 13, to_num(row.get("len","")))
+            ws.cell(r, 14, to_num(row.get("wid","")))
+            ws.cell(r, 15, to_num(row.get("hei","")))
+
+            # P欄(16) 材積、Q欄(17) 總重量 → 兩位小數
+            for col, key in [(16,"volume"),(17,"total_weight")]:
+                v = to_num(row.get(key,""))
+                c = ws.cell(r, col, v)
+                if isinstance(v, float):
+                    c.number_format = fmt_2dec
+
             ws.cell(r, 18, row.get("image",""))
             if row.get("status") != "ok":
                 for c in range(1, 19):
