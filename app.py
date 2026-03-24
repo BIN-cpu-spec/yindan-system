@@ -2538,12 +2538,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
-  <div class="card card-tools" style="opacity:.6;cursor:default">
-    <span class="card-badge badge-soon">&#x23F3; 即將上線</span>
-    <span class="card-icon">&#x1F527;</span>
-    <div class="card-title">工具箱</div>
-    <div class="card-desc">更多倉庫小工具陸續開發中，敬請期待！有好點子歡迎告知特工開發團隊。</div>
-  </div>
+  <a href="/rack" class="card card-tools">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <span class="card-icon">&#x1F4E6;</span>
+    <div class="card-title">貨架入庫</div>
+    <div class="card-desc">掃描貨號入庫到重型貨架，記錄每個儲位的商品，一秒查詢貨號在哪個儲位。</div>
+  </a>
 </div>
 </body></html>"""
 
@@ -3498,6 +3498,374 @@ def append_to_customs_db(new_item):
     except Exception as e:
         return str(e)
 
+# ============================================================
+# 貨架入庫模組
+# ============================================================
+
+def load_rack_sheet():
+    """取得貨架庫位紀錄 worksheet，不存在則自動建立"""
+    client, err = get_sheets_client()
+    if err:
+        return None, err
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("貨架庫位紀錄")
+        except Exception:
+            ws = sh.add_worksheet(title="貨架庫位紀錄", rows=1000, cols=6)
+            ws.append_row(["貨號", "儲位", "數量", "入庫時間", "備註"])
+        return ws, None
+    except Exception as e:
+        return None, str(e)
+
+def rack_save_records(items, rack_code):
+    """items = [{"sku": "BCE001-001", "qty": 2}], rack_code = "RACK-A-1" """
+    ws, err = load_rack_sheet()
+    if err:
+        return err
+    try:
+        now = datetime.now().strftime("%Y/%m/%d %H:%M")
+        rows = [[item.get("sku",""), rack_code, item.get("qty",1), now, ""] for item in items]
+        if rows:
+            ws.append_rows(rows)
+        return None
+    except Exception as e:
+        return str(e)
+
+def rack_query_sku(sku):
+    """查詢貨號在哪些儲位"""
+    ws, err = load_rack_sheet()
+    if err:
+        return [], err
+    try:
+        all_values = ws.get_all_values()
+        results = []
+        for row in all_values[1:]:
+            if len(row) < 2:
+                continue
+            if sku.upper() in str(row[0]).strip().upper():
+                results.append({
+                    "sku":  row[0] if len(row)>0 else "",
+                    "rack": row[1] if len(row)>1 else "",
+                    "qty":  row[2] if len(row)>2 else "",
+                    "time": row[3] if len(row)>3 else "",
+                    "note": row[4] if len(row)>4 else "",
+                })
+        return results, None
+    except Exception as e:
+        return [], str(e)
+
+def rack_query_rack(rack_code):
+    """查詢某儲位裡有哪些貨號"""
+    ws, err = load_rack_sheet()
+    if err:
+        return [], err
+    try:
+        all_values = ws.get_all_values()
+        results = []
+        for row in all_values[1:]:
+            if len(row) < 2:
+                continue
+            if str(row[1]).strip().upper() == rack_code.strip().upper():
+                results.append({
+                    "sku":  row[0] if len(row)>0 else "",
+                    "rack": row[1] if len(row)>1 else "",
+                    "qty":  row[2] if len(row)>2 else "",
+                    "time": row[3] if len(row)>3 else "",
+                    "note": row[4] if len(row)>4 else "",
+                })
+        return results, None
+    except Exception as e:
+        return [], str(e)
+
+RACK_HTML = """<!DOCTYPE html>
+<html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>貨架入庫系統</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:100vh;color:#fff;font-size:14px}
+.topbar{background:rgba(255,255,255,.05);backdrop-filter:blur(10px);height:52px;padding:0 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;z-index:300}
+.logo{font-size:15px;font-weight:700;margin-right:auto}.logo span{color:#f4a100}
+a.back{color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #333;border-radius:5px}
+a.back:hover{border-color:#666;color:#fff}
+.tabs{display:flex;border-bottom:2px solid rgba(255,255,255,.08);padding:0 20px}
+.tab{padding:14px 24px;cursor:pointer;font-size:13px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
+.tab.active{color:#f4a100;border-bottom-color:#f4a100;font-weight:600}
+.tab:hover{color:#fff}
+.panel{display:none;padding:24px 20px;max-width:800px;margin:0 auto}
+.panel.active{display:block}
+.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h3{font-size:14px;font-weight:600;margin-bottom:14px;color:#f4a100}
+input[type=text],input[type=number]{width:100%;padding:10px 14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-size:14px;font-family:inherit;outline:none}
+input:focus{border-color:#f4a100;background:rgba(244,161,0,.08)}
+input::placeholder{color:#555}
+.btn{padding:10px 20px;border-radius:8px;border:none;font-size:13px;cursor:pointer;font-weight:600;transition:all .2s;white-space:nowrap}
+.btn-yellow{background:#f4a100;color:#0f1923}.btn-yellow:hover{background:#ffb300}
+.btn-green{background:#2e7d32;color:#fff}.btn-green:hover{background:#388e3c}
+.btn-red{background:#b71c1c;color:#fff}.btn-red:hover{background:#c62828}
+.scan-list{list-style:none;margin:12px 0}
+.scan-item{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.06);border-radius:8px;margin-bottom:6px;border:1px solid rgba(255,255,255,.08)}
+.scan-sku{flex:1;font-weight:600;font-size:15px;letter-spacing:.5px}
+.scan-qty{width:70px;padding:5px 8px;text-align:center}
+.scan-del{cursor:pointer;color:#e57373;font-size:18px;background:none;border:none;padding:0 4px}
+.confirm-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.88);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:20px;text-align:center}
+.confirm-overlay.show{display:flex}
+.confirm-rack{font-size:80px;font-weight:900;color:#f4a100;letter-spacing:6px;text-shadow:0 0 60px rgba(244,161,0,.6);animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{from{transform:scale(1)}to{transform:scale(1.06)}}
+.confirm-sub{font-size:24px;color:#fff;opacity:.7;letter-spacing:2px}
+.confirm-items{background:rgba(255,255,255,.08);border-radius:12px;padding:16px 28px;min-width:340px;max-width:520px;text-align:left}
+.confirm-items li{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:15px}
+.confirm-items li:last-child{border:none}
+.confirm-btns{display:flex;gap:14px;margin-top:4px}
+.result-table{width:100%;border-collapse:collapse;margin-top:12px}
+.result-table th{background:rgba(244,161,0,.15);padding:10px 12px;text-align:left;font-size:12px;color:#f4a100;border-bottom:1px solid rgba(244,161,0,.2)}
+.result-table td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px}
+.result-table tr:hover td{background:rgba(255,255,255,.04)}
+.rack-badge{display:inline-block;padding:3px 10px;background:rgba(244,161,0,.15);color:#f4a100;border-radius:20px;font-weight:700;font-size:13px;border:1px solid rgba(244,161,0,.3)}
+.msg{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.msg-ok{background:rgba(46,125,50,.2);color:#81c784;border:1px solid rgba(46,125,50,.3)}
+.msg-err{background:rgba(183,28,28,.2);color:#ef9a9a;border:1px solid rgba(183,28,28,.3)}
+.empty{text-align:center;padding:32px;color:#555;font-size:13px}
+.row{display:flex;gap:10px}
+</style></head><body>
+
+<div class="topbar">
+  <div class="logo">&#x1F4E6; <span>貨架入庫系統</span></div>
+  <a href="/" class="back">&#x2302; 返回首頁</a>
+  <a href="/logout" class="back">登出</a>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('inbound',this)">&#x1F4E5; 入庫作業</div>
+  <div class="tab" onclick="switchTab('search',this)">&#x1F50D; 查找貨位</div>
+</div>
+
+<!-- 入庫作業 -->
+<div class="panel active" id="panel-inbound">
+  <div id="msg-inbound"></div>
+  <div class="card">
+    <h3>&#x1F4F7; 步驟一：掃描 / 輸入貨號</h3>
+    <input type="text" id="sku-input" placeholder="掃描或輸入貨號，按 Enter 加入清單" autocomplete="off" autofocus>
+    <ul class="scan-list" id="scan-list">
+      <li class="empty" id="scan-empty">尚未掃描任何貨號</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>&#x1F4CD; 步驟二：掃描 / 輸入儲位條碼</h3>
+    <div class="row">
+      <input type="text" id="rack-input" placeholder="掃描或輸入儲位，例：RACK-A-1" autocomplete="off">
+      <button class="btn btn-yellow" onclick="confirmRack()">&#x2705; 確認入庫</button>
+    </div>
+    <div style="font-size:12px;color:#555;margin-top:8px">掃描儲位後會出現大字二次確認，避免刷錯儲位</div>
+  </div>
+</div>
+
+<!-- 查找貨位 -->
+<div class="panel" id="panel-search">
+  <div id="msg-search"></div>
+  <div class="card">
+    <h3>&#x1F50D; 查詢貨號所在儲位</h3>
+    <div class="row">
+      <input type="text" id="search-sku" placeholder="輸入或掃描貨號" autocomplete="off">
+      <button class="btn btn-yellow" onclick="searchSku()">查詢</button>
+    </div>
+    <div id="result-sku"></div>
+  </div>
+  <div class="card">
+    <h3>&#x1F4E6; 查詢儲位內有哪些貨號</h3>
+    <div class="row">
+      <input type="text" id="search-rack" placeholder="輸入或掃描儲位條碼，例：RACK-A-1" autocomplete="off">
+      <button class="btn btn-yellow" onclick="searchRack()">查詢</button>
+    </div>
+    <div id="result-rack"></div>
+  </div>
+</div>
+
+<!-- 大字二次確認 -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-rack" id="confirm-rack-text"></div>
+  <div class="confirm-sub" id="confirm-rack-sub"></div>
+  <div class="confirm-items">
+    <div style="font-size:13px;color:#aaa;margin-bottom:10px">即將入庫以下貨號：</div>
+    <ul id="confirm-item-list"></ul>
+  </div>
+  <div class="confirm-btns">
+    <button class="btn btn-green" onclick="doSave()">&#x2705; 確認正確，儲存</button>
+    <button class="btn btn-red" onclick="cancelConfirm()">&#x274C; 取消重掃</button>
+  </div>
+</div>
+
+<script>
+var scannedItems = {};
+var pendingRack = '';
+
+function switchTab(name, el){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('active');});
+  el.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+  if(name==='inbound') document.getElementById('sku-input').focus();
+  else document.getElementById('search-sku').focus();
+}
+
+document.getElementById('sku-input').addEventListener('keydown',function(e){
+  if(e.key!=='Enter') return;
+  var sku = this.value.trim().toUpperCase();
+  if(!sku) return;
+  scannedItems[sku] = (scannedItems[sku]||0)+1;
+  renderScanList();
+  this.value=''; this.focus();
+});
+
+document.getElementById('rack-input').addEventListener('keydown',function(e){
+  if(e.key==='Enter') confirmRack();
+});
+document.getElementById('search-sku').addEventListener('keydown',function(e){
+  if(e.key==='Enter') searchSku();
+});
+document.getElementById('search-rack').addEventListener('keydown',function(e){
+  if(e.key==='Enter') searchRack();
+});
+
+function renderScanList(){
+  var ul=document.getElementById('scan-list');
+  var keys=Object.keys(scannedItems);
+  document.getElementById('scan-empty').style.display=keys.length?'none':'block';
+  Array.from(ul.querySelectorAll('.scan-item')).forEach(function(el){el.remove();});
+  keys.forEach(function(sku){
+    var li=document.createElement('li'); li.className='scan-item';
+    li.innerHTML='<span class="scan-sku">'+sku+'</span>'+
+      '<input type="number" class="scan-qty" value="'+scannedItems[sku]+'" min="1" onchange="updateQty(\''+sku+'\',this.value)">'+
+      '<span style="font-size:12px;color:#666">件</span>'+
+      '<button class="scan-del" onclick="removeSku(\''+sku+'\')">&#x2715;</button>';
+    ul.appendChild(li);
+  });
+}
+
+function updateQty(sku,val){var n=parseInt(val);if(n>0)scannedItems[sku]=n;else removeSku(sku);}
+function removeSku(sku){delete scannedItems[sku];renderScanList();}
+
+function confirmRack(){
+  if(!Object.keys(scannedItems).length){showMsg('inbound','&#x26A0; 請先掃描至少一個貨號！',false);return;}
+  var rack=document.getElementById('rack-input').value.trim().toUpperCase();
+  if(!rack){showMsg('inbound','&#x26A0; 請掃描或輸入儲位條碼！',false);return;}
+  pendingRack=rack;
+  document.getElementById('confirm-rack-text').textContent=rack;
+  var parts=rack.split('-');
+  var sub=parts.length>=3?parts[1]+' 排　第 '+parts[2]+' 層':rack;
+  document.getElementById('confirm-rack-sub').textContent=sub;
+  var ul=document.getElementById('confirm-item-list'); ul.innerHTML='';
+  Object.keys(scannedItems).forEach(function(sku){
+    var li=document.createElement('li');
+    li.textContent=sku+'　×　'+scannedItems[sku]+' 件';
+    ul.appendChild(li);
+  });
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+function cancelConfirm(){
+  document.getElementById('confirm-overlay').classList.remove('show');
+  document.getElementById('rack-input').focus();
+}
+
+function doSave(){
+  var items=Object.keys(scannedItems).map(function(sku){return{sku:sku,qty:scannedItems[sku]};});
+  fetch('/api/rack/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items:items,rack:pendingRack})
+  }).then(function(r){return r.json();}).then(function(d){
+    document.getElementById('confirm-overlay').classList.remove('show');
+    if(d.ok){
+      showMsg('inbound','&#x2705; 入庫成功！共 '+items.length+' 種貨號 → '+pendingRack,true);
+      scannedItems={};renderScanList();
+      document.getElementById('rack-input').value='';
+      document.getElementById('sku-input').focus();
+    } else {
+      showMsg('inbound','&#x274C; 儲存失敗：'+d.msg,false);
+    }
+  });
+}
+
+function searchSku(){
+  var sku=document.getElementById('search-sku').value.trim();
+  if(!sku){showMsg('search','請輸入貨號',false);return;}
+  document.getElementById('result-sku').innerHTML='<div style="color:#888;padding:10px">查詢中...</div>';
+  fetch('/api/rack/query-sku?sku='+encodeURIComponent(sku))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){document.getElementById('result-sku').innerHTML='<div class="msg msg-err">'+d.msg+'</div>';return;}
+      if(!d.results.length){document.getElementById('result-sku').innerHTML='<div class="empty">&#x1F4ED; 找不到此貨號的入庫紀錄</div>';return;}
+      var h='<table class="result-table"><tr><th>貨號</th><th>儲位</th><th>數量</th><th>入庫時間</th></tr>';
+      d.results.forEach(function(r){h+='<tr><td>'+r.sku+'</td><td><span class="rack-badge">'+r.rack+'</span></td><td>'+r.qty+'</td><td>'+r.time+'</td></tr>';});
+      document.getElementById('result-sku').innerHTML=h+'</table>';
+    });
+}
+
+function searchRack(){
+  var rack=document.getElementById('search-rack').value.trim();
+  if(!rack){showMsg('search','請輸入儲位條碼',false);return;}
+  document.getElementById('result-rack').innerHTML='<div style="color:#888;padding:10px">查詢中...</div>';
+  fetch('/api/rack/query-rack?rack='+encodeURIComponent(rack))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){document.getElementById('result-rack').innerHTML='<div class="msg msg-err">'+d.msg+'</div>';return;}
+      if(!d.results.length){document.getElementById('result-rack').innerHTML='<div class="empty">&#x1F4ED; 此儲位目前沒有入庫紀錄</div>';return;}
+      var h='<table class="result-table"><tr><th>貨號</th><th>儲位</th><th>數量</th><th>入庫時間</th></tr>';
+      d.results.forEach(function(r){h+='<tr><td>'+r.sku+'</td><td><span class="rack-badge">'+r.rack+'</span></td><td>'+r.qty+'</td><td>'+r.time+'</td></tr>';});
+      document.getElementById('result-rack').innerHTML=h+'</table>';
+    });
+}
+
+function showMsg(panel,msg,ok){
+  var el=document.getElementById('msg-'+panel);
+  el.innerHTML='<div class="msg '+(ok?'msg-ok':'msg-err')+'">'+msg+'</div>';
+  setTimeout(function(){el.innerHTML='';},4000);
+}
+</script>
+</body></html>"""
+
+@app.route("/rack")
+@login_required
+def rack_page():
+    return render_template_string(RACK_HTML)
+
+@app.route("/api/rack/save", methods=["POST"])
+@login_required
+def api_rack_save():
+    data = request.get_json()
+    items = data.get("items", [])
+    rack  = data.get("rack", "").strip().upper()
+    if not items or not rack:
+        return jsonify({"ok": False, "msg": "缺少貨號或儲位"})
+    err = rack_save_records(items, rack)
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    log(f"貨架入庫：{len(items)} 種貨號 → {rack}")
+    return jsonify({"ok": True})
+
+@app.route("/api/rack/query-sku")
+@login_required
+def api_rack_query_sku():
+    sku = request.args.get("sku", "").strip()
+    if not sku:
+        return jsonify({"ok": False, "msg": "請提供貨號"})
+    results, err = rack_query_sku(sku)
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    return jsonify({"ok": True, "results": results})
+
+@app.route("/api/rack/query-rack")
+@login_required
+def api_rack_query_rack():
+    rack = request.args.get("rack", "").strip()
+    if not rack:
+        return jsonify({"ok": False, "msg": "請提供儲位條碼"})
+    results, err = rack_query_rack(rack)
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    return jsonify({"ok": True, "results": results})
+
+
 CUSTOMS_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
 <meta charset="UTF-8">
@@ -4171,6 +4539,430 @@ def api_customs_export():
             download_name=fname)
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+# ============================================================
+# 貨架入庫工具
+# ============================================================
+
+WAREHOUSE_HTML = """<!DOCTYPE html>
+<html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>貨架入庫系統</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;min-height:100vh}
+.topbar{background:#0a1219;height:52px;padding:0 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #1e2d3d}
+.logo{font-size:15px;font-weight:600;margin-right:auto;color:#fff}.logo span{color:#f4a100}
+.topbar a{color:#aaa;font-size:12px;text-decoration:none}
+.topbar a:hover{color:#f4a100}
+.tabs{display:flex;gap:0;border-bottom:2px solid #1e2d3d;margin:0 20px}
+.tab-btn{padding:12px 28px;background:none;border:none;color:#888;font-size:14px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-2px;transition:.2s}
+.tab-btn.active{color:#f4a100;border-bottom-color:#f4a100;font-weight:600}
+.tab-content{display:none;padding:20px}
+.tab-content.active{display:block}
+.scan-card{background:#1a2535;border:1px solid #1e2d3d;border-radius:12px;padding:24px;margin-bottom:16px}
+.scan-card h2{font-size:14px;color:#f4a100;margin-bottom:16px;font-weight:600;letter-spacing:1px}
+.scan-input-wrap{position:relative}
+.scan-input{width:100%;padding:14px 48px 14px 16px;background:#0f1923;border:2px solid #1e2d3d;border-radius:8px;color:#fff;font-size:16px;font-family:inherit;transition:.2s}
+.scan-input:focus{outline:none;border-color:#f4a100}
+.scan-input::placeholder{color:#444}
+.scan-icon{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:20px;pointer-events:none}
+.scanned-list{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:280px;overflow-y:auto}
+.scanned-item{display:flex;align-items:center;justify-content:space-between;background:#0f1923;border:1px solid #1e2d3d;border-radius:6px;padding:8px 12px}
+.scanned-item .sku{font-size:14px;font-weight:600;color:#fff}
+.scanned-item .qty-ctrl{display:flex;align-items:center;gap:8px}
+.qty-btn{width:28px;height:28px;border-radius:50%;border:1px solid #f4a100;background:none;color:#f4a100;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.qty-btn:hover{background:#f4a100;color:#000}
+.qty-num{font-size:16px;font-weight:700;color:#f4a100;min-width:24px;text-align:center}
+.del-btn{background:none;border:none;color:#555;font-size:18px;cursor:pointer;padding:0 4px}
+.del-btn:hover{color:#f44}
+.empty-hint{color:#444;font-size:13px;text-align:center;padding:20px}
+.confirm-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center;flex-direction:column}
+.confirm-overlay.show{display:flex}
+.confirm-box{background:#1a2535;border:3px solid #f4a100;border-radius:20px;padding:40px 60px;text-align:center;max-width:500px;width:90%}
+.confirm-rack{font-size:72px;font-weight:900;color:#f4a100;letter-spacing:4px;line-height:1;margin:16px 0;word-break:break-all}
+.confirm-label{font-size:16px;color:#aaa;margin-bottom:8px}
+.confirm-items{font-size:13px;color:#ccc;margin:16px 0;text-align:left;background:#0f1923;border-radius:8px;padding:12px;max-height:200px;overflow-y:auto}
+.confirm-items .ci{padding:4px 0;border-bottom:1px solid #1e2d3d;display:flex;justify-content:space-between}
+.confirm-items .ci:last-child{border:none}
+.confirm-btns{display:flex;gap:12px;margin-top:24px;justify-content:center}
+.btn{padding:12px 28px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;transition:.2s}
+.btn-confirm{background:#2e7d32;color:#fff}.btn-confirm:hover{background:#1b5e20}
+.btn-cancel{background:#555;color:#fff}.btn-cancel:hover{background:#333}
+.btn-yellow{background:#f4a100;color:#000}.btn-yellow:hover{background:#e69500}
+.result-card{background:#1a2535;border:1px solid #1e2d3d;border-radius:10px;padding:16px;margin-bottom:10px}
+.result-sku{font-size:16px;font-weight:700;color:#f4a100;margin-bottom:8px}
+.result-loc{display:flex;flex-wrap:wrap;gap:8px}
+.loc-tag{background:#0f1923;border:1px solid #f4a100;border-radius:20px;padding:6px 14px;font-size:13px;color:#fff}
+.loc-tag .qty{color:#f4a100;font-weight:700}
+.loc-tag .time{font-size:11px;color:#666;display:block;margin-top:2px}
+.no-result{color:#555;text-align:center;padding:40px;font-size:14px}
+.rec-table{width:100%;border-collapse:collapse;font-size:13px}
+.rec-table th{background:#0f1923;padding:8px 10px;text-align:left;color:#888;font-weight:500;border-bottom:1px solid #1e2d3d}
+.rec-table td{padding:8px 10px;border-bottom:1px solid #1a2535;vertical-align:middle}
+.rec-table tr:hover td{background:#1a2535}
+.badge-rack{background:#1e3a5f;color:#64b5f6;padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600}
+.msg-bar{padding:10px 16px;border-radius:6px;font-size:13px;margin-bottom:12px;display:none}
+.msg-ok{background:#1b5e20;color:#a5d6a7;display:block}
+.msg-err{background:#4a0000;color:#ef9a9a;display:block}
+.search-wrap{display:flex;gap:8px;margin-bottom:16px}
+.search-input{flex:1;padding:10px 14px;background:#0f1923;border:2px solid #1e2d3d;border-radius:8px;color:#fff;font-size:14px;font-family:inherit}
+.search-input:focus{outline:none;border-color:#f4a100}
+.btn-sm{padding:10px 20px;border-radius:8px;border:none;font-size:13px;cursor:pointer;font-weight:600;font-family:inherit}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #333;border-top-color:#f4a100;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style></head><body>
+<div class="topbar">
+  <div class="logo">&#x1F4E6; <span>貨架入庫系統</span></div>
+  <a href="/">&#x2302; 返回首頁</a>
+  <a href="/logout" style="margin-left:8px">登出</a>
+</div>
+<div style="margin:16px 20px 0">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('inbound',this)">&#x1F4E5; 入庫作業</button>
+    <button class="tab-btn" onclick="switchTab('search',this)">&#x1F50D; 查找儲位</button>
+    <button class="tab-btn" onclick="switchTab('records',this)">&#x1F4CB; 入庫紀錄</button>
+  </div>
+</div>
+
+<!-- 入庫作業 -->
+<div id="tab-inbound" class="tab-content active">
+  <div id="msg-inbound" class="msg-bar"></div>
+  <div class="scan-card">
+    <h2>&#x25CF; STEP 1 &nbsp;掃描 / 輸入貨號</h2>
+    <p style="font-size:12px;color:#666;margin-bottom:12px">掃描商品條碼或手動輸入貨號，同一貨號掃兩次 = 2件</p>
+    <div class="scan-input-wrap">
+      <input type="text" id="sku-input" class="scan-input" placeholder="掃描條碼或輸入貨號..." onkeydown="if(event.key==='Enter')addSku()">
+      <span class="scan-icon">&#x1F4F7;</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-yellow" onclick="addSku()" style="flex:1">+ 加入清單</button>
+      <button class="btn btn-cancel" onclick="clearSkus()">清空</button>
+    </div>
+    <div id="scanned-list" class="scanned-list"><div class="empty-hint">尚未掃描任何貨號</div></div>
+  </div>
+  <div class="scan-card">
+    <h2>&#x25CF; STEP 2 &nbsp;掃描 / 輸入儲位條碼</h2>
+    <p style="font-size:12px;color:#666;margin-bottom:12px">格式：RACK-A-1，掃描後會出現大字確認畫面</p>
+    <div class="scan-input-wrap">
+      <input type="text" id="rack-input" class="scan-input" placeholder="掃描貨架條碼，例：RACK-A-1" onkeydown="if(event.key==='Enter')confirmRack()">
+      <span class="scan-icon">&#x1F4CD;</span>
+    </div>
+    <button class="btn btn-yellow" onclick="confirmRack()" style="width:100%;margin-top:10px">&#x1F50D; 確認儲位</button>
+  </div>
+</div>
+
+<!-- 查找儲位 -->
+<div id="tab-search" class="tab-content">
+  <div class="scan-card">
+    <h2>&#x25CF; 查找商品在哪個儲位</h2>
+    <div class="search-wrap">
+      <input type="text" id="search-input" class="search-input" placeholder="輸入貨號或關鍵字..." onkeydown="if(event.key==='Enter')doSearch()">
+      <button class="btn btn-sm btn-yellow" onclick="doSearch()">查找</button>
+    </div>
+    <div id="search-result"></div>
+  </div>
+  <div class="scan-card">
+    <h2>&#x25CF; 查找貨架裡有什麼</h2>
+    <div class="search-wrap">
+      <input type="text" id="rack-search-input" class="search-input" placeholder="輸入儲位條碼，例：RACK-A-1" onkeydown="if(event.key==='Enter')doRackSearch()">
+      <button class="btn btn-sm btn-yellow" onclick="doRackSearch()">查找</button>
+    </div>
+    <div id="rack-search-result"></div>
+  </div>
+</div>
+
+<!-- 入庫紀錄 -->
+<div id="tab-records" class="tab-content">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <span style="font-size:13px;color:#888">最近 100 筆入庫紀錄</span>
+    <button class="btn btn-sm btn-yellow" onclick="loadRecords()">&#x21BB; 重新整理</button>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="rec-table">
+      <thead><tr><th>入庫時間</th><th>貨號</th><th>儲位</th><th>數量</th></tr></thead>
+      <tbody id="records-body"><tr><td colspan="4" style="text-align:center;color:#555;padding:30px">點擊重新整理載入紀錄</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 儲位確認大畫面 -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-label">&#x1F4CD; 確認入庫到此儲位</div>
+    <div class="confirm-rack" id="confirm-rack-text">RACK-A-1</div>
+    <div style="font-size:13px;color:#888;margin-bottom:8px">以下商品將入庫：</div>
+    <div class="confirm-items" id="confirm-items-list"></div>
+    <div class="confirm-btns">
+      <button class="btn btn-cancel" onclick="hideConfirm()">&#x274C; 取消</button>
+      <button class="btn btn-confirm" onclick="doInbound()">&#x2705; 確認入庫</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var skuList = [];
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(function(el){el.classList.remove('active');});
+  document.querySelectorAll('.tab-btn').forEach(function(el){el.classList.remove('active');});
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+  if(name==='records') loadRecords();
+}
+
+function addSku() {
+  var val = document.getElementById('sku-input').value.trim().toUpperCase();
+  if(!val) return;
+  var existing = skuList.find(function(x){return x.sku===val;});
+  if(existing){existing.qty+=1;}else{skuList.push({sku:val,qty:1});}
+  document.getElementById('sku-input').value='';
+  document.getElementById('sku-input').focus();
+  renderSkuList();
+}
+
+function renderSkuList() {
+  var el = document.getElementById('scanned-list');
+  if(skuList.length===0){el.innerHTML='<div class="empty-hint">尚未掃描任何貨號</div>';return;}
+  el.innerHTML = skuList.map(function(item,i){
+    return '<div class="scanned-item">'+
+      '<span class="sku">'+item.sku+'</span>'+
+      '<div class="qty-ctrl">'+
+        '<button class="qty-btn" onclick="changeQty('+i+',-1)">&#x2212;</button>'+
+        '<span class="qty-num">'+item.qty+'</span>'+
+        '<button class="qty-btn" onclick="changeQty('+i+',1)">+</button>'+
+        '<button class="del-btn" onclick="removeSku('+i+')">&#x2715;</button>'+
+      '</div></div>';
+  }).join('');
+}
+
+function changeQty(i,delta){skuList[i].qty=Math.max(1,skuList[i].qty+delta);renderSkuList();}
+function removeSku(i){skuList.splice(i,1);renderSkuList();}
+function clearSkus(){skuList=[];renderSkuList();}
+
+function confirmRack() {
+  if(skuList.length===0){showMsg('inbound','&#x26A0; 請先掃描至少一個貨號！',false);return;}
+  var rack=document.getElementById('rack-input').value.trim().toUpperCase();
+  if(!rack){showMsg('inbound','&#x26A0; 請輸入或掃描儲位條碼！',false);return;}
+  document.getElementById('confirm-rack-text').textContent=rack;
+  document.getElementById('confirm-items-list').innerHTML=skuList.map(function(item){
+    return '<div class="ci"><span>'+item.sku+'</span><span style="color:#f4a100">'+item.qty+' 件</span></div>';
+  }).join('');
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+function hideConfirm(){document.getElementById('confirm-overlay').classList.remove('show');}
+
+function doInbound() {
+  var rack=document.getElementById('rack-input').value.trim().toUpperCase();
+  hideConfirm();
+  showMsg('inbound','<span class="spinner"></span>正在寫入紀錄...',true);
+  fetch('/api/warehouse/inbound',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({rack:rack,items:skuList})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){
+      showMsg('inbound','&#x2705; 入庫成功！'+d.count+' 筆紀錄已儲存',true);
+      skuList=[];renderSkuList();
+      document.getElementById('rack-input').value='';
+    }else{showMsg('inbound','&#x274C; 入庫失敗：'+d.msg,false);}
+  });
+}
+
+function doSearch() {
+  var q=document.getElementById('search-input').value.trim().toUpperCase();
+  if(!q) return;
+  var el=document.getElementById('search-result');
+  el.innerHTML='<div style="color:#888;padding:12px"><span class="spinner"></span>查找中...</div>';
+  fetch('/api/warehouse/search?q='+encodeURIComponent(q))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){el.innerHTML='<div class="no-result">查詢失敗：'+d.msg+'</div>';return;}
+      if(d.results.length===0){el.innerHTML='<div class="no-result">&#x1F50D; 找不到「'+q+'」的入庫紀錄</div>';return;}
+      var grouped={};
+      d.results.forEach(function(r){if(!grouped[r.sku])grouped[r.sku]=[];grouped[r.sku].push(r);});
+      el.innerHTML=Object.keys(grouped).map(function(sku){
+        var locs=grouped[sku].map(function(r){
+          return '<div class="loc-tag"><span class="badge-rack">'+r.rack+'</span>'+
+            (r.qty?' <span class="qty">x'+r.qty+'</span>':'')+
+            '<span class="time">'+r.time+'</span></div>';
+        }).join('');
+        return '<div class="result-card"><div class="result-sku">&#x1F4E6; '+sku+'</div>'+
+          '<div class="result-loc">'+locs+'</div></div>';
+      }).join('');
+    });
+}
+
+function doRackSearch() {
+  var q=document.getElementById('rack-search-input').value.trim().toUpperCase();
+  if(!q) return;
+  var el=document.getElementById('rack-search-result');
+  el.innerHTML='<div style="color:#888;padding:12px"><span class="spinner"></span>查找中...</div>';
+  fetch('/api/warehouse/search-rack?rack='+encodeURIComponent(q))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){el.innerHTML='<div class="no-result">查詢失敗：'+d.msg+'</div>';return;}
+      if(d.results.length===0){el.innerHTML='<div class="no-result">&#x1F50D; 儲位「'+q+'」目前沒有入庫紀錄</div>';return;}
+      el.innerHTML='<div class="result-card">'+
+        '<div class="result-sku">&#x1F4CD; 儲位 '+q+'（共 '+d.results.length+' 筆）</div>'+
+        '<table class="rec-table" style="margin-top:8px">'+
+        '<thead><tr><th>貨號</th><th>數量</th><th>入庫時間</th></tr></thead><tbody>'+
+        d.results.map(function(r){
+          return '<tr><td style="font-weight:600;color:#f4a100">'+r.sku+'</td>'+
+            '<td>'+(r.qty||'—')+'</td><td style="color:#888;font-size:12px">'+r.time+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    });
+}
+
+function loadRecords() {
+  var tbody=document.getElementById('records-body');
+  tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#888;padding:20px"><span class="spinner"></span>載入中...</td></tr>';
+  fetch('/api/warehouse/records').then(function(r){return r.json();}).then(function(d){
+    if(!d.ok||d.records.length===0){
+      tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#555;padding:30px">尚無入庫紀錄</td></tr>';return;
+    }
+    tbody.innerHTML=d.records.map(function(r){
+      return '<tr><td style="color:#888;font-size:12px">'+r.time+'</td>'+
+        '<td style="font-weight:600;color:#f4a100">'+r.sku+'</td>'+
+        '<td><span class="badge-rack">'+r.rack+'</span></td>'+
+        '<td>'+(r.qty||'—')+'</td></tr>';
+    }).join('');
+  });
+}
+
+function showMsg(zone,msg,ok) {
+  var el=document.getElementById('msg-'+zone);
+  el.className='msg-bar '+(ok?'msg-ok':'msg-err');
+  el.innerHTML=msg;
+  if(ok) setTimeout(function(){el.className='msg-bar';},4000);
+}
+
+document.getElementById('sku-input').focus();
+</script>
+</body></html>"""
+
+
+def get_warehouse_sheet():
+    """取得貨架庫位紀錄 worksheet，不存在就自動建立"""
+    client, err = get_sheets_client()
+    if err:
+        return None, err
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("貨架庫位紀錄")
+        except Exception:
+            ws = sh.add_worksheet(title="貨架庫位紀錄", rows=1000, cols=6)
+            ws.append_row(["貨號", "儲位", "數量", "入庫時間", "備註"])
+        return ws, None
+    except Exception as e:
+        return None, str(e)
+
+
+@app.route("/warehouse")
+@login_required
+def warehouse_page():
+    return render_template_string(WAREHOUSE_HTML)
+
+
+@app.route("/api/warehouse/inbound", methods=["POST"])
+@login_required
+def api_warehouse_inbound():
+    data  = request.get_json()
+    rack  = data.get("rack", "").strip().upper()
+    items = data.get("items", [])
+    if not rack:
+        return jsonify({"ok": False, "msg": "儲位條碼不能為空"})
+    if not items:
+        return jsonify({"ok": False, "msg": "請先掃描至少一個貨號"})
+    ws, err = get_warehouse_sheet()
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    try:
+        now = datetime.now().strftime("%Y/%m/%d %H:%M")
+        rows_to_add = []
+        for item in items:
+            sku = str(item.get("sku", "")).strip().upper()
+            qty = item.get("qty", 1)
+            if sku:
+                rows_to_add.append([sku, rack, qty, now, ""])
+        if rows_to_add:
+            ws.append_rows(rows_to_add)
+        return jsonify({"ok": True, "count": len(rows_to_add)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+
+@app.route("/api/warehouse/search")
+@login_required
+def api_warehouse_search():
+    q = request.args.get("q", "").strip().upper()
+    if not q:
+        return jsonify({"ok": False, "msg": "請輸入查詢關鍵字"})
+    ws, err = get_warehouse_sheet()
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    try:
+        rows = ws.get_all_records()
+        results = []
+        for row in rows:
+            sku = str(row.get("貨號", "")).strip().upper()
+            if q in sku:
+                results.append({
+                    "sku":  sku,
+                    "rack": str(row.get("儲位", "")),
+                    "qty":  str(row.get("數量", "")),
+                    "time": str(row.get("入庫時間", "")),
+                })
+        results.reverse()
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+
+@app.route("/api/warehouse/search-rack")
+@login_required
+def api_warehouse_search_rack():
+    rack = request.args.get("rack", "").strip().upper()
+    if not rack:
+        return jsonify({"ok": False, "msg": "請輸入儲位條碼"})
+    ws, err = get_warehouse_sheet()
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    try:
+        rows = ws.get_all_records()
+        results = []
+        for row in rows:
+            r = str(row.get("儲位", "")).strip().upper()
+            if rack in r:
+                results.append({
+                    "sku":  str(row.get("貨號", "")),
+                    "rack": r,
+                    "qty":  str(row.get("數量", "")),
+                    "time": str(row.get("入庫時間", "")),
+                })
+        results.reverse()
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+
+@app.route("/api/warehouse/records")
+@login_required
+def api_warehouse_records():
+    ws, err = get_warehouse_sheet()
+    if err:
+        return jsonify({"ok": False, "msg": err})
+    try:
+        rows = ws.get_all_records()
+        records = [{"sku": str(r.get("貨號","")), "rack": str(r.get("儲位","")),
+                    "qty": str(r.get("數量","")), "time": str(r.get("入庫時間",""))}
+                   for r in rows]
+        records.reverse()
+        return jsonify({"ok": True, "records": records[:100]})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 
 if __name__ == "__main__":
