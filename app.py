@@ -4721,13 +4721,13 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
 
 <script>
 // 不依賴外部 CDN，使用瀏覽器原生 BarcodeDetector API
-// ── 狀態 ──
+// -- 狀態 --
 var skuList = [];
 var camTarget = null; // 'sku' | 'rack' | 'search'
 var camStream = null;
 var scanInterval = null;
 
-// ── 分頁切換（用 addEventListener 避免 onclick 問題）──
+// -- 分頁切換（用 addEventListener 避免 onclick 問題）--
 document.getElementById('tb-inbound').addEventListener('click', function(){ switchTab('inbound'); });
 document.getElementById('tb-search').addEventListener('click', function(){ switchTab('search'); });
 document.getElementById('tb-records').addEventListener('click', function(){ switchTab('records'); });
@@ -4740,7 +4740,7 @@ function switchTab(name) {
   if(name==='records') loadRecords();
 }
 
-// ── 加入貨號 ──
+// -- 加入貨號 --
 document.getElementById('add-sku-btn').addEventListener('click', addSku);
 document.getElementById('sku-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addSku(); } });
 
@@ -4784,7 +4784,7 @@ function renderSkuList() {
   });
 }
 
-// ── 確認儲位 ──
+// -- 確認儲位 --
 document.getElementById('confirm-rack-btn').addEventListener('click', confirmRack);
 document.getElementById('rack-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); confirmRack(); } });
 
@@ -4802,7 +4802,7 @@ function confirmRack() {
   document.getElementById('confirm-overlay').classList.add('show');
 }
 
-// ── 確認/取消入庫 ──
+// -- 確認/取消入庫 --
 document.getElementById('cancel-btn').addEventListener('click', function() {
   document.getElementById('confirm-overlay').classList.remove('show');
 });
@@ -4826,7 +4826,7 @@ function doInbound() {
   }).catch(function(e){ showMsg('inbound','&#x274C; 錯誤：'+e,'err'); });
 }
 
-// ── 查找 ──
+// -- 查找 --
 document.getElementById('do-search-btn').addEventListener('click', doSearch);
 document.getElementById('search-sku').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
 document.getElementById('do-rack-search-btn').addEventListener('click', doRackSearch);
@@ -4866,12 +4866,12 @@ function doRackSearch() {
       el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+'（'+d.results.length+' 筆）</div>'+
         '<table class="rec-table"><thead><tr><th>貨號</th><th>數量</th><th>時間</th></tr></thead><tbody>'+
         d.results.map(function(r){
-          return '<tr><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td>'+(r.qty||'—')+'</td><td style="color:#888;font-size:11px">'+r.time+'</td></tr>';
+          return '<tr><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td>'+(r.qty||'-')+'</td><td style="color:#888;font-size:11px">'+r.time+'</td></tr>';
         }).join('')+'</tbody></table></div>';
     });
 }
 
-// ── 入庫紀錄 ──
+// -- 入庫紀錄 --
 document.getElementById('refresh-btn').addEventListener('click', loadRecords);
 
 function loadRecords() {
@@ -4885,12 +4885,12 @@ function loadRecords() {
       return '<tr><td style="color:#888;font-size:11px">'+r.time+'</td>'+
         '<td style="color:#f4a100;font-weight:700">'+r.sku+'</td>'+
         '<td><span class="rack-badge">'+r.rack+'</span></td>'+
-        '<td>'+(r.qty||'—')+'</td></tr>';
+        '<td>'+(r.qty||'-')+'</td></tr>';
     }).join('');
   });
 }
 
-// ── 相機掃描 ──
+// -- 相機掃描 --
 document.getElementById('cam-sku-btn').addEventListener('click', function(){ openCam('sku'); });
 document.getElementById('cam-rack-btn').addEventListener('click', function(){ openCam('rack'); });
 document.getElementById('cam-search-btn').addEventListener('click', function(){ openCam('search'); });
@@ -4958,7 +4958,7 @@ function handleScanResult(code) {
   }
 }
 
-// ── 訊息 ──
+// -- 訊息 --
 function showMsg(zone, msg, type) {
   var el = document.getElementById('msg-'+zone);
   el.className = 'msg msg-'+(type||'ok');
