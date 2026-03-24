@@ -4619,6 +4619,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
 .cam-video{width:100%;border-radius:8px;display:block}
 .cam-line{position:absolute;top:50%;left:10%;right:10%;height:2px;background:#f4a100;box-shadow:0 0 8px #f4a100}
 .cam-hint{color:#aaa;font-size:13px;margin:12px 0;text-align:center}
+@keyframes scanAnim{0%{top:0}50%{top:calc(100% - 2px)}100%{top:0}}
 </style>
 </head>
 <div class="topbar">
@@ -4699,12 +4700,34 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
   </div>
 </div>
 <div class="cam-overlay" id="cam-overlay">
-  <div class="cam-frame">
+  <div class="cam-frame" style="position:relative;width:100%;max-width:500px">
     <video id="cam-video" class="cam-video" autoplay playsinline muted></video>
-    <div class="cam-line"></div>
+    <!-- 對焦框 -->
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:72%;height:130px;border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,0.5);">
+      <!-- 掃描線 -->
+      <div id="cam-scan-line" style="position:absolute;top:0;left:0;right:0;height:2px;background:#f4a100;box-shadow:0 0 8px #f4a100;animation:scanAnim 1.8s ease-in-out infinite"></div>
+      <!-- 四個角 -->
+      <div style="position:absolute;top:-2px;left:-2px;width:20px;height:20px;border-top:4px solid #f4a100;border-left:4px solid #f4a100;border-radius:4px 0 0 0"></div>
+      <div style="position:absolute;top:-2px;right:-2px;width:20px;height:20px;border-top:4px solid #f4a100;border-right:4px solid #f4a100;border-radius:0 4px 0 0"></div>
+      <div style="position:absolute;bottom:-2px;left:-2px;width:20px;height:20px;border-bottom:4px solid #f4a100;border-left:4px solid #f4a100;border-radius:0 0 0 4px"></div>
+      <div style="position:absolute;bottom:-2px;right:-2px;width:20px;height:20px;border-bottom:4px solid #f4a100;border-right:4px solid #f4a100;border-radius:0 0 4px 0"></div>
+    </div>
   </div>
-  <div class="cam-hint" id="cam-hint">&#x5C07;&#x689D;&#x78BC; / QR Code &#x5C0D;&#x6E96;&#x63CF;&#x63C3;&#x7DDA;</div>
+  <div class="cam-hint" id="cam-hint">&#x5C07;&#x689D;&#x78BC;&#x5C0D;&#x6E96;&#x6A21;&#x64EC;&#x6846;</div>
   <button class="btn btn-red" id="cam-close-btn" onclick="closeCam()" style="margin-top:16px;padding:12px 32px">&#x274C; &#x95DC;&#x9589;&#x76F8;&#x6A5F;</button>
+</div>
+
+<!-- 掃描結果確認視窗 -->
+<div class="overlay" id="scan-confirm-overlay">
+  <div class="confirm-box" style="max-width:320px">
+    <div style="font-size:13px;color:#aaa;margin-bottom:8px">&#x1F4F7; &#x5DF2;&#x25195;&#x25551;&#x5230;</div>
+    <div id="scan-confirm-code" style="font-size:28px;font-weight:900;color:#f4a100;letter-spacing:2px;word-break:break-all;margin:8px 0"></div>
+    <div style="font-size:12px;color:#666;margin-bottom:16px" id="scan-confirm-target"></div>
+    <div class="confirm-btns">
+      <button class="btn btn-gray" onclick="scanConfirmCancel()">&#x274C; &#x91CD;&#x65B0;&#x25195;</button>
+      <button class="btn btn-green" onclick="scanConfirmOK()">&#x2705; &#x78BA;&#x8A8D;</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -4847,69 +4870,85 @@ function openCam(target) {
     return;
   }
 
-  // 開啟自動對焦、連續對焦、高解析度，讓掃描更精準更快
-  var constraints = {
+  navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
       facingMode: {ideal: 'environment'},
-      width: {ideal: 1280},
-      height: {ideal: 720},
-      focusMode: {ideal: 'continuous'},
+      width:  {ideal: 1920},
+      height: {ideal: 1080},
       advanced: [{focusMode: 'continuous'}]
     }
-  };
+  }).then(function(stream) {
+    var video = document.getElementById('cam-video');
+    video.srcObject = stream;
+    video.setAttribute('playsinline', true);
+    video.play();
+    window._camStream = stream;
 
-  navigator.mediaDevices.getUserMedia(constraints)
-    .then(function(stream) {
-      var video = document.getElementById('cam-video');
-      video.srcObject = stream;
-      video.setAttribute('playsinline', true);
-      video.play();
-      window._camStream = stream;
+    // 嘗試連續對焦
+    var track = stream.getVideoTracks()[0];
+    if(track && track.applyConstraints) {
+      track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(function(){});
+    }
+    if(hint) hint.textContent = '\u5C07\u689D\u78BC\u5C0D\u6E96\u6A21\u64EC\u6846';
 
-      // 嘗試開啟相機的連續自動對焦
-      var track = stream.getVideoTracks()[0];
-      if(track && track.applyConstraints) {
-        track.applyConstraints({advanced: [{focusMode: 'continuous'}]}).catch(function(){});
-      }
+    if(typeof ZXing === 'undefined') {
+      if(hint) hint.textContent = 'ZXing \u672A\u8F09\u5165';
+      return;
+    }
 
-      if(hint) hint.textContent = '\u5C07\u689D\u78BC\u5C0D\u6E96\u6A21\u64EC\u7DDA';
+    // 用 BrowserMultiFormatReader 全畫面掃描（支援任意角度/大小）
+    var hints = new Map();
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.QR_CODE,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.DATA_MATRIX,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.CODABAR,
+      ZXing.BarcodeFormat.CODE_93
+    ]);
 
-      if(typeof ZXing === 'undefined') {
-        if(hint) hint.textContent = 'ZXing \u672A\u8F09\u5165\uFF0C\u8ACB\u91CD\u65B0\u6574\u7406\u9801\u9762';
-        return;
-      }
+    var reader = new ZXing.BrowserMultiFormatReader(hints);
+    window._codeReader = reader;
+    window._scanLocked = false;
+    window._lastScan = '';
 
-      // 用 canvas 手動截圖掃描，控制頻率（200ms）提升速度
-      var reader = new ZXing.BrowserMultiFormatReader();
-      window._codeReader = reader;
+    // 全畫面掃描，每 200ms 一次
+    window._scanTimer = setInterval(function() {
+      if(window._scanLocked) return;
+      if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      var vw = video.videoWidth, vh = video.videoHeight;
+      if(!vw || !vh) return;
 
-      var hints = new Map();
-      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-      reader.hints = hints;
+      // 全畫面 canvas
+      var canvas = document.createElement('canvas');
+      canvas.width = vw;
+      canvas.height = vh;
+      canvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
 
-      window._scanTimer = setInterval(function() {
-        if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
-        var canvas = document.createElement('canvas');
-        var w = video.videoWidth, h = video.videoHeight;
-        if(!w || !h) return;
-        canvas.width = w;
-        canvas.height = h;
-        var ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, w, h);
-        try {
-          var result = reader.decodeFromCanvas(canvas);
-          if(result) {
-            clearInterval(window._scanTimer);
-            window._scanTimer = null;
-            handleScan(result.getText().trim().toUpperCase());
+      try {
+        var result = reader.decodeFromCanvas(canvas);
+        if(result) {
+          var code = result.getText().trim().toUpperCase();
+          if(code && code !== window._lastScan) {
+            window._lastScan = code;
+            window._scanLocked = true;
+            // 震動反饋（手機）
+            if(navigator.vibrate) navigator.vibrate(100);
+            handleScan(code);
           }
-        } catch(e) { /* 繼續掃描 */ }
-      }, 200);
-    })
-    .catch(function(e) {
-      if(hint) hint.textContent = '\u76F8\u6A5F\u6B0A\u9650\u932F\u8AA4: ' + e.message;
-    });
+        }
+      } catch(e) { /* 繼續掃描 */ }
+    }, 200);
+
+  }).catch(function(e) {
+    if(hint) hint.textContent = '\u76F8\u6A5F\u6B0A\u9650\u932F\u8AA4: ' + e.message;
+  });
 }
 
 function closeCam() {
@@ -4922,19 +4961,44 @@ function closeCam() {
 }
 
 function handleScan(code) {
+  // 暫停掃描，顯示確認視窗
+  window._pendingScan = code;
+  var overlay = document.getElementById('scan-confirm-overlay');
+  document.getElementById('scan-confirm-code').textContent = code;
+  var targetLabel = {
+    'sku': '\u8CA8;\u865F;\uFF08STEP1\uFF09',
+    'rack': '\u5132;\u4F4D;\u689D;\u78BC;\uFF08STEP2\uFF09',
+    'search': '\u67E5;\u627E;\u8CA8;\u865F;'
+  }[camTarget] || camTarget;
+  document.getElementById('scan-confirm-target').textContent = '\u76EE;\u6A19;: ' + targetLabel;
+  if(overlay) overlay.classList.add('show');
+}
+
+function scanConfirmOK() {
+  var code = window._pendingScan;
+  var overlay = document.getElementById('scan-confirm-overlay');
+  if(overlay) overlay.classList.remove('show');
   closeCam();
-  if(camTarget==='sku'){
-    var ex=skuList.find(function(x){return x.sku===code;});
-    if(ex){ex.qty++;}else{skuList.push({sku:code,qty:1});}
+  if(camTarget === 'sku') {
+    var ex = skuList.find(function(x){ return x.sku === code; });
+    if(ex){ ex.qty++; } else { skuList.push({sku:code, qty:1}); }
     renderSkuList();
-    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x25195;&#x25551;: '+code,'ok');
-  } else if(camTarget==='rack'){
-    document.getElementById('rack-input').value=code;
-    showMsg('inbound','&#x1F4F7; &#x5132;&#x4F4D;: '+code,'ok');
-  } else if(camTarget==='search'){
-    document.getElementById('search-sku').value=code;
+    showMsg('inbound', '&#x1F4F7; \u5DF2\u52A0\u5165: ' + code, 'ok');
+  } else if(camTarget === 'rack') {
+    document.getElementById('rack-input').value = code;
+    showMsg('inbound', '&#x1F4F7; \u5132\u4F4D: ' + code, 'ok');
+  } else if(camTarget === 'search') {
+    document.getElementById('search-sku').value = code;
     doSearch();
   }
+}
+
+function scanConfirmCancel() {
+  var overlay = document.getElementById('scan-confirm-overlay');
+  if(overlay) overlay.classList.remove('show');
+  // 解鎖，繼續掃描
+  window._scanLocked = false;
+  window._lastScan = '';
 }
 
 
