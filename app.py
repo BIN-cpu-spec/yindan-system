@@ -4836,62 +4836,48 @@ function loadRecords() {
 }
 
 function openCam(target) {
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x6301;&#x76F8;&#x6A5F;'); return; }
-  camTarget=target;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    showMsg('inbound','&#x6B64;&#x5E73;&#x53F0;&#x4E0D;&#x652F;&#x6301;&#x76F8;&#x6A5F;','err');
+    return;
+  }
+  camTarget = target;
   document.getElementById('cam-overlay').classList.add('show');
-  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false})
-    .then(function(stream){
-      camStream=stream;
-      var video=document.getElementById('cam-video');
-      video.srcObject=stream; video.play();
-      startScan(video);
-    }).catch(function(e){
-      document.getElementById('cam-overlay').classList.remove('show');
-      alert('&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: '+e.message);
+  var codeReader = new ZXing.BrowserMultiFormatReader();
+  window._codeReader = codeReader;
+  codeReader.listVideoInputDevices().then(function(videoInputDevices) {
+    var deviceId = undefined;
+    // 優先使用後鏡頭
+    for(var i=0;i<videoInputDevices.length;i++){
+      var label = videoInputDevices[i].label.toLowerCase();
+      if(label.includes('back')||label.includes('rear')||label.includes('environment')){
+        deviceId = videoInputDevices[i].deviceId;
+        break;
+      }
+    }
+    if(!deviceId && videoInputDevices.length > 0) {
+      deviceId = videoInputDevices[videoInputDevices.length-1].deviceId;
+    }
+    codeReader.decodeFromVideoDevice(deviceId, 'cam-video', function(result, err) {
+      if(result) {
+        handleScan(result.getText().trim().toUpperCase());
+      }
     });
+  }).catch(function(e){
+    document.getElementById('cam-overlay').classList.remove('show');
+    showMsg('inbound','&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: '+e.message,'err');
+  });
 }
 
 function closeCam() {
-  if(scanInterval){clearInterval(scanInterval);scanInterval=null;}
-  if(camStream){camStream.getTracks().forEach(function(t){t.stop();});camStream=null;}
+  if(window._codeReader) {
+    window._codeReader.reset();
+    window._codeReader = null;
+  }
   document.getElementById('cam-overlay').classList.remove('show');
-}
-
-function startScan(video) {
-  try {
-    var hints = new Map();
-    var formats = [
-      ZXing.BarcodeFormat.QR_CODE,
-      ZXing.BarcodeFormat.CODE_128,
-      ZXing.BarcodeFormat.CODE_39,
-      ZXing.BarcodeFormat.EAN_13,
-      ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.UPC_A,
-      ZXing.BarcodeFormat.DATA_MATRIX
-    ];
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-    var reader = new ZXing.MultiFormatReader();
-    reader.setHints(hints);
-    scanInterval = setInterval(function() {
-      if(video.readyState === video.HAVE_ENOUGH_DATA) {
-        try {
-          var canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          var ctx = canvas.getContext('2d');
-          ctx.drawImage(video, 0, 0);
-          var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          var luminance = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
-          var binary = new ZXing.HybridBinarizer(luminance);
-          var bitmap = new ZXing.BinaryBitmap(binary);
-          var result = reader.decode(bitmap);
-          if(result) handleScan(result.getText().trim().toUpperCase());
-        } catch(e) { /* 繼續掃描 */ }
-      }
-    }, 300);
-  } catch(e) {
-    closeCam();
-    showMsg('inbound', '&#x76F8;&#x6A5F;&#x555F;&#x52D5;&#x5931;&#x6557;: ' + e.message, 'err');
+  var video = document.getElementById('cam-video');
+  if(video && video.srcObject) {
+    video.srcObject.getTracks().forEach(function(t){t.stop();});
+    video.srcObject = null;
   }
 }
 
@@ -4910,6 +4896,7 @@ function handleScan(code) {
     doSearch();
   }
 }
+
 
 function showMsg(zone,msg,type) {
   var el=document.getElementById('msg-'+zone);
