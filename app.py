@@ -4712,22 +4712,15 @@ var camTarget = null;
 var camStream = null;
 var scanInterval = null;
 
-document.getElementById('tb-inbound').addEventListener('click', function(){ switchTab('inbound'); });
-document.getElementById('tb-search').addEventListener('click', function(){ switchTab('search'); });
-document.getElementById('tb-records').addEventListener('click', function(){ switchTab('records'); });
-
 function switchTab(name) {
   ['inbound','search','records'].forEach(function(t) {
     var pane = document.getElementById('pane-'+t);
     var tab = document.getElementById('tb-'+t);
     if(pane) pane.style.display = (t===name)?'block':'none';
-    if(tab) tab.style.fontWeight = (t===name)?'bold':'normal';
+    if(tab) { tab.style.color=(t===name)?'#f4a100':'#888'; tab.style.borderBottomColor=(t===name)?'#f4a100':'transparent'; tab.style.fontWeight=(t===name)?'600':'normal'; }
   });
   if(name==='records') loadRecords();
 }
-
-document.getElementById('add-sku-btn').addEventListener('click', addSku);
-document.getElementById('sku-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addSku(); } });
 
 function addSku() {
   var val = document.getElementById('sku-input').value.trim().toUpperCase();
@@ -4741,93 +4734,71 @@ function addSku() {
 
 function renderSkuList() {
   var el = document.getElementById('sku-list');
-  if(!skuList.length){ el.innerHTML='<div>empty</div>'; return; }
-  el.innerHTML = skuList.map(function(item, i) {
-    return '<div class="sku-item">'+
-      '<span class="sku-name">'+item.sku+'</span>'+
-      '<div class="qty-row">'+
-        '<button class="qty-btn" data-idx="'+i+'" data-delta="-1">-</button>'+
-        '<span class="qty-num">'+item.qty+'</span>'+
-        '<button class="qty-btn" data-idx="'+i+'" data-delta="1">+</button>'+
-        '<button class="del-btn" data-del="'+i+'">x</button>'+
-      '</div></div>';
+  if(!skuList.length){ el.innerHTML='<div class="hint">&#x23578;&#x672A;&#x52A0;&#x5165;&#x4EFB;&#x4F55;&#x8CA8;&#x865F;</div>'; return; }
+  el.innerHTML = skuList.map(function(item,i){
+    return '<div class="sku-item"><span class="sku-name">'+item.sku+'</span><div class="qty-row"><button class="qty-btn" data-i="'+i+'" data-d="-1">-</button><span class="qty-num">'+item.qty+'</span><button class="qty-btn" data-i="'+i+'" data-d="1">+</button><button class="del-btn" data-del="'+i+'">&#x2715;</button></div></div>';
   }).join('');
-  el.querySelectorAll('.qty-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var i = parseInt(this.getAttribute('data-idx'));
-      var d = parseInt(this.getAttribute('data-delta'));
-      skuList[i].qty = Math.max(1, skuList[i].qty + d);
+  el.querySelectorAll('.qty-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var i=parseInt(this.getAttribute('data-i'));
+      var d=parseInt(this.getAttribute('data-d'));
+      skuList[i].qty=Math.max(1,skuList[i].qty+d);
       renderSkuList();
     });
   });
-  el.querySelectorAll('.del-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      skuList.splice(parseInt(this.getAttribute('data-del')), 1);
+  el.querySelectorAll('.del-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      skuList.splice(parseInt(this.getAttribute('data-del')),1);
       renderSkuList();
     });
   });
 }
-
-document.getElementById('confirm-rack-btn').addEventListener('click', confirmRack);
-document.getElementById('rack-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); confirmRack(); } });
 
 function confirmRack() {
   var skuVal = document.getElementById('sku-input').value.trim().toUpperCase();
   if(skuVal) addSku();
-  if(!skuList.length){ showMsg('inbound','&#x8ACB;&#x5148;&#x8F38;&#x5165;&#x81F3;&#x5C11;&#x4E00;&#x500B;&#x8CA8;&#x865F;!','warn'); return; }
+  if(!skuList.length){ showMsg('inbound','&#x26A0; &#x8ACB;&#x5148;&#x8F38;&#x5165;&#x8CA8;&#x865F;','warn'); return; }
   var rack = document.getElementById('rack-input').value.trim().toUpperCase();
-  if(!rack){ showMsg('inbound','&#x8ACB;&#x8F38;&#x5165;&#x5132;&#x4F4D;&#x689D;&#x78BC;!','warn'); return; }
+  if(!rack){ showMsg('inbound','&#x26A0; &#x8ACB;&#x8F38;&#x5165;&#x5132;&#x4F4D;&#x689D;&#x78BC;','warn'); return; }
   document.getElementById('confirm-rack-text').textContent = rack;
   document.getElementById('confirm-items').innerHTML = skuList.map(function(item){
-    return '<div>'+item.sku+' x'+item.qty+'</div>';
+    return '<div class="ci"><span>'+item.sku+'</span><span style="color:#f4a100">'+item.qty+' &#x4EF6;</span></div>';
   }).join('');
-  document.getElementById('confirm-overlay').style.display = 'block';
+  document.getElementById('confirm-overlay').classList.add('show');
 }
-
-document.getElementById('cancel-btn').addEventListener('click', function() {
-  document.getElementById('confirm-overlay').style.display = 'none';
-});
-document.getElementById('do-inbound-btn').addEventListener('click', doInbound);
 
 function doInbound() {
   var rack = document.getElementById('rack-input').value.trim().toUpperCase();
-  document.getElementById('confirm-overlay').style.display = 'none';
+  document.getElementById('confirm-overlay').classList.remove('show');
   showMsg('inbound','<span class="spinner"></span>&#x5BEB;&#x5165;&#x4E2D;...','ok');
-  fetch('/api/warehouse/inbound', {
+  fetch('/api/warehouse/inbound',{
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({rack:rack, items:skuList})
-  }).then(function(r){ return r.json(); }).then(function(d) {
+    body:JSON.stringify({rack:rack, items:skuList})
+  }).then(function(r){return r.json();}).then(function(d){
     if(d.ok){
       showMsg('inbound','&#x2705; &#x5165;&#x5EAB;&#x6210;&#x529F;! '+d.count+' &#x7B46;&#x5DF2;&#x5132;&#x5B58;','ok');
       skuList=[]; renderSkuList();
       document.getElementById('rack-input').value='';
     } else {
-      showMsg('inbound','&#x274C; &#x5931;&#x6557;: '+d.msg,'err');
+      showMsg('inbound','&#x274C; '+d.msg,'err');
     }
   }).catch(function(e){ showMsg('inbound','&#x274C; &#x932F;&#x8AA4;: '+e,'err'); });
 }
-
-document.getElementById('do-search-btn').addEventListener('click', doSearch);
-document.getElementById('search-sku').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
-document.getElementById('do-rack-search-btn').addEventListener('click', doRackSearch);
-document.getElementById('search-rack').addEventListener('keydown', function(e){ if(e.key==='Enter') doRackSearch(); });
 
 function doSearch() {
   var q = document.getElementById('search-sku').value.trim().toUpperCase();
   if(!q) return;
   var el = document.getElementById('search-result');
-  el.innerHTML = 'Searching...';
+  el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>&#x67E5;&#x627E;&#x4E2D;...</div>';
   fetch('/api/warehouse/search?q='+encodeURIComponent(q))
-    .then(function(r){ return r.json(); }).then(function(d) {
+    .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){ el.innerHTML='<div class="no-result">&#x5931;&#x6557;: '+d.msg+'</div>'; return; }
-      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; &#x627E;&#x4E0D;&#x5230;&#x300C;'+q+'&#x300D;&#x7684;&#x5165;&#x5EAB;&#x7D00;&#x9304;</div>'; return; }
+      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; &#x627E;&#x4E0D;&#x5230; '+q+'</div>'; return; }
       var grouped={};
       d.results.forEach(function(r){ if(!grouped[r.sku]) grouped[r.sku]=[]; grouped[r.sku].push(r); });
       el.innerHTML=Object.keys(grouped).map(function(sku){
         var tags=grouped[sku].map(function(r){
-          return '<div class="loc-tag"><span class="loc-rack">'+r.rack+'</span>'+
-            (r.qty?'<span class="loc-qty">x'+r.qty+'</span>':'')+
-            '<span class="loc-time">'+r.time+'</span></div>';
+          return '<div class="loc-tag"><span class="loc-rack">'+r.rack+'</span>'+(r.qty?'<span class="loc-qty">x'+r.qty+'</span>':'')+'<span class="loc-time">'+r.time+'</span></div>';
         }).join('');
         return '<div class="result-card"><div class="result-sku">&#x1F4E6; '+sku+'</div><div class="loc-tags">'+tags+'</div></div>';
       }).join('');
@@ -4838,109 +4809,113 @@ function doRackSearch() {
   var q = document.getElementById('search-rack').value.trim().toUpperCase();
   if(!q) return;
   var el = document.getElementById('rack-result');
-  el.innerHTML = 'Searching...';
+  el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>&#x67E5;&#x627E;&#x4E2D;...</div>';
   fetch('/api/warehouse/search-rack?rack='+encodeURIComponent(q))
-    .then(function(r){ return r.json(); }).then(function(d) {
+    .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){ el.innerHTML='<div class="no-result">&#x5931;&#x6557;: '+d.msg+'</div>'; return; }
-      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x5132;&#x4F4D;&#x300C;'+q+'&#x300D;&#x6C92;&#x6709;&#x5165;&#x5EAB;&#x7D00;&#x9304;</div>'; return; }
-      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+' ('+d.results.length+' &#x7B46;)</div>'+
-        '<table class="rec-table"><thead><tr><th>&#x8CA8;&#x865F;</th><th>&#x6578;&#x91CF;</th><th>&#x6642;&#x9593;</th></tr></thead><tbody>'+
+      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; &#x5132;&#x4F4D; '+q+' &#x6C92;&#x6709;&#x7D00;&#x9304;</div>'; return; }
+      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+'('+d.results.length+'&#x7B46;)</div><table class="rec-table"><thead><tr><th>&#x8CA8;&#x865F;</th><th>&#x6578;&#x91CF;</th><th>&#x6642;&#x9593;</th></tr></thead><tbody>'+
         d.results.map(function(r){
           return '<tr><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td>'+(r.qty||'-')+'</td><td style="color:#888;font-size:11px">'+r.time+'</td></tr>';
         }).join('')+'</tbody></table></div>';
     });
 }
 
-document.getElementById('refresh-btn').addEventListener('click', loadRecords);
-
 function loadRecords() {
   var tbody = document.getElementById('records-body');
   tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#888;padding:16px"><span class="spinner"></span>&#x8F09;&#x5165;&#x4E2D;...</td></tr>';
-  fetch('/api/warehouse/records').then(function(r){ return r.json(); }).then(function(d) {
+  fetch('/api/warehouse/records').then(function(r){return r.json();}).then(function(d){
     if(!d.ok||!d.records.length){
       tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#555;padding:20px">&#x5C1A;&#x7121;&#x7D00;&#x9304;</td></tr>'; return;
     }
     tbody.innerHTML=d.records.map(function(r){
-      return '<tr><td style="color:#888;font-size:11px">'+r.time+'</td>'+
-        '<td style="color:#f4a100;font-weight:700">'+r.sku+'</td>'+
-        '<td><span class="rack-badge">'+r.rack+'</span></td>'+
-        '<td>'+(r.qty||'-')+'</td></tr>';
+      return '<tr><td style="color:#888;font-size:11px">'+r.time+'</td><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td><span class="rack-badge">'+r.rack+'</span></td><td>'+(r.qty||'-')+'</td></tr>';
     }).join('');
   });
 }
 
-document.getElementById('cam-sku-btn').addEventListener('click', function(){ openCam('sku'); });
-document.getElementById('cam-rack-btn').addEventListener('click', function(){ openCam('rack'); });
-document.getElementById('cam-search-btn').addEventListener('click', function(){ openCam('search'); });
-document.getElementById('cam-close-btn').addEventListener('click', closeCam);
-
 function openCam(target) {
-  camTarget = target;
-  var overlay = document.getElementById('cam-overlay');
-  overlay.style.display = 'block';
-  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false})
-    .then(function(stream) {
-      camStream = stream;
-      var video = document.getElementById('cam-video');
-      video.srcObject = stream;
-      video.play();
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x6301;&#x76F8;&#x6A5F;'); return; }
+  camTarget=target;
+  document.getElementById('cam-overlay').classList.add('show');
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false})
+    .then(function(stream){
+      camStream=stream;
+      var video=document.getElementById('cam-video');
+      video.srcObject=stream; video.play();
       startScan(video);
-    })
-    .catch(function(e) {
-      overlay.style.display = 'none';
-      alert('&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: ' + e.message + '\n&#x8ACB;&#x78BA;&#x8A8D;&#x5DF2;&#x5141;&#x8A31;&#x76F8;&#x6A5F;&#x6B0A;&#x9650;');
+    }).catch(function(e){
+      document.getElementById('cam-overlay').classList.remove('show');
+      alert('&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: '+e.message);
     });
 }
 
 function closeCam() {
-  if(scanInterval){ clearInterval(scanInterval); scanInterval=null; }
-  if(camStream){ camStream.getTracks().forEach(function(t){ t.stop(); }); camStream=null; }
-  document.getElementById('cam-overlay').style.display = 'none';
+  if(scanInterval){clearInterval(scanInterval);scanInterval=null;}
+  if(camStream){camStream.getTracks().forEach(function(t){t.stop();});camStream=null;}
+  document.getElementById('cam-overlay').classList.remove('show');
 }
 
 function startScan(video) {
-  if('BarcodeDetector' in window) {
-    var detector = new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e']});
-    scanInterval = setInterval(function() {
-      if(video.readyState === video.HAVE_ENOUGH_DATA) {
-        detector.detect(video).then(function(codes) {
-          if(codes.length > 0) { handleScanResult(codes[0].rawValue); }
-        }).catch(function(){});
-      }
-    }, 300);
-  } else {
+  if(!('BarcodeDetector' in window)){
     closeCam();
-    alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x63F4;&#x81EA;&#x52D5;&#x63CF;&#x63C3;\n&#x8ACB;&#x4F7F;&#x7528; Chrome &#x6216; Edge &#x700F;&#x89BD;&#x5668;');
+    alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x6301;&#x81EA;&#x52D5;&#x25195;&#x25551;');
+    return;
   }
+  var detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e']});
+  scanInterval=setInterval(function(){
+    if(video.readyState===video.HAVE_ENOUGH_DATA){
+      detector.detect(video).then(function(codes){
+        if(codes.length>0) handleScan(codes[0].rawValue.trim().toUpperCase());
+      }).catch(function(){});
+    }
+  },300);
 }
 
-function handleScanResult(code) {
+function handleScan(code) {
   closeCam();
-  code = code.trim().toUpperCase();
-  if(camTarget === 'sku') {
-    var ex = skuList.find(function(x){ return x.sku===code; });
-    if(ex){ ex.qty++; } else { skuList.push({sku:code, qty:1}); }
+  if(camTarget==='sku'){
+    var ex=skuList.find(function(x){return x.sku===code;});
+    if(ex){ex.qty++;}else{skuList.push({sku:code,qty:1});}
     renderSkuList();
-    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x63CF;&#x63C3;: '+code,'ok');
-  } else if(camTarget === 'rack') {
-    document.getElementById('rack-input').value = code;
-    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x63CF;&#x63C3;&#x5132;&#x4F4D;: '+code,'ok');
-  } else if(camTarget === 'search') {
-    document.getElementById('search-sku').value = code;
+    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x25195;&#x25551;: '+code,'ok');
+  } else if(camTarget==='rack'){
+    document.getElementById('rack-input').value=code;
+    showMsg('inbound','&#x1F4F7; &#x5132;&#x4F4D;: '+code,'ok');
+  } else if(camTarget==='search'){
+    document.getElementById('search-sku').value=code;
     doSearch();
   }
 }
 
-function showMsg(zone, msg, type) {
-  var el = document.getElementById('msg-'+zone);
-  if(!el) return;
-  el.className = 'msg-bar' + (type ? ' msg-'+type : '');
-  el.innerHTML = msg;
-  if(type==='ok') setTimeout(function(){ el.className='msg-bar'; el.innerHTML=''; }, 4000);
+function showMsg(zone,msg,type) {
+  var el=document.getElementById('msg-'+zone);
+  el.className='msg msg-'+(type||'ok');
+  el.innerHTML=msg;
+  if(type==='ok') setTimeout(function(){el.className='msg';},4000);
 }
 
-document.getElementById('sku-input').focus();
-console.log('JS loaded OK, skuList type:', typeof skuList);
+window.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('tb-inbound').addEventListener('click', function(){ switchTab('inbound'); });
+  document.getElementById('tb-search').addEventListener('click', function(){ switchTab('search'); });
+  document.getElementById('tb-records').addEventListener('click', function(){ switchTab('records'); });
+  document.getElementById('add-sku-btn').addEventListener('click', addSku);
+  document.getElementById('sku-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){e.preventDefault();addSku();} });
+  document.getElementById('confirm-rack-btn').addEventListener('click', confirmRack);
+  document.getElementById('rack-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){e.preventDefault();confirmRack();} });
+  document.getElementById('cancel-btn').addEventListener('click', function(){ document.getElementById('confirm-overlay').classList.remove('show'); });
+  document.getElementById('do-inbound-btn').addEventListener('click', doInbound);
+  document.getElementById('do-search-btn').addEventListener('click', doSearch);
+  document.getElementById('search-sku').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
+  document.getElementById('do-rack-btn').addEventListener('click', doRackSearch);
+  document.getElementById('search-rack').addEventListener('keydown', function(e){ if(e.key==='Enter') doRackSearch(); });
+  document.getElementById('refresh-btn').addEventListener('click', loadRecords);
+  document.getElementById('cam-sku-btn').addEventListener('click', function(){ openCam('sku'); });
+  document.getElementById('cam-rack-btn').addEventListener('click', function(){ openCam('rack'); });
+  document.getElementById('cam-search-btn').addEventListener('click', function(){ openCam('search'); });
+  document.getElementById('cam-close-btn').addEventListener('click', closeCam);
+  document.getElementById('sku-input').focus();
+});
 </script>
 </body></html>
 """
