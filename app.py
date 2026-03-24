@@ -3440,22 +3440,34 @@ def load_customs_db():
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
         sh = client.open_by_key(sheet_id)
         ws = sh.worksheet("商品報關資料庫")
-        rows = ws.get_all_records()
+
+        # 用 FORMULA 模式讀取，才能拿到 =IMAGE("url") 公式字串
+        # get_all_records() 只讀顯示值，無法讀到公式
+        header_row = ws.row_values(1)
+        all_values = ws.get_all_values(value_render_option='FORMULA')
+        col_idx = {name: i for i, name in enumerate(header_row)}
+
+        def get_cell(row_data, col_name, default=""):
+            idx = col_idx.get(col_name)
+            if idx is None or idx >= len(row_data):
+                return default
+            return str(row_data[idx]).strip()
+
         db = {}
-        for row in rows:
-            sku = str(row.get("SKU編碼", "")).strip()
+        for row_data in all_values[1:]:  # 跳過標題列
+            sku = get_cell(row_data, "SKU編碼")
             if sku:
                 db[sku] = {
-                    "sku":        sku,
-                    "name":       row.get("系統名稱", ""),
-                    "style":      row.get("樣式", ""),
-                    "size":       row.get("尺寸", ""),
-                    "material":   row.get("材質", ""),
-                    "customs_name": row.get("報關品名", ""),
-                    "price":      row.get("單價", ""),
-                    "unit":       row.get("單位", ""),
-                    "product_size": row.get("商品尺寸", ""),
-                    "image":      parse_image_url(row.get("圖片", "")),
+                    "sku":          sku,
+                    "name":         get_cell(row_data, "系統名稱"),
+                    "style":        get_cell(row_data, "樣式"),
+                    "size":         get_cell(row_data, "尺寸"),
+                    "material":     get_cell(row_data, "材質"),
+                    "customs_name": get_cell(row_data, "報關品名"),
+                    "price":        get_cell(row_data, "單價"),
+                    "unit":         get_cell(row_data, "單位"),
+                    "product_size": get_cell(row_data, "商品尺寸"),
+                    "image":        parse_image_url(get_cell(row_data, "圖片")),
                 }
         return db, None
     except Exception as e:
@@ -4056,24 +4068,22 @@ def api_customs_export():
         cabinet_no = data.get("cabinet_no", "")
         seal_no    = data.get("seal_no", "")
         ship_date  = data.get("ship_date", "")
+        exporter   = data.get("exporter", "")
+        importer   = data.get("importer", "")
 
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "本次報關清單"
 
-        exporter  = data.get("exporter", "")
-        importer  = data.get("importer", "")
-
-        # ── 第1~4列：標題資訊 ──────────────────────────────
-        # A1：出口商（可填寫）
-        ws.cell(1, 1, exporter if exporter else "")
+        # ── A1：出口商（可填寫）──
+        ws.cell(1, 1, exporter)
         ws.cell(1, 1).font = Font(bold=True, size=11)
 
-        # A2：進口商（可填寫）
-        ws.cell(2, 1, importer if importer else "")
+        # ── A2：進口商（可填寫）──
+        ws.cell(2, 1, importer)
         ws.cell(2, 1).font = Font(size=11)
 
-        # A3：固定 CFR
+        # ── A3：固定 CFR ──
         ws.cell(3, 1, "CFR")
         ws.cell(3, 1).font = Font(bold=True)
 
@@ -4104,12 +4114,11 @@ def api_customs_export():
             cell.font = Font(bold=True, color="FFFFFFFF")
             cell.alignment = Alignment(horizontal="center")
 
-        # 數字格式定義
-        fmt_int   = '0'        # 整數（無小數點）→ F、G、H 欄（第6、7、8欄）
-        fmt_2dec  = '0.00'     # 兩位小數 → P、Q 欄（第16、17欄）
+        # 數字格式
+        fmt_int  = '0'     # F/G/H 欄：整數無小數
+        fmt_2dec = '0.00'  # P/Q 欄：兩位小數
 
         def to_num(val):
-            """安全轉為數字，失敗回傳原字串"""
             try:
                 return float(str(val).replace(',', '')) if val not in ('', None) else ''
             except:
@@ -4123,14 +4132,12 @@ def api_customs_export():
             ws.cell(r, 3,  row.get("material",""))
             ws.cell(r, 4,  row.get("customs_name",""))
             ws.cell(r, 5,  row.get("box_no",""))
-
-            # F欄(6) PCS/件、G欄(7) 件數、H欄(8) 總PCS → 整數無小數點
+            # F(6) G(7) H(8)：整數無小數點
             for col, key in [(6,"pcs_per"),(7,"qty"),(8,"total_pcs")]:
                 v = to_num(row.get(key,""))
                 c = ws.cell(r, col, int(v) if isinstance(v, float) else v)
                 if isinstance(v, float):
                     c.number_format = fmt_int
-
             ws.cell(r, 9,  row.get("unit",""))
             ws.cell(r, 10, to_num(row.get("price","")))
             ws.cell(r, 11, to_num(row.get("total_rmb","")))
@@ -4138,14 +4145,12 @@ def api_customs_export():
             ws.cell(r, 13, to_num(row.get("len","")))
             ws.cell(r, 14, to_num(row.get("wid","")))
             ws.cell(r, 15, to_num(row.get("hei","")))
-
-            # P欄(16) 材積、Q欄(17) 總重量 → 兩位小數
+            # P(16) Q(17)：兩位小數
             for col, key in [(16,"volume"),(17,"total_weight")]:
                 v = to_num(row.get(key,""))
                 c = ws.cell(r, col, v)
                 if isinstance(v, float):
                     c.number_format = fmt_2dec
-
             ws.cell(r, 18, row.get("image",""))
             if row.get("status") != "ok":
                 for c in range(1, 19):
