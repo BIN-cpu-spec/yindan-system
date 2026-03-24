@@ -4743,6 +4743,9 @@ function removeSku(i){skuList.splice(i,1);renderSkuList();}
 function clearSkus(){skuList=[];renderSkuList();}
 
 function confirmRack() {
+  // 若 STEP1 輸入框還有值，自動加入清單（避免忘記按加入清單）
+  var skuVal = document.getElementById('sku-input').value.trim().toUpperCase();
+  if(skuVal) addSku();
   if(skuList.length===0){showMsg('inbound','&#x26A0; 請先掃描至少一個貨號！',false);return;}
   var rack=document.getElementById('rack-input').value.trim().toUpperCase();
   if(!rack){showMsg('inbound','&#x26A0; 請輸入或掃描儲位條碼！',false);return;}
