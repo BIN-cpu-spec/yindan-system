@@ -4545,47 +4545,48 @@ def api_customs_export():
 # 貨架入庫工具
 # ============================================================
 
-WAREHOUSE_HTML = """<!DOCTYPE html>
+WAREHOUSE_HTML = """
+<!DOCTYPE html>
 <html lang="zh-TW"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>貨架入庫系統</title>
+<title>&#x8CA8;&#x67B6;&#x5165;&#x5EAB;&#x7CFB;&#x7D71;</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;min-height:100vh}
 .topbar{background:#0a1219;height:52px;padding:0 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #1e2d3d;position:sticky;top:0;z-index:100}
 .logo{font-size:15px;font-weight:600;margin-right:auto}.logo span{color:#f4a100}
-.topbar a{color:#aaa;font-size:12px;text-decoration:none}
-.tabs{display:flex;border-bottom:2px solid #1e2d3d;margin:0}
+.topbar a{color:#aaa;font-size:12px;text-decoration:none;margin-left:8px}
+.tabs{display:flex;border-bottom:2px solid #1e2d3d}
 .tab-btn{flex:1;padding:13px 8px;background:none;border:none;color:#888;font-size:13px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-2px;transition:.2s;text-align:center}
 .tab-btn.active{color:#f4a100;border-bottom-color:#f4a100;font-weight:600}
 .tab-pane{display:none;padding:14px}
 .tab-pane.active{display:block}
 .card{background:#1a2535;border:1px solid #1e2d3d;border-radius:12px;padding:16px;margin-bottom:14px}
-.card-title{font-size:13px;color:#f4a100;font-weight:700;margin-bottom:12px;letter-spacing:.5px}
+.card-title{font-size:13px;color:#f4a100;font-weight:700;margin-bottom:12px}
 .input-row{display:flex;gap:8px;margin-bottom:10px}
-.inp{flex:1;padding:13px 14px;background:#0f1923;border:2px solid #1e2d3d;border-radius:8px;color:#fff;font-size:15px;font-family:inherit;-webkit-appearance:none}
+.inp{flex:1;padding:13px 14px;background:#0f1923;border:2px solid #1e2d3d;border-radius:8px;color:#fff;font-size:15px;font-family:inherit}
 .inp:focus{outline:none;border-color:#f4a100}
 .inp::placeholder{color:#444}
-.btn{padding:13px 16px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.btn{padding:13px 16px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap}
 .btn-yellow{background:#f4a100;color:#000}
 .btn-green{background:#2e7d32;color:#fff}
 .btn-gray{background:#444;color:#fff}
 .btn-red{background:#b71c1c;color:#fff}
-.btn-cam{background:#1e3a5f;color:#64b5f6;padding:13px 14px;font-size:20px}
-.btn-block{width:100%;padding:14px;margin-top:8px}
+.btn-cam{background:#1e3a5f;color:#64b5f6;padding:13px 14px;font-size:18px}
+.btn-block{width:100%;padding:14px;margin-top:8px;border-radius:8px;border:none;font-size:15px;cursor:pointer;font-weight:600;font-family:inherit;background:#f4a100;color:#000}
 .sku-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto}
 .sku-item{display:flex;align-items:center;justify-content:space-between;background:#0f1923;border:1px solid #1e2d3d;border-radius:8px;padding:10px 12px}
 .sku-name{font-weight:700;font-size:14px}
 .qty-row{display:flex;align-items:center;gap:10px}
-.qty-btn{width:32px;height:32px;border-radius:50%;border:2px solid #f4a100;background:none;color:#f4a100;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;line-height:1}
+.qty-btn{width:32px;height:32px;border-radius:50%;border:2px solid #f4a100;background:none;color:#f4a100;font-size:20px;cursor:pointer;line-height:1}
 .qty-num{font-size:16px;font-weight:700;color:#f4a100;min-width:28px;text-align:center}
-.del-btn{background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px;-webkit-tap-highlight-color:transparent}
-.hint{color:#555;text-align:center;padding:20px;font-size:13px}
-.msg{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:10px;display:none}
-.msg-ok{background:#1b5e20;color:#a5d6a7;display:block}
-.msg-err{background:#4a0000;color:#ef9a9a;display:block}
-.msg-warn{background:#3e2800;color:#ffcc80;display:block}
+.del-btn{background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px}
+.empty-hint{color:#555;text-align:center;padding:20px;font-size:13px}
+.msg-bar{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:10px;min-height:20px}
+.msg-ok{background:#1b5e20;color:#a5d6a7}
+.msg-err{background:#4a0000;color:#ef9a9a}
+.msg-warn{background:#3e2800;color:#ffcc80}
 .search-box{display:flex;gap:8px;margin-bottom:10px}
 .result-card{background:#0f1923;border:1px solid #1e2d3d;border-radius:10px;padding:14px;margin-bottom:8px}
 .result-sku{font-size:15px;font-weight:700;color:#f4a100;margin-bottom:8px}
@@ -4601,146 +4602,130 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
 .rack-badge{background:#1e3a5f;color:#64b5f6;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid #333;border-top-color:#f4a100;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* 確認視窗 */
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:999;align-items:center;justify-content:center}
 .overlay.show{display:flex}
 .confirm-box{background:#1a2535;border:3px solid #f4a100;border-radius:20px;padding:32px 24px;text-align:center;width:90%;max-width:420px}
-.confirm-rack{font-size:60px;font-weight:900;color:#f4a100;letter-spacing:3px;word-break:break-all;line-height:1.1;margin:12px 0}
+.confirm-rack{font-size:56px;font-weight:900;color:#f4a100;letter-spacing:3px;word-break:break-all;line-height:1.1;margin:12px 0}
 .confirm-label{font-size:13px;color:#aaa;margin-bottom:6px}
-.confirm-items{text-align:left;background:#0f1923;border-radius:8px;padding:10px;margin:10px 0;max-height:180px;overflow-y:auto}
+.confirm-items-box{text-align:left;background:#0f1923;border-radius:8px;padding:10px;margin:10px 0;max-height:180px;overflow-y:auto}
 .ci{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2d3d;font-size:13px}
 .ci:last-child{border:none}
 .confirm-btns{display:flex;gap:10px;margin-top:16px}
 .confirm-btns .btn{flex:1;padding:14px}
-/* 相機視窗 */
 .cam-overlay{display:none;position:fixed;inset:0;background:#000;z-index:998;flex-direction:column;align-items:center;justify-content:center}
 .cam-overlay.show{display:flex}
-.cam-video{width:100%;max-width:500px;border-radius:8px}
 .cam-frame{position:relative;width:100%;max-width:500px}
+.cam-video{width:100%;border-radius:8px;display:block}
 .cam-line{position:absolute;top:50%;left:10%;right:10%;height:2px;background:#f4a100;box-shadow:0 0 8px #f4a100}
 .cam-hint{color:#aaa;font-size:13px;margin:12px 0;text-align:center}
 </style>
-</head><body>
-
+</head>
 <div class="topbar">
-  <div class="logo">&#x1F4E6; <span>貨架入庫</span></div>
-  <a href="/">&#x2302; 首頁</a>
-  <a href="/logout" style="margin-left:8px">登出</a>
+  <div class="logo">&#x1F4E6; <span>&#x8CA8;&#x67B6;&#x5165;&#x5EAB;</span></div>
+  <a href="/">&#x2302; &#x9996;&#x9801;</a>
+  <a href="/logout">&#x767B;&#x51FA;</a>
 </div>
-
 <div class="tabs">
-  <button class="tab-btn active" id="tb-inbound">&#x1F4E5; 入庫</button>
-  <button class="tab-btn" id="tb-search">&#x1F50D; 查找</button>
-  <button class="tab-btn" id="tb-records">&#x1F4CB; 紀錄</button>
+  <button class="tab-btn active" id="tb-inbound">&#x1F4E5; &#x5165;&#x5EAB;</button>
+  <button class="tab-btn" id="tb-search">&#x1F50D; &#x67E5;&#x627E;</button>
+  <button class="tab-btn" id="tb-records">&#x1F4CB; &#x7D00;&#x9304;</button>
 </div>
+<body>
 
-<!-- 入庫 -->
 <div class="tab-pane active" id="pane-inbound">
-  <div id="msg-inbound" class="msg"></div>
-
+  <div id="msg-inbound" class="msg-bar"></div>
   <div class="card">
-    <div class="card-title">&#x25CF; STEP 1 &nbsp;掃描 / 輸入貨號</div>
-    <p style="font-size:12px;color:#666;margin-bottom:10px">掃描或輸入貨號後按＋加入，同一貨號掃兩次＝2件</p>
+    <div class="card-title">STEP 1 - &#x8F38;&#x5165;&#x8CA8;&#x865F;</div>
+    <p style="font-size:12px;color:#666;margin-bottom:10px">&#x8F38;&#x5165;&#x8CA8;&#x865F;&#x5F8C;&#x6309; + &#x52A0;&#x5165;&#xFF0C;&#x540C;&#x4E00;&#x8CA8;&#x865F;&#x91CD;&#x8907;&#x5247;&#x6578;&#x91CF;+1</p>
     <div class="input-row">
-      <input type="text" id="sku-input" class="inp" placeholder="輸入貨號...">
+      <input type="text" id="sku-input" class="inp" placeholder="&#x8F38;&#x5165;&#x8CA8;&#x865F;...">
       <button class="btn btn-cam" id="cam-sku-btn">&#x1F4F7;</button>
-      <button class="btn btn-yellow" id="add-sku-btn">＋</button>
+      <button class="btn btn-yellow" id="add-sku-btn">+</button>
     </div>
-    <div id="sku-list" class="sku-list"><div class="hint">尚未加入任何貨號</div></div>
+    <div id="sku-list" class="sku-list"><div class="empty-hint">&#x5C1A;&#x672A;&#x52A0;&#x5165;&#x4EFB;&#x4F55;&#x8CA8;&#x865F;</div></div>
   </div>
-
   <div class="card">
-    <div class="card-title">&#x25CF; STEP 2 &nbsp;掃描 / 輸入儲位</div>
-    <p style="font-size:12px;color:#666;margin-bottom:10px">格式：RACK-A-1，確認後出現大字二次確認</p>
+    <div class="card-title">STEP 2 - &#x8F38;&#x5165;&#x5132;&#x4F4D;</div>
+    <p style="font-size:12px;color:#666;margin-bottom:10px">&#x683C;&#x5F0F;: RACK-A-1&#xFF0C;&#x78BA;&#x8A8D;&#x5F8C;&#x51FA;&#x73FE;&#x5927;&#x5B57;&#x4E8C;&#x6B21;&#x78BA;&#x8A8D;</p>
     <div class="input-row">
-      <input type="text" id="rack-input" class="inp" placeholder="例：RACK-A-1">
+      <input type="text" id="rack-input" class="inp" placeholder="&#x4F8B;: RACK-A-1">
       <button class="btn btn-cam" id="cam-rack-btn">&#x1F4F7;</button>
     </div>
-    <button class="btn btn-yellow btn-block" id="confirm-rack-btn">&#x1F50D; 確認儲位</button>
+    <button class="btn-block" id="confirm-rack-btn">&#x1F50D; &#x78BA;&#x8A8D;&#x5132;&#x4F4D;</button>
   </div>
 </div>
-
-<!-- 查找 -->
 <div class="tab-pane" id="pane-search">
   <div class="card">
-    <div class="card-title">&#x25CF; 查找商品在哪個儲位</div>
+    <div class="card-title">&#x67E5;&#x627E;&#x5546;&#x54C1;&#x5728;&#x54EA;&#x500B;&#x5132;&#x4F4D;</div>
     <div class="search-box">
-      <input type="text" id="search-sku" class="inp" placeholder="輸入貨號或關鍵字...">
+      <input type="text" id="search-sku" class="inp" placeholder="&#x8F38;&#x5165;&#x8CA8;&#x865F;...">
       <button class="btn btn-cam" id="cam-search-btn">&#x1F4F7;</button>
-      <button class="btn btn-yellow" id="do-search-btn">查找</button>
+      <button class="btn btn-yellow" id="do-search-btn">&#x67E5;&#x627E;</button>
     </div>
     <div id="search-result"></div>
   </div>
   <div class="card">
-    <div class="card-title">&#x25CF; 查找貨架裡有什麼</div>
+    <div class="card-title">&#x67E5;&#x627E;&#x8CA8;&#x67B6;&#x88E1;&#x6709;&#x4EC0;&#x9EBC;</div>
     <div class="search-box">
-      <input type="text" id="search-rack" class="inp" placeholder="例：RACK-A-1">
-      <button class="btn btn-yellow" id="do-rack-search-btn">查找</button>
+      <input type="text" id="search-rack" class="inp" placeholder="&#x4F8B;: RACK-A-1">
+      <button class="btn btn-yellow" id="do-rack-search-btn">&#x67E5;&#x627E;</button>
     </div>
     <div id="rack-result"></div>
   </div>
 </div>
-
-<!-- 紀錄 -->
 <div class="tab-pane" id="pane-records">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <span style="font-size:12px;color:#888">最近 100 筆</span>
-    <button class="btn btn-yellow" id="refresh-btn" style="padding:8px 16px;font-size:12px">&#x21BB; 重新整理</button>
+    <span style="font-size:12px;color:#888">&#x6700;&#x8FD1; 100 &#x7B46;</span>
+    <button class="btn btn-yellow" id="refresh-btn" style="padding:8px 16px;font-size:12px">&#x21BB; &#x91CD;&#x65B0;&#x6574;&#x7406;</button>
   </div>
   <div style="overflow-x:auto">
     <table class="rec-table">
-      <thead><tr><th>時間</th><th>貨號</th><th>儲位</th><th>數量</th></tr></thead>
-      <tbody id="records-body"><tr><td colspan="4" style="text-align:center;color:#555;padding:20px">請按重新整理</td></tr></tbody>
+      <thead><tr><th>&#x5165;&#x5EAB;&#x6642;&#x9593;</th><th>&#x8CA8;&#x865F;</th><th>&#x5132;&#x4F4D;</th><th>&#x6578;&#x91CF;</th></tr></thead>
+      <tbody id="records-body"><tr><td colspan="4" style="text-align:center;color:#555;padding:20px">&#x8ACB;&#x6309;&#x91CD;&#x65B0;&#x6574;&#x7406;</td></tr></tbody>
     </table>
   </div>
 </div>
-
-<!-- 確認入庫大視窗 -->
 <div class="overlay" id="confirm-overlay">
   <div class="confirm-box">
-    <div class="confirm-label">&#x1F4CD; 確認入庫到此儲位</div>
+    <div class="confirm-label">&#x1F4CD; &#x78BA;&#x8A8D;&#x5165;&#x5EAB;&#x5230;&#x6B64;&#x5132;&#x4F4D;</div>
     <div class="confirm-rack" id="confirm-rack-text"></div>
-    <div style="font-size:12px;color:#888">以下商品將入庫：</div>
-    <div class="confirm-items" id="confirm-items"></div>
+    <div style="font-size:12px;color:#888">&#x4EE5;&#x4E0B;&#x5546;&#x54C1;&#x5C07;&#x5165;&#x5EAB;:</div>
+    <div class="confirm-items-box" id="confirm-items"></div>
     <div class="confirm-btns">
-      <button class="btn btn-gray" id="cancel-btn">&#x274C; 取消</button>
-      <button class="btn btn-green" id="do-inbound-btn">&#x2705; 確認入庫</button>
+      <button class="btn btn-gray" id="cancel-btn">&#x274C; &#x53D6;&#x6D88;</button>
+      <button class="btn btn-green" id="do-inbound-btn">&#x2705; &#x78BA;&#x8A8D;&#x5165;&#x5EAB;</button>
     </div>
   </div>
 </div>
-
-<!-- 相機掃描視窗 -->
 <div class="cam-overlay" id="cam-overlay">
   <div class="cam-frame">
     <video id="cam-video" class="cam-video" autoplay playsinline muted></video>
     <div class="cam-line"></div>
   </div>
-  <div class="cam-hint">將條碼/QR Code 對準掃描線</div>
-  <button class="btn btn-red" id="cam-close-btn" style="margin-top:16px;padding:12px 32px">&#x274C; 關閉相機</button>
+  <div class="cam-hint">&#x5C07;&#x689D;&#x78BC; / QR Code &#x5C0D;&#x6E96;&#x63CF;&#x63C3;&#x7DDA;</div>
+  <button class="btn btn-red" id="cam-close-btn" style="margin-top:16px;padding:12px 32px">&#x274C; &#x95DC;&#x9589;&#x76F8;&#x6A5F;</button>
 </div>
 
 <script>
-// 不依賴外部 CDN,使用瀏覽器原生 BarcodeDetector API
-// -- 狀態 --
 var skuList = [];
-var camTarget = null; // 'sku' | 'rack' | 'search'
+var camTarget = null;
 var camStream = null;
 var scanInterval = null;
 
-// -- 分頁切換(用 addEventListener 避免 onclick 問題)--
 document.getElementById('tb-inbound').addEventListener('click', function(){ switchTab('inbound'); });
 document.getElementById('tb-search').addEventListener('click', function(){ switchTab('search'); });
 document.getElementById('tb-records').addEventListener('click', function(){ switchTab('records'); });
 
 function switchTab(name) {
   ['inbound','search','records'].forEach(function(t) {
-    document.getElementById('pane-'+t).classList.toggle('active', t===name);
-    document.getElementById('tb-'+t).classList.toggle('active', t===name);
+    var pane = document.getElementById('pane-'+t);
+    var tab = document.getElementById('tb-'+t);
+    if(pane) pane.style.display = (t===name)?'block':'none';
+    if(tab) tab.style.fontWeight = (t===name)?'bold':'normal';
   });
   if(name==='records') loadRecords();
 }
 
-// -- 加入貨號 --
 document.getElementById('add-sku-btn').addEventListener('click', addSku);
 document.getElementById('sku-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); addSku(); } });
 
@@ -4756,18 +4741,17 @@ function addSku() {
 
 function renderSkuList() {
   var el = document.getElementById('sku-list');
-  if(!skuList.length){ el.innerHTML='<div class="hint">尚未加入任何貨號</div>'; return; }
+  if(!skuList.length){ el.innerHTML='<div>empty</div>'; return; }
   el.innerHTML = skuList.map(function(item, i) {
     return '<div class="sku-item">'+
       '<span class="sku-name">'+item.sku+'</span>'+
       '<div class="qty-row">'+
-        '<button class="qty-btn" data-idx="'+i+'" data-delta="-1">&#x2212;</button>'+
+        '<button class="qty-btn" data-idx="'+i+'" data-delta="-1">-</button>'+
         '<span class="qty-num">'+item.qty+'</span>'+
         '<button class="qty-btn" data-idx="'+i+'" data-delta="1">+</button>'+
-        '<button class="del-btn" data-del="'+i+'">&#x2715;</button>'+
+        '<button class="del-btn" data-del="'+i+'">x</button>'+
       '</div></div>';
   }).join('');
-  // 用 event delegation 綁定數量按鈕
   el.querySelectorAll('.qty-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var i = parseInt(this.getAttribute('data-idx'));
@@ -4784,49 +4768,45 @@ function renderSkuList() {
   });
 }
 
-// -- 確認儲位 --
 document.getElementById('confirm-rack-btn').addEventListener('click', confirmRack);
 document.getElementById('rack-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); confirmRack(); } });
 
 function confirmRack() {
-  // 若 STEP1 輸入框還有值自動加入
   var skuVal = document.getElementById('sku-input').value.trim().toUpperCase();
   if(skuVal) addSku();
-  if(!skuList.length){ showMsg('inbound','&#x26A0; 請先輸入至少一個貨號!','warn'); return; }
+  if(!skuList.length){ showMsg('inbound','&#x8ACB;&#x5148;&#x8F38;&#x5165;&#x81F3;&#x5C11;&#x4E00;&#x500B;&#x8CA8;&#x865F;!','warn'); return; }
   var rack = document.getElementById('rack-input').value.trim().toUpperCase();
-  if(!rack){ showMsg('inbound','&#x26A0; 請輸入儲位條碼!','warn'); return; }
+  if(!rack){ showMsg('inbound','&#x8ACB;&#x8F38;&#x5165;&#x5132;&#x4F4D;&#x689D;&#x78BC;!','warn'); return; }
   document.getElementById('confirm-rack-text').textContent = rack;
   document.getElementById('confirm-items').innerHTML = skuList.map(function(item){
-    return '<div class="ci"><span>'+item.sku+'</span><span style="color:#f4a100">'+item.qty+' 件</span></div>';
+    return '<div>'+item.sku+' x'+item.qty+'</div>';
   }).join('');
-  document.getElementById('confirm-overlay').classList.add('show');
+  document.getElementById('confirm-overlay').style.display = 'block';
 }
 
-// -- 確認/取消入庫 --
 document.getElementById('cancel-btn').addEventListener('click', function() {
-  document.getElementById('confirm-overlay').classList.remove('show');
+  document.getElementById('confirm-overlay').style.display = 'none';
 });
 document.getElementById('do-inbound-btn').addEventListener('click', doInbound);
 
 function doInbound() {
   var rack = document.getElementById('rack-input').value.trim().toUpperCase();
-  document.getElementById('confirm-overlay').classList.remove('show');
-  showMsg('inbound','<span class="spinner"></span>寫入中...','ok');
+  document.getElementById('confirm-overlay').style.display = 'none';
+  showMsg('inbound','<span class="spinner"></span>&#x5BEB;&#x5165;&#x4E2D;...','ok');
   fetch('/api/warehouse/inbound', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({rack:rack, items:skuList})
   }).then(function(r){ return r.json(); }).then(function(d) {
     if(d.ok){
-      showMsg('inbound','&#x2705; 入庫成功!'+d.count+' 筆已儲存','ok');
+      showMsg('inbound','&#x2705; &#x5165;&#x5EAB;&#x6210;&#x529F;! '+d.count+' &#x7B46;&#x5DF2;&#x5132;&#x5B58;','ok');
       skuList=[]; renderSkuList();
       document.getElementById('rack-input').value='';
     } else {
-      showMsg('inbound','&#x274C; 失敗:'+d.msg,'err');
+      showMsg('inbound','&#x274C; &#x5931;&#x6557;: '+d.msg,'err');
     }
-  }).catch(function(e){ showMsg('inbound','&#x274C; 錯誤:'+e,'err'); });
+  }).catch(function(e){ showMsg('inbound','&#x274C; &#x932F;&#x8AA4;: '+e,'err'); });
 }
 
-// -- 查找 --
 document.getElementById('do-search-btn').addEventListener('click', doSearch);
 document.getElementById('search-sku').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
 document.getElementById('do-rack-search-btn').addEventListener('click', doRackSearch);
@@ -4836,11 +4816,11 @@ function doSearch() {
   var q = document.getElementById('search-sku').value.trim().toUpperCase();
   if(!q) return;
   var el = document.getElementById('search-result');
-  el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>查找中...</div>';
+  el.innerHTML = 'Searching...';
   fetch('/api/warehouse/search?q='+encodeURIComponent(q))
     .then(function(r){ return r.json(); }).then(function(d) {
-      if(!d.ok){ el.innerHTML='<div class="no-result">失敗:'+d.msg+'</div>'; return; }
-      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; 找不到「'+q+'」的入庫紀錄</div>'; return; }
+      if(!d.ok){ el.innerHTML='<div class="no-result">&#x5931;&#x6557;: '+d.msg+'</div>'; return; }
+      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; &#x627E;&#x4E0D;&#x5230;&#x300C;'+q+'&#x300D;&#x7684;&#x5165;&#x5EAB;&#x7D00;&#x9304;</div>'; return; }
       var grouped={};
       d.results.forEach(function(r){ if(!grouped[r.sku]) grouped[r.sku]=[]; grouped[r.sku].push(r); });
       el.innerHTML=Object.keys(grouped).map(function(sku){
@@ -4858,28 +4838,27 @@ function doRackSearch() {
   var q = document.getElementById('search-rack').value.trim().toUpperCase();
   if(!q) return;
   var el = document.getElementById('rack-result');
-  el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>查找中...</div>';
+  el.innerHTML = 'Searching...';
   fetch('/api/warehouse/search-rack?rack='+encodeURIComponent(q))
     .then(function(r){ return r.json(); }).then(function(d) {
-      if(!d.ok){ el.innerHTML='<div class="no-result">失敗:'+d.msg+'</div>'; return; }
-      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; 儲位「'+q+'」沒有入庫紀錄</div>'; return; }
-      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+'('+d.results.length+' 筆)</div>'+
-        '<table class="rec-table"><thead><tr><th>貨號</th><th>數量</th><th>時間</th></tr></thead><tbody>'+
+      if(!d.ok){ el.innerHTML='<div class="no-result">&#x5931;&#x6557;: '+d.msg+'</div>'; return; }
+      if(!d.results.length){ el.innerHTML='<div class="no-result">&#x5132;&#x4F4D;&#x300C;'+q+'&#x300D;&#x6C92;&#x6709;&#x5165;&#x5EAB;&#x7D00;&#x9304;</div>'; return; }
+      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+' ('+d.results.length+' &#x7B46;)</div>'+
+        '<table class="rec-table"><thead><tr><th>&#x8CA8;&#x865F;</th><th>&#x6578;&#x91CF;</th><th>&#x6642;&#x9593;</th></tr></thead><tbody>'+
         d.results.map(function(r){
           return '<tr><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td>'+(r.qty||'-')+'</td><td style="color:#888;font-size:11px">'+r.time+'</td></tr>';
         }).join('')+'</tbody></table></div>';
     });
 }
 
-// -- 入庫紀錄 --
 document.getElementById('refresh-btn').addEventListener('click', loadRecords);
 
 function loadRecords() {
   var tbody = document.getElementById('records-body');
-  tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#888;padding:16px"><span class="spinner"></span>載入中...</td></tr>';
+  tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#888;padding:16px"><span class="spinner"></span>&#x8F09;&#x5165;&#x4E2D;...</td></tr>';
   fetch('/api/warehouse/records').then(function(r){ return r.json(); }).then(function(d) {
     if(!d.ok||!d.records.length){
-      tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#555;padding:20px">尚無紀錄</td></tr>'; return;
+      tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#555;padding:20px">&#x5C1A;&#x7121;&#x7D00;&#x9304;</td></tr>'; return;
     }
     tbody.innerHTML=d.records.map(function(r){
       return '<tr><td style="color:#888;font-size:11px">'+r.time+'</td>'+
@@ -4890,7 +4869,6 @@ function loadRecords() {
   });
 }
 
-// -- 相機掃描 --
 document.getElementById('cam-sku-btn').addEventListener('click', function(){ openCam('sku'); });
 document.getElementById('cam-rack-btn').addEventListener('click', function(){ openCam('rack'); });
 document.getElementById('cam-search-btn').addEventListener('click', function(){ openCam('search'); });
@@ -4899,7 +4877,7 @@ document.getElementById('cam-close-btn').addEventListener('click', closeCam);
 function openCam(target) {
   camTarget = target;
   var overlay = document.getElementById('cam-overlay');
-  overlay.classList.add('show');
+  overlay.style.display = 'block';
   navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false})
     .then(function(stream) {
       camStream = stream;
@@ -4909,35 +4887,30 @@ function openCam(target) {
       startScan(video);
     })
     .catch(function(e) {
-      overlay.classList.remove('show');
-      alert('無法開啟相機:' + e.message + '\n請確認已允許相機權限');
+      overlay.style.display = 'none';
+      alert('&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: ' + e.message + '\n&#x8ACB;&#x78BA;&#x8A8D;&#x5DF2;&#x5141;&#x8A31;&#x76F8;&#x6A5F;&#x6B0A;&#x9650;');
     });
 }
 
 function closeCam() {
   if(scanInterval){ clearInterval(scanInterval); scanInterval=null; }
   if(camStream){ camStream.getTracks().forEach(function(t){ t.stop(); }); camStream=null; }
-  document.getElementById('cam-overlay').classList.remove('show');
+  document.getElementById('cam-overlay').style.display = 'none';
 }
 
 function startScan(video) {
-  // 使用 BarcodeDetector API(現代瀏覽器原生支援)
   if('BarcodeDetector' in window) {
-    var detector = new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','data_matrix']});
+    var detector = new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e']});
     scanInterval = setInterval(function() {
       if(video.readyState === video.HAVE_ENOUGH_DATA) {
         detector.detect(video).then(function(codes) {
-          if(codes.length > 0) {
-            var code = codes[0].rawValue;
-            handleScanResult(code);
-          }
+          if(codes.length > 0) { handleScanResult(codes[0].rawValue); }
         }).catch(function(){});
       }
     }, 300);
   } else {
-    // 降級:用 canvas 截圖讓使用者手動確認
     closeCam();
-    alert('此瀏覽器不支援自動掃描,請手動輸入條碼\n建議使用 Chrome 或 Edge 瀏覽器');
+    alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x63F4;&#x81EA;&#x52D5;&#x63CF;&#x63C3;\n&#x8ACB;&#x4F7F;&#x7528; Chrome &#x6216; Edge &#x700F;&#x89BD;&#x5668;');
   }
 }
 
@@ -4948,28 +4921,29 @@ function handleScanResult(code) {
     var ex = skuList.find(function(x){ return x.sku===code; });
     if(ex){ ex.qty++; } else { skuList.push({sku:code, qty:1}); }
     renderSkuList();
-    showMsg('inbound', '&#x1F4F7; 已掃描:' + code, 'ok');
+    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x63CF;&#x63C3;: '+code,'ok');
   } else if(camTarget === 'rack') {
     document.getElementById('rack-input').value = code;
-    showMsg('inbound', '&#x1F4F7; 已掃描儲位:' + code, 'ok');
+    showMsg('inbound','&#x1F4F7; &#x5DF2;&#x63CF;&#x63C3;&#x5132;&#x4F4D;: '+code,'ok');
   } else if(camTarget === 'search') {
     document.getElementById('search-sku').value = code;
     doSearch();
   }
 }
 
-// -- 訊息 --
 function showMsg(zone, msg, type) {
   var el = document.getElementById('msg-'+zone);
-  el.className = 'msg msg-'+(type||'ok');
+  if(!el) return;
+  el.className = 'msg-bar' + (type ? ' msg-'+type : '');
   el.innerHTML = msg;
-  if(type==='ok') setTimeout(function(){ el.className='msg'; }, 4000);
+  if(type==='ok') setTimeout(function(){ el.className='msg-bar'; el.innerHTML=''; }, 4000);
 }
 
-// 初始化
 document.getElementById('sku-input').focus();
+console.log('JS loaded OK, skuList type:', typeof skuList);
 </script>
-</body></html>"""
+</body></html>
+"""
 
 
 def get_warehouse_sheet():
