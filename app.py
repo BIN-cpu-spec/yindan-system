@@ -4551,6 +4551,7 @@ WAREHOUSE_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>&#x8CA8;&#x67B6;&#x5165;&#x5EAB;&#x7CFB;&#x7D71;</title>
+<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;min-height:100vh}
@@ -4857,19 +4858,41 @@ function closeCam() {
 }
 
 function startScan(video) {
-  if(!('BarcodeDetector' in window)){
+  try {
+    var hints = new Map();
+    var formats = [
+      ZXing.BarcodeFormat.QR_CODE,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.DATA_MATRIX
+    ];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    var reader = new ZXing.MultiFormatReader();
+    reader.setHints(hints);
+    scanInterval = setInterval(function() {
+      if(video.readyState === video.HAVE_ENOUGH_DATA) {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0);
+          var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          var luminance = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+          var binary = new ZXing.HybridBinarizer(luminance);
+          var bitmap = new ZXing.BinaryBitmap(binary);
+          var result = reader.decode(bitmap);
+          if(result) handleScan(result.getText().trim().toUpperCase());
+        } catch(e) { /* 繼續掃描 */ }
+      }
+    }, 300);
+  } catch(e) {
     closeCam();
-    alert('&#x6B64;&#x700F;&#x89BD;&#x5668;&#x4E0D;&#x652F;&#x6301;&#x81EA;&#x52D5;&#x25195;&#x25551;');
-    return;
+    showMsg('inbound', '&#x76F8;&#x6A5F;&#x555F;&#x52D5;&#x5931;&#x6557;: ' + e.message, 'err');
   }
-  var detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e']});
-  scanInterval=setInterval(function(){
-    if(video.readyState===video.HAVE_ENOUGH_DATA){
-      detector.detect(video).then(function(codes){
-        if(codes.length>0) handleScan(codes[0].rawValue.trim().toUpperCase());
-      }).catch(function(){});
-    }
-  },300);
 }
 
 function handleScan(code) {
