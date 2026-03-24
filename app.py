@@ -2538,7 +2538,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
-  <a href="/rack" class="card card-tools">
+  <a href="/warehouse" class="card card-tools">
     <span class="card-badge badge-ready">&#x2713; 上線中</span>
     <span class="card-icon">&#x1F4E6;</span>
     <div class="card-title">貨架入庫</div>
@@ -4568,7 +4568,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
 .inp{flex:1;padding:13px 14px;background:#0f1923;border:2px solid #1e2d3d;border-radius:8px;color:#fff;font-size:15px;font-family:inherit}
 .inp:focus{outline:none;border-color:#f4a100}
 .inp::placeholder{color:#444}
-.btn{padding:13px 16px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap}
+.btn{padding:13px 16px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .btn-yellow{background:#f4a100;color:#000}
 .btn-green{background:#2e7d32;color:#fff}
 .btn-gray{background:#444;color:#fff}
