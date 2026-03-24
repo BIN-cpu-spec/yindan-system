@@ -4836,49 +4836,89 @@ function loadRecords() {
 }
 
 function openCam(target) {
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    showMsg('inbound','&#x6B64;&#x5E73;&#x53F0;&#x4E0D;&#x652F;&#x6301;&#x76F8;&#x6A5F;','err');
+  camTarget = target;
+  var overlay = document.getElementById('cam-overlay');
+  overlay.classList.add('show');
+  var hint = document.getElementById('cam-hint');
+  if(hint) hint.textContent = '\u6B63\u5728\u555F\u52D5\u76F8\u6A5F...';
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if(hint) hint.textContent = '\u6B64\u88DD\u7F6E\u4E0D\u652F\u6301\u76F8\u6A5F';
     return;
   }
-  camTarget = target;
-  document.getElementById('cam-overlay').classList.add('show');
-  var codeReader = new ZXing.BrowserMultiFormatReader();
-  window._codeReader = codeReader;
-  codeReader.listVideoInputDevices().then(function(videoInputDevices) {
-    var deviceId = undefined;
-    // 優先使用後鏡頭
-    for(var i=0;i<videoInputDevices.length;i++){
-      var label = videoInputDevices[i].label.toLowerCase();
-      if(label.includes('back')||label.includes('rear')||label.includes('environment')){
-        deviceId = videoInputDevices[i].deviceId;
-        break;
-      }
+
+  // 開啟自動對焦、連續對焦、高解析度，讓掃描更精準更快
+  var constraints = {
+    audio: false,
+    video: {
+      facingMode: {ideal: 'environment'},
+      width: {ideal: 1280},
+      height: {ideal: 720},
+      focusMode: {ideal: 'continuous'},
+      advanced: [{focusMode: 'continuous'}]
     }
-    if(!deviceId && videoInputDevices.length > 0) {
-      deviceId = videoInputDevices[videoInputDevices.length-1].deviceId;
-    }
-    codeReader.decodeFromVideoDevice(deviceId, 'cam-video', function(result, err) {
-      if(result) {
-        handleScan(result.getText().trim().toUpperCase());
+  };
+
+  navigator.mediaDevices.getUserMedia(constraints)
+    .then(function(stream) {
+      var video = document.getElementById('cam-video');
+      video.srcObject = stream;
+      video.setAttribute('playsinline', true);
+      video.play();
+      window._camStream = stream;
+
+      // 嘗試開啟相機的連續自動對焦
+      var track = stream.getVideoTracks()[0];
+      if(track && track.applyConstraints) {
+        track.applyConstraints({advanced: [{focusMode: 'continuous'}]}).catch(function(){});
       }
+
+      if(hint) hint.textContent = '\u5C07\u689D\u78BC\u5C0D\u6E96\u6A21\u64EC\u7DDA';
+
+      if(typeof ZXing === 'undefined') {
+        if(hint) hint.textContent = 'ZXing \u672A\u8F09\u5165\uFF0C\u8ACB\u91CD\u65B0\u6574\u7406\u9801\u9762';
+        return;
+      }
+
+      // 用 canvas 手動截圖掃描，控制頻率（200ms）提升速度
+      var reader = new ZXing.BrowserMultiFormatReader();
+      window._codeReader = reader;
+
+      var hints = new Map();
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      reader.hints = hints;
+
+      window._scanTimer = setInterval(function() {
+        if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        var canvas = document.createElement('canvas');
+        var w = video.videoWidth, h = video.videoHeight;
+        if(!w || !h) return;
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+        try {
+          var result = reader.decodeFromCanvas(canvas);
+          if(result) {
+            clearInterval(window._scanTimer);
+            window._scanTimer = null;
+            handleScan(result.getText().trim().toUpperCase());
+          }
+        } catch(e) { /* 繼續掃描 */ }
+      }, 200);
+    })
+    .catch(function(e) {
+      if(hint) hint.textContent = '\u76F8\u6A5F\u6B0A\u9650\u932F\u8AA4: ' + e.message;
     });
-  }).catch(function(e){
-    document.getElementById('cam-overlay').classList.remove('show');
-    showMsg('inbound','&#x7121;&#x6CD5;&#x958B;&#x555F;&#x76F8;&#x6A5F;: '+e.message,'err');
-  });
 }
 
 function closeCam() {
-  if(window._codeReader) {
-    window._codeReader.reset();
-    window._codeReader = null;
-  }
+  if(window._scanTimer){ clearInterval(window._scanTimer); window._scanTimer=null; }
+  if(window._codeReader){ try{ window._codeReader.reset(); }catch(e){} window._codeReader=null; }
+  if(window._camStream){ window._camStream.getTracks().forEach(function(t){t.stop();}); window._camStream=null; }
+  var v = document.getElementById('cam-video');
+  if(v && v.srcObject){ v.srcObject=null; }
   document.getElementById('cam-overlay').classList.remove('show');
-  var video = document.getElementById('cam-video');
-  if(video && video.srcObject) {
-    video.srcObject.getTracks().forEach(function(t){t.stop();});
-    video.srcObject = null;
-  }
 }
 
 function handleScan(code) {
