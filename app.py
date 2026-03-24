@@ -4720,14 +4720,14 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;color:#fff;m
 </div>
 
 <script>
-// 不依賴外部 CDN，使用瀏覽器原生 BarcodeDetector API
+// 不依賴外部 CDN,使用瀏覽器原生 BarcodeDetector API
 // -- 狀態 --
 var skuList = [];
 var camTarget = null; // 'sku' | 'rack' | 'search'
 var camStream = null;
 var scanInterval = null;
 
-// -- 分頁切換（用 addEventListener 避免 onclick 問題）--
+// -- 分頁切換(用 addEventListener 避免 onclick 問題)--
 document.getElementById('tb-inbound').addEventListener('click', function(){ switchTab('inbound'); });
 document.getElementById('tb-search').addEventListener('click', function(){ switchTab('search'); });
 document.getElementById('tb-records').addEventListener('click', function(){ switchTab('records'); });
@@ -4792,9 +4792,9 @@ function confirmRack() {
   // 若 STEP1 輸入框還有值自動加入
   var skuVal = document.getElementById('sku-input').value.trim().toUpperCase();
   if(skuVal) addSku();
-  if(!skuList.length){ showMsg('inbound','&#x26A0; 請先輸入至少一個貨號！','warn'); return; }
+  if(!skuList.length){ showMsg('inbound','&#x26A0; 請先輸入至少一個貨號!','warn'); return; }
   var rack = document.getElementById('rack-input').value.trim().toUpperCase();
-  if(!rack){ showMsg('inbound','&#x26A0; 請輸入儲位條碼！','warn'); return; }
+  if(!rack){ showMsg('inbound','&#x26A0; 請輸入儲位條碼!','warn'); return; }
   document.getElementById('confirm-rack-text').textContent = rack;
   document.getElementById('confirm-items').innerHTML = skuList.map(function(item){
     return '<div class="ci"><span>'+item.sku+'</span><span style="color:#f4a100">'+item.qty+' 件</span></div>';
@@ -4817,13 +4817,13 @@ function doInbound() {
     body: JSON.stringify({rack:rack, items:skuList})
   }).then(function(r){ return r.json(); }).then(function(d) {
     if(d.ok){
-      showMsg('inbound','&#x2705; 入庫成功！'+d.count+' 筆已儲存','ok');
+      showMsg('inbound','&#x2705; 入庫成功!'+d.count+' 筆已儲存','ok');
       skuList=[]; renderSkuList();
       document.getElementById('rack-input').value='';
     } else {
-      showMsg('inbound','&#x274C; 失敗：'+d.msg,'err');
+      showMsg('inbound','&#x274C; 失敗:'+d.msg,'err');
     }
-  }).catch(function(e){ showMsg('inbound','&#x274C; 錯誤：'+e,'err'); });
+  }).catch(function(e){ showMsg('inbound','&#x274C; 錯誤:'+e,'err'); });
 }
 
 // -- 查找 --
@@ -4839,7 +4839,7 @@ function doSearch() {
   el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>查找中...</div>';
   fetch('/api/warehouse/search?q='+encodeURIComponent(q))
     .then(function(r){ return r.json(); }).then(function(d) {
-      if(!d.ok){ el.innerHTML='<div class="no-result">失敗：'+d.msg+'</div>'; return; }
+      if(!d.ok){ el.innerHTML='<div class="no-result">失敗:'+d.msg+'</div>'; return; }
       if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; 找不到「'+q+'」的入庫紀錄</div>'; return; }
       var grouped={};
       d.results.forEach(function(r){ if(!grouped[r.sku]) grouped[r.sku]=[]; grouped[r.sku].push(r); });
@@ -4861,9 +4861,9 @@ function doRackSearch() {
   el.innerHTML = '<div style="color:#888;padding:10px"><span class="spinner"></span>查找中...</div>';
   fetch('/api/warehouse/search-rack?rack='+encodeURIComponent(q))
     .then(function(r){ return r.json(); }).then(function(d) {
-      if(!d.ok){ el.innerHTML='<div class="no-result">失敗：'+d.msg+'</div>'; return; }
+      if(!d.ok){ el.innerHTML='<div class="no-result">失敗:'+d.msg+'</div>'; return; }
       if(!d.results.length){ el.innerHTML='<div class="no-result">&#x1F50D; 儲位「'+q+'」沒有入庫紀錄</div>'; return; }
-      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+'（'+d.results.length+' 筆）</div>'+
+      el.innerHTML='<div class="result-card"><div class="result-sku">&#x1F4CD; '+q+'('+d.results.length+' 筆)</div>'+
         '<table class="rec-table"><thead><tr><th>貨號</th><th>數量</th><th>時間</th></tr></thead><tbody>'+
         d.results.map(function(r){
           return '<tr><td style="color:#f4a100;font-weight:700">'+r.sku+'</td><td>'+(r.qty||'-')+'</td><td style="color:#888;font-size:11px">'+r.time+'</td></tr>';
@@ -4910,7 +4910,7 @@ function openCam(target) {
     })
     .catch(function(e) {
       overlay.classList.remove('show');
-      alert('無法開啟相機：' + e.message + '\n請確認已允許相機權限');
+      alert('無法開啟相機:' + e.message + '\n請確認已允許相機權限');
     });
 }
 
@@ -4921,7 +4921,7 @@ function closeCam() {
 }
 
 function startScan(video) {
-  // 使用 BarcodeDetector API（現代瀏覽器原生支援）
+  // 使用 BarcodeDetector API(現代瀏覽器原生支援)
   if('BarcodeDetector' in window) {
     var detector = new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','data_matrix']});
     scanInterval = setInterval(function() {
@@ -4935,9 +4935,9 @@ function startScan(video) {
       }
     }, 300);
   } else {
-    // 降級：用 canvas 截圖讓使用者手動確認
+    // 降級:用 canvas 截圖讓使用者手動確認
     closeCam();
-    alert('此瀏覽器不支援自動掃描，請手動輸入條碼\n建議使用 Chrome 或 Edge 瀏覽器');
+    alert('此瀏覽器不支援自動掃描,請手動輸入條碼\n建議使用 Chrome 或 Edge 瀏覽器');
   }
 }
 
@@ -4948,10 +4948,10 @@ function handleScanResult(code) {
     var ex = skuList.find(function(x){ return x.sku===code; });
     if(ex){ ex.qty++; } else { skuList.push({sku:code, qty:1}); }
     renderSkuList();
-    showMsg('inbound', '&#x1F4F7; 已掃描：' + code, 'ok');
+    showMsg('inbound', '&#x1F4F7; 已掃描:' + code, 'ok');
   } else if(camTarget === 'rack') {
     document.getElementById('rack-input').value = code;
-    showMsg('inbound', '&#x1F4F7; 已掃描儲位：' + code, 'ok');
+    showMsg('inbound', '&#x1F4F7; 已掃描儲位:' + code, 'ok');
   } else if(camTarget === 'search') {
     document.getElementById('search-sku').value = code;
     doSearch();
@@ -4993,7 +4993,8 @@ def get_warehouse_sheet():
 @app.route("/warehouse")
 @login_required
 def warehouse_page():
-    return render_template_string(WAREHOUSE_HTML)
+    from flask import Response
+    return Response(WAREHOUSE_HTML, mimetype='text/html; charset=utf-8')
 
 
 @app.route("/api/warehouse/inbound", methods=["POST"])
