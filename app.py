@@ -36,7 +36,7 @@ CONFIG = {
     "auto_run_min": 30,
 
     # CSV 欄位名稱
-    "col_txn":      "交易序號",
+    "col_txn":      "子交易序號",
     "col_order_id": "訂單編號",
     "col_shipping": "出貨類型",
     "col_warehouse":"商品倉庫儲位",
@@ -335,13 +335,13 @@ def _get_zone_label(locs):
     return "混單"
 
 def get_sort_key(k):
-    """排序：宅配→超商→店到店單項品→店到店→隔日配→無包裝→可拆單→超材"""
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
     if k == "__delivery__":     return (0,  k, k)
-    if k == "__store_single__": return (25, k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
     if k == "__nopkg__":        return (88, k, k)
     if k == "__splittable__":   return (92, k, k)
     if k == "__oversize__":     return (95, k, k)
-    order = {"超商":1, "店到店":2, "店到店隔日配":3}
+    order = {"店到店":2, "店到店隔日配":3}
     for label, pri in order.items():
         if k.startswith(label):
             if "混單" in k: return (pri*10+9, "zzz", k)
@@ -485,16 +485,39 @@ def split_orders(rows):
             summary["宅配"] = summary.get("宅配", 0) + 1
             continue
 
-        # 店到店單項品 → 獨立一組（單一SKU不管幾件）
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
         skus = set(p["sku"] for p in o["products"] if p["sku"])
-        if ch == "store" and len(skus) == 1:
-            add("__store_single__", "🏬 店到店 ｜ 單項品", "🏬", "#1b5e20", o)
-            summary["店到店"] = summary.get("店到店", 0) + 1
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
             continue
 
-        # 其餘通路（超商、店到店多品、隔日配）→ 依倉庫區域細分
-        whs   = set(wh for wh, z in locs)
-        zones = set(z  for wh, z in locs if z != "?")
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
         if not zones:
             zones = {"?"}
 
@@ -624,7 +647,7 @@ CONFIG = {
     "auto_run_min": 30,
 
     # CSV 欄位名稱
-    "col_txn":      "交易序號",
+    "col_txn":      "子交易序號",
     "col_order_id": "訂單編號",
     "col_shipping": "出貨類型",
     "col_warehouse":"商品倉庫儲位",
@@ -923,13 +946,13 @@ def _get_zone_label(locs):
     return "混單"
 
 def get_sort_key(k):
-    """排序：宅配→超商→店到店單項品→店到店→隔日配→無包裝→可拆單→超材"""
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
     if k == "__delivery__":     return (0,  k, k)
-    if k == "__store_single__": return (25, k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
     if k == "__nopkg__":        return (88, k, k)
     if k == "__splittable__":   return (92, k, k)
     if k == "__oversize__":     return (95, k, k)
-    order = {"超商":1, "店到店":2, "店到店隔日配":3}
+    order = {"店到店":2, "店到店隔日配":3}
     for label, pri in order.items():
         if k.startswith(label):
             if "混單" in k: return (pri*10+9, "zzz", k)
@@ -1073,16 +1096,39 @@ def split_orders(rows):
             summary["宅配"] = summary.get("宅配", 0) + 1
             continue
 
-        # 店到店單項品 → 獨立一組（單一SKU不管幾件）
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
         skus = set(p["sku"] for p in o["products"] if p["sku"])
-        if ch == "store" and len(skus) == 1:
-            add("__store_single__", "🏬 店到店 ｜ 單項品", "🏬", "#1b5e20", o)
-            summary["店到店"] = summary.get("店到店", 0) + 1
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
             continue
 
-        # 其餘通路（超商、店到店多品、隔日配）→ 依倉庫區域細分
-        whs   = set(wh for wh, z in locs)
-        zones = set(z  for wh, z in locs if z != "?")
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
         if not zones:
             zones = {"?"}
 
@@ -1212,7 +1258,7 @@ CONFIG = {
     "auto_run_min": 30,
 
     # CSV 欄位名稱
-    "col_txn":      "交易序號",
+    "col_txn":      "子交易序號",
     "col_order_id": "訂單編號",
     "col_shipping": "出貨類型",
     "col_warehouse":"商品倉庫儲位",
@@ -1511,13 +1557,13 @@ def _get_zone_label(locs):
     return "混單"
 
 def get_sort_key(k):
-    """排序：宅配→超商→店到店單項品→店到店→隔日配→無包裝→可拆單→超材"""
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
     if k == "__delivery__":     return (0,  k, k)
-    if k == "__store_single__": return (25, k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
     if k == "__nopkg__":        return (88, k, k)
     if k == "__splittable__":   return (92, k, k)
     if k == "__oversize__":     return (95, k, k)
-    order = {"超商":1, "店到店":2, "店到店隔日配":3}
+    order = {"店到店":2, "店到店隔日配":3}
     for label, pri in order.items():
         if k.startswith(label):
             if "混單" in k: return (pri*10+9, "zzz", k)
@@ -1661,16 +1707,39 @@ def split_orders(rows):
             summary["宅配"] = summary.get("宅配", 0) + 1
             continue
 
-        # 店到店單項品 → 獨立一組（單一SKU不管幾件）
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
         skus = set(p["sku"] for p in o["products"] if p["sku"])
-        if ch == "store" and len(skus) == 1:
-            add("__store_single__", "🏬 店到店 ｜ 單項品", "🏬", "#1b5e20", o)
-            summary["店到店"] = summary.get("店到店", 0) + 1
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
             continue
 
-        # 其餘通路（超商、店到店多品、隔日配）→ 依倉庫區域細分
-        whs   = set(wh for wh, z in locs)
-        zones = set(z  for wh, z in locs if z != "?")
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
         if not zones:
             zones = {"?"}
 
@@ -1800,7 +1869,7 @@ CONFIG = {
     "auto_run_min": 30,
 
     # CSV 欄位名稱
-    "col_txn":      "交易序號",
+    "col_txn":      "子交易序號",
     "col_order_id": "訂單編號",
     "col_shipping": "出貨類型",
     "col_warehouse":"商品倉庫儲位",
@@ -2132,14 +2201,14 @@ def _get_zone_label(locs):
     return "混單"
 
 def get_sort_key(k):
-    """排序：宅配→超商→店到店單項品→店到店→隔日配→無包裝→巨無霸→可拆單→超材"""
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→巨無霸→可拆單→超材"""
     if k == "__delivery__":     return (0,  k, k)
-    if k == "__store_single__": return (25, k, k)
+    if k == "__single_zone__":  return (20, k, k)
     if k == "__nopkg__":        return (88, k, k)
     if k == "__giant__":        return (91, k, k)
     if k == "__splittable__":   return (92, k, k)
     if k == "__oversize__":     return (95, k, k)
-    order = {"超商":1, "店到店":2, "店到店隔日配":3}
+    order = {"店到店":2, "店到店隔日配":3}
     for label, pri in order.items():
         if k.startswith(label):
             if "混單" in k: return (pri*10+9, "zzz", k)
@@ -2331,16 +2400,39 @@ def split_orders(rows):
             summary["宅配"] = summary.get("宅配", 0) + 1
             continue
 
-        # 店到店單項品 → 獨立一組（單一SKU不管幾件）
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
         skus = set(p["sku"] for p in o["products"] if p["sku"])
-        if ch == "store" and len(skus) == 1:
-            add("__store_single__", "🏬 店到店 ｜ 單項品", "🏬", "#1b5e20", o)
-            summary["店到店"] = summary.get("店到店", 0) + 1
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
             continue
 
-        # 其餘通路（超商、店到店多品、隔日配）→ 依倉庫區域細分
-        whs   = set(wh for wh, z in locs)
-        zones = set(z  for wh, z in locs if z != "?")
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
         if not zones:
             zones = {"?"}
 
@@ -2699,7 +2791,7 @@ tr.dr:hover td{background:#fafcff}
     <input type="file" id="csv-in" accept=".csv" style="display:none" onchange="doUpload()">
     <div id="up-name" style="font-size:12px;color:#aaa;margin-top:6px"></div>
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid #eee;font-size:12px;color:#bbb">
-      需包含欄位：交易序號、出貨類型、商品倉庫儲位、商品編號
+      需包含欄位：子交易序號、出貨類型、商品倉庫儲位、商品編號
     </div>
   </div>
 </div>
@@ -2721,7 +2813,7 @@ tr.dr:hover td{background:#fafcff}
     <input type="checkbox" class="grp-check" data-grpkey="{{ key }}" style="cursor:pointer">
     {% if key == '__oversize__' %}&#9888; 超材（{{ g.orders|length }}）
     {% elif key == '__delivery__' %}&#128665; 宅配（{{ g.orders|length }}）
-    {% elif key == '__store_single__' %}店到店-單項品（{{ g.orders|length }}）
+    {% elif key == '__single_zone__' %}純區+單品（{{ g.orders|length }}）
     {% elif key == '__nopkg__' %}&#128230; 無包裝（{{ g.orders|length }}）
     {% else %}{{ key }}（{{ g.orders|length }}）{% endif %}
   </label>
@@ -2745,7 +2837,7 @@ tr.dr:hover td{background:#fafcff}
     {% if key == '__oversize__' %}&#9888; 超材（{{ groups[key].orders|length }}）
     {% elif key == '__giant__' %}&#129427; 巨無霸（{{ groups[key].orders|length }}）
     {% elif key == '__delivery__' %}&#128665; 宅配（{{ groups[key].orders|length }}）
-    {% elif key == '__store_single__' %}&#128364; 店到店-單項品（{{ groups[key].orders|length }}）
+    {% elif key == '__single_zone__' %}&#128364; 純區+單品（{{ groups[key].orders|length }}）
     {% elif key == '__nopkg__' %}&#128230; 無包裝（{{ groups[key].orders|length }}）
     {% else %}{{ groups[key].icon | safe }} {{ key }}（{{ groups[key].orders|length }}）{% endif %}
   </div>
@@ -2810,31 +2902,45 @@ tr.dr:hover td{background:#fafcff}
   {% endfor %}
 </div>
 
-{% elif key == '__store_single__' %}
-{# 店到店單項品 #}
+{% elif key == '__single_zone__' %}
+{# 純區 + 超商單品 + 店到店單品 大分類 #}
 <div class="grp" data-key="{{ key }}">
-  <div class="grp-hd" style="background:#1b5e20">
-    &#x1F3EC; 店到店 ｜ 單項品
+  <div class="grp-hd" style="background:#e65100">
+    &#x26A1; 純區 + 超商單品 + 店到店單品
     <span class="gcnt">{{ g.orders|length }} 張</span>
-    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製子交易序號</button>
     <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
   </div>
-  <table>
-    <thead><tr><th>#</th><th>交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
-    <tbody>
-    {% for o in g.orders %}
-    <tr class="dr">
-      <td class="mono">{{ loop.index }}</td>
-      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
-      <td style="font-size:11px;color:#666">{{ o.ship_raw }}</td>
-      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
-      <td style="font-size:11px;color:#555;white-space:nowrap">{% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}{% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}</td>
-      <td style="font-weight:600;color:#1a5fa8;text-align:center">{{ o.total_qty }}</td>
-    </tr>
-    {% endfor %}
-    <tr class="sum-row"><td colspan="2">小計 {{ g.orders|length }} 張</td><td colspan="4">{% set ns2=namespace(t=0) %}{% for o in g.orders %}{% set ns2.t=ns2.t+o.total_qty %}{% endfor %}共 {{ ns2.t }} 件</td></tr>
-    </tbody>
-  </table>
+  {# 依 single_zone_sub 分組顯示子分類 #}
+  {% set sub_groups = {} %}
+  {% for o in g.orders %}
+    {% set sub = o.single_zone_sub if o.single_zone_sub else '其他' %}
+    {% if sub not in sub_groups %}{% set _ = sub_groups.update({sub: []}) %}{% endif %}
+    {% set _ = sub_groups[sub].append(o) %}
+  {% endfor %}
+  {% for sub, orders in sub_groups.items() %}
+  <div style="margin:0">
+    <div style="background:#bf360c;color:#fff;font-size:12px;font-weight:700;padding:6px 14px;letter-spacing:.5px">
+      &#9656; {{ sub }} &nbsp;<span style="font-weight:400;opacity:.8">{{ orders|length }} 張</span>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>子交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+      <tr class="dr">
+        <td class="mono">{{ loop.index }}</td>
+        <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+        <td style="font-size:11px;color:#666">{{ o.ship_raw }}</td>
+        <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+        <td style="font-size:11px;color:#555;white-space:nowrap">{% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}{% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}</td>
+        <td style="font-weight:600;color:#e65100;text-align:center">{{ o.total_qty }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="sum-row"><td colspan="2">小計 {{ orders|length }} 張</td><td colspan="4">{% set ns3=namespace(t=0) %}{% for o in orders %}{% set ns3.t=ns3.t+o.total_qty %}{% endfor %}共 {{ ns3.t }} 件</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
 </div>
 
 {% elif key == "__giant__" %}
