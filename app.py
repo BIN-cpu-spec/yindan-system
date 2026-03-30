@@ -4537,6 +4537,10 @@ def api_customs_export():
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.drawing.image import Image as XLImage
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import requests as req_lib
+        from PIL import Image as PILImage
         data = request.get_json()
         rows       = data.get("rows", [])
         cabinet_no = data.get("cabinet_no", "")
@@ -4544,6 +4548,42 @@ def api_customs_export():
         ship_date  = data.get("ship_date", "")
         exporter   = data.get("exporter", "")
         importer   = data.get("importer", "")
+
+        # ── 平行下載所有圖片 ──────────────────────────────
+        IMG_HEADERS = {
+            "Referer": "https://www.1688.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        IMG_ROW_H  = 75   # 列高（點）
+        IMG_MAX_PX = 90   # 圖片最大像素（正方形）
+
+        def fetch_image(idx_url):
+            idx, url = idx_url
+            if not url:
+                return idx, None
+            try:
+                r = req_lib.get(url, headers=IMG_HEADERS, timeout=8)
+                if r.status_code == 200 and r.content:
+                    buf = io.BytesIO(r.content)
+                    # 縮圖避免 Excel 檔案過大
+                    pil = PILImage.open(buf)
+                    pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
+                    out = io.BytesIO()
+                    pil.save(out, format="PNG")
+                    out.seek(0)
+                    return idx, out
+            except Exception:
+                pass
+            return idx, None
+
+        # 收集所有圖片 URL 並平行下載
+        url_list = [(i, row.get("image", "")) for i, row in enumerate(rows)]
+        img_map = {}  # idx -> BytesIO or None
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {pool.submit(fetch_image, item): item[0] for item in url_list}
+            for future in as_completed(futures):
+                idx, buf = future.result()
+                img_map[idx] = buf
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -4600,7 +4640,8 @@ def api_customs_export():
 
         # ── 第7列起：商品資料 ──────────────────────────────
         miss_fill = PatternFill("solid", fgColor="FFFFEBEE")
-        for r, row in enumerate(rows, HEADER_ROW + 1):
+        for i, row in enumerate(rows):
+            r = HEADER_ROW + 1 + i
             ws.cell(r, 1,  row.get("type",""))
             ws.cell(r, 2,  row.get("product_size_orig",""))
             ws.cell(r, 3,  row.get("material",""))
@@ -4625,24 +4666,35 @@ def api_customs_export():
                 c = ws.cell(r, col, v)
                 if isinstance(v, float):
                     c.number_format = fmt_2dec
-            img_url = row.get("image", "")
-            if img_url:
-                ws.cell(r, 18, f'=IMAGE("{img_url}")')
+
+            # ── 嵌入圖片 ──
+            img_buf = img_map.get(i)
+            if img_buf:
+                try:
+                    xl_img = XLImage(img_buf)
+                    xl_img.width  = IMG_MAX_PX
+                    xl_img.height = IMG_MAX_PX
+                    col_letter = "R"
+                    ws.add_image(xl_img, f"{col_letter}{r}")
+                except Exception:
+                    ws.cell(r, 18, row.get("image", ""))
             else:
-                ws.cell(r, 18, "")
+                ws.cell(r, 18, row.get("image", ""))
+
             if row.get("status") != "ok":
                 for c in range(1, 19):
                     ws.cell(r, c).fill = miss_fill
+
+            # 列高放大讓圖片顯示完整
+            ws.row_dimensions[r].height = IMG_ROW_H
 
         # 自動調整欄寬
         for col in ws.columns:
             max_len = max((len(str(cell.value or "")) for cell in col), default=0)
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
 
-        # 圖片欄(R)固定寬度 & 每列高度放大以顯示圖片
-        ws.column_dimensions['R'].width = 15
-        for r_idx in range(HEADER_ROW + 1, HEADER_ROW + 1 + len(rows)):
-            ws.row_dimensions[r_idx].height = 80
+        # 圖片欄(R)固定寬度
+        ws.column_dimensions['R'].width = 14
 
         fname = f"報關清單{'_'+cabinet_no if cabinet_no else ''}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         buf = io.BytesIO()
