@@ -4457,41 +4457,88 @@ function resetPage() {
   showMsg('', true);
 }
 
+function imgToBase64(url, callback) {
+  var img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = function() {
+    var canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    try {
+      callback(canvas.toDataURL('image/jpeg', 0.85), null);
+    } catch(e) {
+      callback(null, e.message);
+    }
+  };
+  img.onerror = function() { callback(null, 'load error'); };
+  img.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+}
+
 function migrateImages() {
-  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。圖片多的話會分批處理，請耐心等候。確定要開始嗎？')) return;
+  if(!confirm('將用瀏覽器下載圖片並上傳到 Google Drive，全程自動執行。確定要開始嗎？')) return;
   var totalUpdated = 0;
-  var totalCount = 0;
-  function runBatch(offset) {
-    showMsg('轉換中... 已處理 ' + offset + ' 筆，請勿關閉頁面', true);
-    fetch('/api/customs/migrate-images', {
+  var totalFailed = 0;
+  var grandTotal = 0;
+
+  function processBatch(offset) {
+    showMsg('讀取待轉換清單... offset=' + offset, true);
+    fetch('/api/customs/get-pending-images', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({offset: offset})
     })
     .then(function(r){ return r.json(); })
     .then(function(d) {
-      if(!d.ok) {
-        showMsg('轉換失敗：' + d.msg, false);
-        showToast('轉換失敗：' + d.msg, false);
+      if(!d.ok) { showMsg('錯誤：' + d.msg, false); showToast('錯誤：' + d.msg, false); return; }
+      if(d.items.length === 0) {
+        var finalMsg = '全部完成！成功 ' + totalUpdated + ' 張，失敗 ' + totalFailed + ' 張';
+        showMsg(finalMsg, true);
+        showToast(finalMsg, true);
         return;
       }
-      totalUpdated += d.updated;
-      totalCount = d.total;
-      if(d.remaining > 0) {
-        showMsg('轉換中... ' + d.msg + '，剩餘 ' + d.remaining + ' 張', true);
-        setTimeout(function(){ runBatch(d.next_offset); }, 500);
+      grandTotal = d.total;
+      uploadItems(d.items, 0, d.remaining, d.next_offset);
+    })
+    .catch(function(e){ showMsg('連線錯誤：' + e, false); });
+  }
+
+  function uploadItems(items, i, remaining, nextOffset) {
+    if(i >= items.length) {
+      if(remaining > 0) {
+        showMsg('轉換中... 已完成 ' + (grandTotal - remaining) + '/' + grandTotal + ' 張', true);
+        setTimeout(function(){ processBatch(nextOffset); }, 300);
       } else {
-        var finalMsg = totalUpdated > 0 ? ('全部完成！共轉換 ' + totalUpdated + ' 張圖片到 Google Drive') : '所有圖片已是最新狀態';
+        var finalMsg = '全部完成！成功 ' + totalUpdated + ' 張，失敗 ' + totalFailed + ' 張';
         showMsg(finalMsg, true);
         showToast(finalMsg, true);
       }
-    })
-    .catch(function(e){
-      showMsg('連線錯誤：' + e, false);
-      showToast('連線錯誤', false);
+      return;
+    }
+    var item = items[i];
+    showMsg('轉換中 ' + (grandTotal - remaining - items.length + i + 1) + '/' + grandTotal + '...', true);
+    imgToBase64(item.url, function(b64, err) {
+      if(!b64 || err) {
+        totalFailed++;
+        uploadItems(items, i + 1, remaining, nextOffset);
+        return;
+      }
+      fetch('/api/customs/upload-image-base64', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({data: b64, row_idx: item.row_idx, col_idx: item.col_idx})
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        if(res.ok) totalUpdated++; else totalFailed++;
+        uploadItems(items, i + 1, remaining, nextOffset);
+      })
+      .catch(function(){ totalFailed++; uploadItems(items, i + 1, remaining, nextOffset); });
     });
   }
-  runBatch(0);
+
+  processBatch(0);
 }
 
 function showToast(msg, ok) {
@@ -4704,6 +4751,77 @@ def api_customs_new_item():
     return jsonify({"ok": True, "image": data.get("image", "")})
 
 
+@app.route("/api/customs/upload-image-base64", methods=["POST"])
+@login_required
+def api_upload_image_base64():
+    """接收前端傳來的 base64 圖片，上傳到 Google Drive，回傳 Drive URL"""
+    try:
+        import base64 as b64lib, hashlib
+        from googleapiclient.http import MediaIoBaseUpload
+        data = request.get_json(silent=True) or {}
+        b64data = data.get("data", "")  # base64 字串（含 data:image/...;base64, 前綴）
+        row_idx = int(data.get("row_idx", 0))
+        col_idx = int(data.get("col_idx", 0))
+
+        if not b64data or not row_idx:
+            return jsonify({"ok": False, "msg": "缺少參數"})
+
+        # 解析 base64
+        if "," in b64data:
+            header, b64str = b64data.split(",", 1)
+            content_type = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
+        else:
+            b64str = b64data
+            content_type = "image/jpeg"
+
+        img_bytes = b64lib.b64decode(b64str)
+        ext = content_type.split("/")[-1].split(";")[0] or "jpg"
+        fname = hashlib.md5(img_bytes).hexdigest()[:16] + "." + ext
+
+        # 取得 Drive service
+        service, err = get_drive_service()
+        if err:
+            return jsonify({"ok": False, "msg": err})
+
+        global _drive_folder_id_cache
+        folder_id = _drive_folder_id_cache or os.environ.get("DRIVE_IMG_FOLDER_ID", "")
+        if not folder_id:
+            folder_meta = {"name": "報關圖片", "mimeType": "application/vnd.google-apps.folder"}
+            folder = service.files().create(body=folder_meta, fields="id").execute()
+            folder_id = folder.get("id", "")
+            service.permissions().create(fileId=folder_id, body={"type": "anyone", "role": "reader"}).execute()
+        _drive_folder_id_cache = folder_id
+
+        # 查重
+        existing = service.files().list(
+            q=f"name='{fname}' and '{folder_id}' in parents and trashed=false",
+            fields="files(id)", pageSize=1
+        ).execute()
+        if existing.get("files"):
+            file_id = existing["files"][0]["id"]
+        else:
+            file_meta = {"name": fname, "parents": [folder_id]}
+            media = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=content_type, resumable=False)
+            uploaded = service.files().create(body=file_meta, media_body=media, fields="id").execute()
+            file_id = uploaded.get("id", "")
+            service.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
+
+        drive_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w200"
+
+        # 寫回 Google Sheets
+        if row_idx and col_idx:
+            client, err2 = get_sheets_client()
+            if not err2:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                sh = client.open_by_key(sheet_id)
+                ws = sh.worksheet("商品報關資料庫")
+                ws.update_cell(row_idx, col_idx, drive_url)
+
+        return jsonify({"ok": True, "drive_url": drive_url})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+
 @app.route("/api/customs/test-image", methods=["POST"])
 @login_required
 def api_test_image():
@@ -4748,6 +4866,50 @@ def api_test_image():
             return jsonify({"ok": False, "step": "drive_create_folder", "msg": str(e), "img_size": img_size})
     except Exception as e:
         return jsonify({"ok": False, "step": "exception", "msg": str(e)})
+
+
+@app.route("/api/customs/get-pending-images", methods=["POST"])
+@login_required
+def api_get_pending_images():
+    """查詢尚未轉換的圖片清單（回傳 row_idx, col_idx, url）"""
+    try:
+        import re as _re
+        data = request.get_json(silent=True) or {}
+        offset = int(data.get("offset", 0))
+        batch_size = 20
+
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err})
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet("商品報關資料庫")
+        all_values = ws.get_all_values(value_render_option='FORMULA')
+        if not all_values:
+            return jsonify({"ok": True, "items": [], "total": 0, "remaining": 0})
+
+        header = all_values[0]
+        try:
+            img_col_idx = header.index("圖片")
+        except ValueError:
+            return jsonify({"ok": False, "msg": "找不到圖片欄位"})
+
+        all_pending = []
+        for row_idx, row in enumerate(all_values[1:], start=2):
+            if img_col_idx < len(row):
+                cell_val = row[img_col_idx]
+                m = _re.search(r'=IMAGE\(["\']([^"\']+)["\']', str(cell_val), _re.IGNORECASE)
+                url = m.group(1) if m else str(cell_val).strip()
+                if url and url.startswith("http") and "drive.google.com" not in url and "googleapis.com" not in url:
+                    all_pending.append({"row_idx": row_idx, "col_idx": img_col_idx + 1, "url": url})
+
+        total = len(all_pending)
+        batch = all_pending[offset:offset + batch_size]
+        remaining = max(0, total - offset - len(batch))
+        return jsonify({"ok": True, "items": batch, "total": total,
+                        "remaining": remaining, "next_offset": offset + len(batch)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 
 @app.route("/api/customs/migrate-images", methods=["POST"])
@@ -4808,16 +4970,19 @@ def api_customs_migrate_images():
                 results[(ridx, cidx)] = new_url
 
         updated = 0
+        failed = 0
         orig_map = {item[0]: item[2] for item in batch}
         for (ridx, cidx), new_url in results.items():
-            if new_url != orig_map.get(ridx):
+            if "drive.google.com" in new_url or "googleapis.com" in new_url:
                 ws.update_cell(ridx, cidx, new_url)
                 updated += 1
+            else:
+                failed += 1
 
-        log(f"圖片遷移 offset={offset} 完成：轉換 {updated} 筆，剩餘 {remaining} 筆")
-        return jsonify({"ok": True, "updated": updated, "total": total,
+        log(f"圖片遷移 offset={offset} 完成：成功 {updated} 筆，失敗 {failed} 筆，剩餘 {remaining} 筆")
+        return jsonify({"ok": True, "updated": updated, "failed": failed, "total": total,
                         "remaining": remaining, "next_offset": offset + len(batch),
-                        "msg": f"已處理 {min(offset+len(batch), total)}/{total} 張"})
+                        "msg": f"已處理 {min(offset+len(batch), total)}/{total} 張（成功 {updated}，防盜鏈擋住 {failed}）"})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
