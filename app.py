@@ -4448,11 +4448,27 @@ function migrateImages() {
     .then(function(d) {
       if(d.ok) {
         showMsg('完成！' + d.msg, true);
+        showToast(d.updated > 0 ? ('成功轉換 ' + d.updated + ' 張圖片到 Google Drive！') : '所有圖片已是最新狀態', true);
       } else {
         showMsg('轉換失敗：' + d.msg, false);
+        showToast('轉換失敗：' + d.msg, false);
       }
     })
-    .catch(function(e){ showMsg('連線錯誤：' + e, false); });
+    .catch(function(e){
+      showMsg('連線錯誤：' + e, false);
+      showToast('連線錯誤', false);
+    });
+}
+
+function showToast(msg, ok) {
+  var old = document.getElementById('toast-notify');
+  if(old) old.remove();
+  var t = document.createElement('div');
+  t.id = 'toast-notify';
+  t.textContent = (ok ? '✅ ' : '❌ ') + msg;
+  t.style.cssText = 'position:fixed;top:24px;right:24px;z-index:9999;padding:14px 22px;border-radius:10px;font-size:14px;font-weight:600;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,0.25);transition:opacity 0.5s;opacity:1;background:' + (ok ? '#2e7d32' : '#c62828');
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 500); }, 4000);
 }
 
 function showMsg(msg, ok) {
