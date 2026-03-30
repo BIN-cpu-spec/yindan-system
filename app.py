@@ -4704,6 +4704,51 @@ def api_customs_new_item():
     return jsonify({"ok": True, "image": data.get("image", "")})
 
 
+@app.route("/api/customs/test-image", methods=["POST"])
+@login_required
+def api_test_image():
+    """診斷單張圖片上傳，回傳詳細錯誤"""
+    try:
+        import requests as req_lib
+        data = request.get_json(silent=True) or {}
+        url = data.get("url", "").strip()
+        if not url:
+            return jsonify({"ok": False, "step": "input", "msg": "沒有 URL"})
+
+        # Step 1: 下載圖片
+        try:
+            dl = req_lib.get(url, headers={
+                "Referer": "https://www.1688.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }, timeout=10)
+            if dl.status_code != 200:
+                return jsonify({"ok": False, "step": "download", "msg": f"HTTP {dl.status_code}", "url": url})
+            if not dl.content:
+                return jsonify({"ok": False, "step": "download", "msg": "回傳內容為空"})
+            img_size = len(dl.content)
+        except Exception as e:
+            return jsonify({"ok": False, "step": "download", "msg": str(e)})
+
+        # Step 2: 取得 Drive service
+        service, err = get_drive_service()
+        if err:
+            return jsonify({"ok": False, "step": "drive_auth", "msg": err})
+
+        # Step 3: 上傳
+        result_url = upload_image_to_drive(url)
+        success = "drive.google.com" in result_url
+
+        return jsonify({
+            "ok": success,
+            "step": "done" if success else "upload_failed",
+            "img_size": img_size,
+            "result_url": result_url,
+            "msg": "成功" if success else "上傳後仍回傳原始 URL"
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "step": "exception", "msg": str(e)})
+
+
 @app.route("/api/customs/migrate-images", methods=["POST"])
 @login_required
 def api_customs_migrate_images():
