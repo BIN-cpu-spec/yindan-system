@@ -4625,7 +4625,11 @@ def api_customs_export():
                 c = ws.cell(r, col, v)
                 if isinstance(v, float):
                     c.number_format = fmt_2dec
-            ws.cell(r, 18, row.get("image",""))
+            img_url = row.get("image", "")
+            if img_url:
+                ws.cell(r, 18, f'=IMAGE("{img_url}")')
+            else:
+                ws.cell(r, 18, "")
             if row.get("status") != "ok":
                 for c in range(1, 19):
                     ws.cell(r, c).fill = miss_fill
@@ -4634,6 +4638,11 @@ def api_customs_export():
         for col in ws.columns:
             max_len = max((len(str(cell.value or "")) for cell in col), default=0)
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+
+        # 圖片欄(R)固定寬度 & 每列高度放大以顯示圖片
+        ws.column_dimensions['R'].width = 15
+        for r_idx in range(HEADER_ROW + 1, HEADER_ROW + 1 + len(rows)):
+            ws.row_dimensions[r_idx].height = 80
 
         fname = f"報關清單{'_'+cabinet_no if cabinet_no else ''}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         buf = io.BytesIO()
