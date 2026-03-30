@@ -4710,8 +4710,21 @@ document.addEventListener('DOMContentLoaded', function() {
 function showMsg(msg, ok) {
   var area = document.getElementById('msg-area');
   if(!msg) { area.innerHTML = ''; return; }
-  var closeBtn = ok ? '' : '<button onclick="document.getElementById(\'msg-area\').innerHTML=\'\'" style="float:right;background:none;border:none;font-size:16px;cursor:pointer;color:inherit;margin-left:8px">✕</button>';
-  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '" style="display:flex;align-items:center;justify-content:space-between">' + closeBtn + '<span>' + msg + '</span></div>';
+  var div = document.createElement('div');
+  div.className = 'msg ' + (ok ? 'msg-ok' : 'msg-err');
+  div.style.cssText = 'display:flex;align-items:center;justify-content:space-between';
+  var span = document.createElement('span');
+  span.innerHTML = msg;
+  div.appendChild(span);
+  if(!ok) {
+    var btn = document.createElement('button');
+    btn.textContent = '✕';
+    btn.style.cssText = 'background:none;border:none;font-size:16px;cursor:pointer;color:inherit;margin-left:8px;flex-shrink:0';
+    btn.onclick = function() { area.innerHTML = ''; };
+    div.appendChild(btn);
+  }
+  area.innerHTML = '';
+  area.appendChild(div);
 }
 </script>
 </body></html>"""
