@@ -3528,6 +3528,9 @@ def upload_image_to_drive(image_url, folder_id=None):
     global _drive_folder_id_cache
     if not image_url:
         return image_url
+    image_url = str(image_url).strip()  # 清除換行符號、空白
+    if not image_url or not image_url.startswith('http'):
+        return image_url
     if "drive.google.com" in image_url or "googleapis.com" in image_url:
         return image_url  # 已經是 Drive URL，跳過
     try:
