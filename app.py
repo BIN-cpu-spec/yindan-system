@@ -4132,7 +4132,7 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
   <a href="/logout" style="color:#aaa;font-size:12px;text-decoration:none">登出</a>
 </div>
 
-<div id="msg-area"></div>
+<div id="msg-area" style="position:sticky;top:52px;z-index:200"></div>
 
 <div class="card">
   <h2>&#128228; 上傳倉庫進貨清單</h2>
@@ -4222,7 +4222,24 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
       <div class="form-group"><label>單價 *</label><input type="number" id="f-price" placeholder="例：3.4" step="0.01"></div>
       <div class="form-group"><label>單位</label><input type="text" id="f-unit" placeholder="例：個"></div>
       <div class="form-group"><label>商品尺寸</label><input type="text" id="f-product-size" placeholder="例：20*35*10"></div>
-      <div class="form-group"><label>圖片網址</label><input type="text" id="f-image" placeholder="貼上圖片URL（選填）"></div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>圖片</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <input type="text" id="f-image" placeholder="貼上圖片URL，或用下方方式上傳" style="flex:1" oninput="previewImageUrl(this.value)">
+          <label style="background:#1565c0;color:#fff;padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap">
+            &#128193; 選擇圖片
+            <input type="file" id="f-image-file" accept="image/*" style="display:none" onchange="handleImageFile(this)">
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <input type="text" id="f-1688-url" placeholder="貼上 1688 商品網址，自動抓取圖片" style="flex:1;font-size:12px">
+          <button type="button" onclick="fetch1688Image()" style="background:#f57c00;color:#fff;border:none;padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap">&#128247; 抓取圖片</button>
+        </div>
+        <div id="f-image-preview" style="display:none;margin-top:6px">
+          <img id="f-image-thumb" style="max-width:80px;max-height:80px;border-radius:4px;border:1px solid #ddd">
+        </div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">&#128161; 支援：貼 URL、Ctrl+V 貼截圖、選圖片檔、1688網址自動抓圖</div>
+      </div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
       <button class="btn btn-gray" onclick="skipNewItem()">跳過此筆</button>
@@ -4314,6 +4331,10 @@ function showNewItemModal(rowIdx) {
   document.getElementById('f-unit').value = '';
   document.getElementById('f-product-size').value = '';
   document.getElementById('f-image').value = '';
+  document.getElementById('f-image').placeholder = '貼上圖片URL，或用下方方式上傳';
+  document.getElementById('f-1688-url').value = '';
+  document.getElementById('f-image-preview').style.display = 'none';
+  window.__pendingImageBase64 = '';
   document.getElementById('new-item-modal').classList.add('show');
 }
 
@@ -4323,45 +4344,66 @@ function saveNewItem() {
   var customsName = document.getElementById('f-customs-name').value.trim();
   var price = document.getElementById('f-price').value.trim();
   if(!material || !customsName || !price) {
-    showMsg('&#9888; 材質、報關品名、單價為必填！', false);
+    showMsg('材質、報關品名、單價為必填！', false);
     return;
   }
-  var newItem = {
-    sku: sku,
-    name: document.getElementById('f-name').value.trim(),
-    style: document.getElementById('f-style').value.trim(),
-    size: document.getElementById('f-size').value.trim(),
-    material: material,
-    customs_name: customsName,
-    price: parseFloat(price),
-    unit: document.getElementById('f-unit').value.trim(),
-    product_size: document.getElementById('f-product-size').value.trim(),
-    image: document.getElementById('f-image').value.trim(),
-  };
-  fetch('/api/customs/new-item', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(newItem)
-  }).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok) { showMsg('&#128561; 儲存失敗：' + d.msg, false); return; }
-    // 更新本地資料
-    customsDb[sku] = newItem;
-    var rowIdx = missingSkus[currentMissingIdx];
-    allRows[rowIdx].status = 'ok';
-    allRows[rowIdx].material = newItem.material;
-    allRows[rowIdx].customs_name = newItem.customs_name;
-    allRows[rowIdx].price = newItem.price;
-    allRows[rowIdx].unit = newItem.unit;
-    allRows[rowIdx].image = newItem.image;
-    allRows[rowIdx].total_rmb = (parseFloat(allRows[rowIdx].total_pcs) * newItem.price).toFixed(2);
-    document.getElementById('new-item-modal').classList.remove('show');
-    currentMissingIdx++;
-    if(currentMissingIdx < missingSkus.length) {
-      showNewItemModal(missingSkus[currentMissingIdx]);
-    } else {
-      showMsg('&#127881; 所有新品建檔完成！', true);
-      renderPreview();
-    }
-  });
+  var imageUrl = document.getElementById('f-image').value.trim();
+  var pendingB64 = window.__pendingImageBase64 || '';
+
+  function doSave(finalImageUrl) {
+    var newItem = {
+      sku: sku,
+      name: document.getElementById('f-name').value.trim(),
+      style: document.getElementById('f-style').value.trim(),
+      size: document.getElementById('f-size').value.trim(),
+      material: material,
+      customs_name: customsName,
+      price: parseFloat(price),
+      unit: document.getElementById('f-unit').value.trim(),
+      product_size: document.getElementById('f-product-size').value.trim(),
+      image: finalImageUrl,
+    };
+    fetch('/api/customs/new-item', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(newItem)
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok) { showMsg('儲存失敗：' + d.msg, false); return; }
+      var usedUrl = d.image || finalImageUrl;
+      customsDb[sku] = newItem;
+      customsDb[sku].image = usedUrl;
+      var rowIdx = missingSkus[currentMissingIdx];
+      allRows[rowIdx].status = 'ok';
+      allRows[rowIdx].material = newItem.material;
+      allRows[rowIdx].customs_name = newItem.customs_name;
+      allRows[rowIdx].price = newItem.price;
+      allRows[rowIdx].unit = newItem.unit;
+      allRows[rowIdx].image = usedUrl;
+      allRows[rowIdx].total_rmb = (parseFloat(allRows[rowIdx].total_pcs) * newItem.price).toFixed(2);
+      window.__pendingImageBase64 = '';
+      document.getElementById('f-image-preview').style.display = 'none';
+      document.getElementById('new-item-modal').classList.remove('show');
+      currentMissingIdx++;
+      if(currentMissingIdx < missingSkus.length) {
+        showNewItemModal(missingSkus[currentMissingIdx]);
+      } else {
+        showMsg('所有新品建檔完成！', true);
+        renderPreview();
+      }
+    });
+  }
+
+  // 如果有 base64 圖片（截圖或上傳檔），先上傳到 Drive
+  if(pendingB64) {
+    showMsg('正在上傳圖片...', true);
+    fetch('/api/customs/upload-image-base64', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({data: pendingB64, row_idx: 0, col_idx: 0})
+    }).then(function(r){return r.json();}).then(function(d){
+      doSave(d.ok ? d.drive_url : imageUrl);
+    }).catch(function(){ doSave(imageUrl); });
+  } else {
+    doSave(imageUrl);
+  }
 }
 
 function skipNewItem() {
@@ -4446,7 +4488,7 @@ function exportExcel() {
   });
 
   if(badUrls.length > 0) {
-    showToast('🙈 ' + badUrls.join('、') + ' 的圖片網址怪怪的，這幾筆會沒有圖片喔！', false);
+    showErrors(badUrls.map(function(sku) { return {sku: sku, url: '網址格式有誤'}; }));
   }
 
   if(imgRows.length === 0) {
@@ -4534,10 +4576,113 @@ function showToast(msg, ok) {
   setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 500); }, 4000);
 }
 
+function showErrors(errors) {
+  var old = document.getElementById('error-list-modal');
+  if(old) old.remove();
+  var PAGE = 5;
+  var shown = Math.min(PAGE, errors.length);
+  function render(count) {
+    var old2 = document.getElementById('error-list-modal');
+    if(old2) old2.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'error-list-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3)';
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+    html += '<h3 style="color:#c62828;margin:0">🙈 發現 ' + errors.length + ' 筆圖片網址有誤</h3>';
+    html += '<button onclick="document.getElementById(\'error-list-modal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999">✕</button></div>';
+    html += '<ul style="margin:0;padding-left:20px">';
+    errors.slice(0, count).forEach(function(e) {
+      html += '<li style="margin-bottom:8px;font-size:13px"><strong>' + e.sku + '</strong>：<span style="color:#e53935">' + e.url + '</span></li>';
+    });
+    html += '</ul>';
+    if(count < errors.length) {
+      html += '<button onclick="(' + render.toString() + ')(' + Math.min(count+PAGE, errors.length) + ')" style="margin-top:12px;padding:8px 16px;background:#1565c0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">載入更多（還有 ' + (errors.length-count) + ' 筆）</button>';
+    }
+    box.innerHTML = html;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+  render(shown);
+}
+
+// ── 圖片建檔：URL預覽 ──
+function previewImageUrl(url) {
+  var preview = document.getElementById('f-image-preview');
+  var thumb = document.getElementById('f-image-thumb');
+  if(url && url.startsWith('http')) {
+    thumb.src = url;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+function fetch1688Image() {
+  var url = (document.getElementById('f-1688-url').value || '').trim();
+  if(!url) { showMsg('請先貼上 1688 商品網址！', false); return; }
+  showMsg('正在從 1688 抓取圖片...', true);
+  fetch('/api/customs/fetch-1688-image', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url: url})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok && d.image_url) {
+      document.getElementById('f-image').value = d.image_url;
+      previewImageUrl(d.image_url);
+      document.getElementById('f-1688-url').value = '';
+      showMsg('圖片抓取成功！', true);
+    } else {
+      showMsg('抓取失敗：' + (d.msg || '找不到圖片'), false);
+    }
+  }).catch(function(e){ showMsg('連線錯誤：' + e, false); });
+}
+
+// ── 圖片建檔：選擇檔案上傳 ──
+function handleImageFile(input) {
+  if(!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    window.__pendingImageBase64 = e.target.result;
+    var thumb = document.getElementById('f-image-thumb');
+    thumb.src = e.target.result;
+    document.getElementById('f-image-preview').style.display = 'block';
+    document.getElementById('f-image').value = '';
+    document.getElementById('f-image').placeholder = '圖片已選擇（上傳後自動填入URL）';
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+// ── 圖片建檔：Ctrl+V 貼截圖 ──
+document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('paste', function(e) {
+    if(!document.getElementById('new-item-modal').classList.contains('show')) return;
+    var items = e.clipboardData && e.clipboardData.items;
+    if(!items) return;
+    for(var i=0; i<items.length; i++) {
+      if(items[i].type.indexOf('image') >= 0) {
+        var file = items[i].getAsFile();
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+          window.__pendingImageBase64 = ev.target.result;
+          document.getElementById('f-image-thumb').src = ev.target.result;
+          document.getElementById('f-image-preview').style.display = 'block';
+          document.getElementById('f-image').value = '';
+          document.getElementById('f-image').placeholder = '截圖已貼上（儲存時自動上傳）';
+        };
+        reader.readAsDataURL(file);
+        e.preventDefault();
+        break;
+      }
+    }
+  });
+});
+
 function showMsg(msg, ok) {
   var area = document.getElementById('msg-area');
   if(!msg) { area.innerHTML = ''; return; }
-  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '">' + msg + '</div>';
+  var closeBtn = ok ? '' : '<button onclick="document.getElementById(\'msg-area\').innerHTML=\'\'" style="float:right;background:none;border:none;font-size:16px;cursor:pointer;color:inherit;margin-left:8px">✕</button>';
+  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '" style="display:flex;align-items:center;justify-content:space-between">' + closeBtn + '<span>' + msg + '</span></div>';
 }
 </script>
 </body></html>"""
@@ -4731,6 +4876,58 @@ def api_customs_new_item():
         return jsonify({"ok": False, "msg": err})
     log(f"新品建檔：{data.get('sku')} {data.get('customs_name')}")
     return jsonify({"ok": True, "image": data.get("image", "")})
+
+
+@app.route("/api/customs/fetch-1688-image", methods=["POST"])
+@login_required
+def api_fetch_1688_image():
+    """從 1688 商品頁面抓取主圖 URL"""
+    try:
+        import requests as req_lib, re as _re
+        data = request.get_json(silent=True) or {}
+        url = data.get("url", "").strip()
+        if not url:
+            return jsonify({"ok": False, "msg": "請提供 1688 商品網址"})
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://www.1688.com/",
+            "Accept-Language": "zh-TW,zh;q=0.9"
+        }
+        resp = req_lib.get(url, headers=headers, timeout=10)
+        html = resp.text
+
+        # 嘗試多種方式抓圖片
+        image_url = None
+
+        # 方法1: og:image meta tag
+        m = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html)
+        if m:
+            image_url = m.group(1)
+
+        # 方法2: 主圖 JSON
+        if not image_url:
+            m = _re.search(r'"mainImageUrl"\s*:\s*"([^"]+)"', html)
+            if m:
+                image_url = m.group(1)
+
+        # 方法3: img src 中最大的圖
+        if not image_url:
+            imgs = _re.findall(r'src=["\']([^"\']+\.jpg[^"\']*)["\']', html)
+            aliimgs = [i for i in imgs if 'alicdn.com' in i or 'alibaba' in i]
+            if aliimgs:
+                image_url = aliimgs[0]
+
+        if image_url:
+            # 清理 URL
+            image_url = image_url.replace('\\/', '/').split('?')[0]
+            if not image_url.startswith('http'):
+                image_url = 'https:' + image_url
+            return jsonify({"ok": True, "image_url": image_url})
+        else:
+            return jsonify({"ok": False, "msg": "找不到商品圖片，請手動貼上圖片URL"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 
 @app.route("/api/customs/upload-image-base64", methods=["POST"])
