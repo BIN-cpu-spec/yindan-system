@@ -4441,7 +4441,7 @@ function resetPage() {
 }
 
 function migrateImages() {
-  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。\n圖片數量多的話可能需要幾分鐘，請耐心等候。\n確定要開始嗎？')) return;
+  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。確定要開始嗎？')) return;
   showMsg('轉換中，請勿關閉頁面...', true);
   fetch('/api/customs/migrate-images', {method:'POST'})
     .then(function(r){ return r.json(); })
