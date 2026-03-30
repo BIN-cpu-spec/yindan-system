@@ -4666,7 +4666,9 @@ def api_customs_migrate_images():
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
         sh = client.open_by_key(sheet_id)
         ws = sh.worksheet("商品報關資料庫")
-        all_values = ws.get_all_values()
+
+        # 用 FORMULA 模式讀取，才能拿到 =IMAGE("url") 公式字串
+        all_values = ws.get_all_values(value_render_option='FORMULA')
         if not all_values:
             return jsonify({"ok": True, "updated": 0, "msg": "沒有資料"})
 
@@ -4677,16 +4679,23 @@ def api_customs_migrate_images():
         except ValueError:
             return jsonify({"ok": False, "msg": "找不到「圖片」欄位"})
 
-        # 找出需要轉換的列（非 Drive URL、非空）
+        # 找出需要轉換的列，支援純URL和 =IMAGE("url") 兩種格式
+        import re as _re
         to_convert = []
-        for row_idx, row in enumerate(all_values[1:], start=2):  # row 2 開始（1-indexed）
+        for row_idx, row in enumerate(all_values[1:], start=2):
             if img_col_idx < len(row):
-                url = row[img_col_idx]
-                if url and "drive.google.com" not in url and "googleapis.com" not in url:
-                    to_convert.append((row_idx, img_col_idx + 1, url))  # col 1-indexed
+                cell_val = row[img_col_idx]
+                # 解析 =IMAGE("url") 公式
+                m = _re.search(r'=IMAGE\(["\']([^"\']+)["\']', str(cell_val), _re.IGNORECASE)
+                if m:
+                    url = m.group(1)
+                else:
+                    url = str(cell_val).strip()
+                if url and url.startswith('http') and "drive.google.com" not in url and "googleapis.com" not in url:
+                    to_convert.append((row_idx, img_col_idx + 1, url))
 
         if not to_convert:
-            return jsonify({"ok": True, "updated": 0, "msg": "所有圖片已是 Google Drive URL"})
+            return jsonify({"ok": True, "updated": 0, "msg": "所有圖片已是 Google Drive URL 或無圖片"})
 
         # 平行轉換
         results = {}
@@ -4701,17 +4710,17 @@ def api_customs_migrate_images():
                 row_idx, col_idx, new_url = future.result()
                 results[(row_idx, col_idx)] = new_url
 
-        # 回寫 Google Sheets
+        # 回寫 Google Sheets（存純 URL，不用公式）
         updated = 0
+        orig_map = {item[0]: item[2] for item in to_convert}
         for (row_idx, col_idx), new_url in results.items():
-            original_url = to_convert[[i for i, x in enumerate(to_convert) if x[0] == row_idx][0]][2]
-            if new_url != original_url:
+            if new_url != orig_map.get(row_idx):
                 ws.update_cell(row_idx, col_idx, new_url)
                 updated += 1
 
         log(f"圖片遷移完成：共轉換 {updated} 筆")
         return jsonify({"ok": True, "updated": updated, "total": len(to_convert),
-                        "msg": f"完成！共轉換 {updated} 張圖片到 Google Drive"})
+                        "msg": f"完成！共 {len(to_convert)} 張，成功轉換 {updated} 張到 Google Drive"})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
