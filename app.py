@@ -4441,18 +4441,18 @@ function resetPage() {
 }
 
 function migrateImages() {
-  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。\n\n圖片數量多的話可能需要幾分鐘，請耐心等候。\n\n確定要開始嗎？')) return;
-  showMsg('⏳ 轉換中，請勿關閉頁面...', true);
+  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。\n圖片數量多的話可能需要幾分鐘，請耐心等候。\n確定要開始嗎？')) return;
+  showMsg('轉換中，請勿關閉頁面...', true);
   fetch('/api/customs/migrate-images', {method:'POST'})
-    .then(r => r.json())
-    .then(d => {
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
       if(d.ok) {
-        showMsg('✅ ' + d.msg, true);
+        showMsg('完成！' + d.msg, true);
       } else {
-        showMsg('❌ 轉換失敗：' + d.msg, false);
+        showMsg('轉換失敗：' + d.msg, false);
       }
     })
-    .catch(e => showMsg('❌ 連線錯誤：' + e, false));
+    .catch(function(e){ showMsg('連線錯誤：' + e, false); });
 }
 
 function showMsg(msg, ok) {
@@ -4466,7 +4466,8 @@ function showMsg(msg, ok) {
 @app.route("/customs")
 @login_required
 def customs_page():
-    return render_template_string(CUSTOMS_HTML)
+    from flask import Response
+    return Response(CUSTOMS_HTML, mimetype="text/html")
 
 @app.route("/api/customs/upload", methods=["POST"])
 @login_required
