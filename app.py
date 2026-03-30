@@ -4223,13 +4223,16 @@ var customsDb = {};
 var processedRows = [];
 
 // 拖曳上傳
-var dz = document.getElementById('drop-zone');
-dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
-dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
-dz.addEventListener('drop', function(e){
-  e.preventDefault(); dz.classList.remove('drag');
-  var f = e.dataTransfer.files[0];
-  if(f) processFile(f);
+document.addEventListener('DOMContentLoaded', function() {
+  var dz = document.getElementById('drop-zone');
+  if(!dz) return;
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault(); dz.classList.remove('drag');
+    var f = e.dataTransfer.files[0];
+    if(f) processFile(f);
+  });
 });
 
 function uploadFile(input) {
