@@ -4390,8 +4390,8 @@ function renderPreview() {
     var imgUrl = (r.image || '').trim();
     var isValidUrl = imgUrl && imgUrl.startsWith('http') && imgUrl.indexOf('.') > 0 && imgUrl.length > 15;
     var img = isValidUrl
-      ? '<img class="thumb" src="' + imgUrl + '" onerror="this.parentNode.innerHTML=\'<span title=&quot;' + imgUrl + '&quot; style=&quot;font-size:18px;cursor:help&quot;>😵 圖片失蹤了！</span>\'">'
-      : (imgUrl ? '<span title="網址格式有誤：' + imgUrl + '" style="font-size:13px;cursor:help;color:#e53935">🙈 這不像網址耶！</span>' : '—');
+      ? '<img class="thumb" src="' + imgUrl + '" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'<span style=\\\"font-size:18px\\\">😵</span>\'">'
+      : (imgUrl ? '<span style="font-size:13px;color:#e53935">🙈 網址有誤</span>' : '—');
     return '<tr class="' + cls + '">' +
       '<td>' + (r.sku||'—') + '</td>' +
       '<td>' + (r.type||'') + '</td>' +
