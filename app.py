@@ -3490,6 +3490,101 @@ def api_diagonal_delete(sku):
 # 報關模組
 # ============================================================
 
+def get_drive_service():
+    """建立 Google Drive API 連線"""
+    try:
+        import base64
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+        cred_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT", "")
+        if not cred_json:
+            return None, "未設定 GOOGLE_SERVICE_ACCOUNT"
+        cred_dict = None
+        try:
+            cred_dict = json.loads(base64.b64decode(cred_json + "==").decode("utf-8"))
+        except Exception:
+            pass
+        if not cred_dict:
+            try:
+                cred_dict = json.loads(cred_json)
+            except Exception as e:
+                return None, str(e)
+        scopes = ["https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
+        service = build("drive", "v3", credentials=creds)
+        return service, None
+    except Exception as e:
+        return None, str(e)
+
+
+def upload_image_to_drive(image_url, folder_id=None):
+    """
+    下載圖片（支援 1688 防盜鏈）並上傳到 Google Drive。
+    回傳可公開存取的直連 URL；失敗回傳原始 URL。
+    """
+    if not image_url:
+        return image_url
+    if "drive.google.com" in image_url or "googleapis.com" in image_url:
+        return image_url  # 已經是 Drive URL，跳過
+    try:
+        import requests as req_lib
+        from googleapiclient.http import MediaIoBaseUpload
+
+        # 下載圖片
+        dl = req_lib.get(image_url, headers={
+            "Referer": "https://www.1688.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }, timeout=10)
+        if dl.status_code != 200 or not dl.content:
+            return image_url
+
+        # 判斷副檔名
+        content_type = dl.headers.get("Content-Type", "image/jpeg")
+        ext = "jpg" if "jpeg" in content_type else content_type.split("/")[-1].split(";")[0]
+
+        service, err = get_drive_service()
+        if err:
+            return image_url
+
+        # 取得或建立圖片資料夾
+        if not folder_id:
+            folder_id = os.environ.get("DRIVE_IMG_FOLDER_ID", "")
+        if not folder_id:
+            # 自動建立「報關圖片」資料夾
+            folder_meta = {
+                "name": "報關圖片",
+                "mimeType": "application/vnd.google-apps.folder"
+            }
+            folder = service.files().create(body=folder_meta, fields="id").execute()
+            folder_id = folder.get("id", "")
+            # 設定資料夾公開
+            service.permissions().create(
+                fileId=folder_id,
+                body={"type": "anyone", "role": "reader"}
+            ).execute()
+            log(f"已建立 Google Drive 圖片資料夾: {folder_id}，請設定 DRIVE_IMG_FOLDER_ID={folder_id}")
+
+        # 上傳圖片
+        import hashlib
+        fname = hashlib.md5(image_url.encode()).hexdigest()[:12] + "." + ext
+        file_meta = {"name": fname, "parents": [folder_id]}
+        media = MediaIoBaseUpload(io.BytesIO(dl.content), mimetype=content_type, resumable=False)
+        uploaded = service.files().create(body=file_meta, media_body=media, fields="id").execute()
+        file_id = uploaded.get("id", "")
+
+        # 設定公開可讀
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"}
+        ).execute()
+
+        # 回傳直連縮圖 URL
+        return f"https://drive.google.com/thumbnail?id={file_id}&sz=w200"
+    except Exception as e:
+        log(f"upload_image_to_drive 失敗: {e}")
+        return image_url
+
+
 def get_sheets_client():
     """建立 Google Sheets 連線"""
     try:
@@ -4084,9 +4179,10 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
         <tbody id="preview-body"></tbody>
       </table>
     </div>
-    <div style="margin-top:16px;display:flex;gap:10px">
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-green" onclick="exportExcel()">&#128229; 匯出報關 Excel</button>
       <button class="btn btn-gray" onclick="resetPage()">&#128260; 重新上傳</button>
+      <button class="btn" style="background:#f57c00;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px" onclick="migrateImages()">&#128247; 一鍵轉換舊圖片到 Google Drive</button>
     </div>
   </div>
 </div>
@@ -4341,6 +4437,21 @@ function resetPage() {
   showMsg('', true);
 }
 
+function migrateImages() {
+  if(!confirm('將把 Google Sheets 裡所有 1688 圖片網址轉存到 Google Drive。\n\n圖片數量多的話可能需要幾分鐘，請耐心等候。\n\n確定要開始嗎？')) return;
+  showMsg('⏳ 轉換中，請勿關閉頁面...', true);
+  fetch('/api/customs/migrate-images', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if(d.ok) {
+        showMsg('✅ ' + d.msg, true);
+      } else {
+        showMsg('❌ 轉換失敗：' + d.msg, false);
+      }
+    })
+    .catch(e => showMsg('❌ 連線錯誤：' + e, false));
+}
+
 function showMsg(msg, ok) {
   var area = document.getElementById('msg-area');
   if(!msg) { area.innerHTML = ''; return; }
@@ -4521,15 +4632,84 @@ def api_customs_upload():
     except Exception as e:
         return jsonify({"ok": False, "msg": f"讀取失敗：{e}"})
 
+def upload_to_imgur(image_url):
+    """已改用 Google Drive，此函數保留相容性"""
+    return upload_image_to_drive(image_url)
+
 @app.route("/api/customs/new-item", methods=["POST"])
 @login_required
 def api_customs_new_item():
     data = request.get_json()
+    # 圖片 URL 自動轉存 Google Drive（避免 1688 防盜鏈導致匯出沒圖片）
+    if data.get("image"):
+        data["image"] = upload_image_to_drive(data["image"])
     err = append_to_customs_db(data)
     if err:
         return jsonify({"ok": False, "msg": err})
     log(f"新品建檔：{data.get('sku')} {data.get('customs_name')}")
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "image": data.get("image", "")})
+
+
+@app.route("/api/customs/migrate-images", methods=["POST"])
+@login_required
+def api_customs_migrate_images():
+    """將 Google Sheets 中所有 1688 圖片 URL 轉存到 Google Drive"""
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err})
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet("商品報關資料庫")
+        all_values = ws.get_all_values()
+        if not all_values:
+            return jsonify({"ok": True, "updated": 0, "msg": "沒有資料"})
+
+        # 找標題列，確認圖片欄位置
+        header = all_values[0]
+        try:
+            img_col_idx = header.index("圖片")
+        except ValueError:
+            return jsonify({"ok": False, "msg": "找不到「圖片」欄位"})
+
+        # 找出需要轉換的列（非 Drive URL、非空）
+        to_convert = []
+        for row_idx, row in enumerate(all_values[1:], start=2):  # row 2 開始（1-indexed）
+            if img_col_idx < len(row):
+                url = row[img_col_idx]
+                if url and "drive.google.com" not in url and "googleapis.com" not in url:
+                    to_convert.append((row_idx, img_col_idx + 1, url))  # col 1-indexed
+
+        if not to_convert:
+            return jsonify({"ok": True, "updated": 0, "msg": "所有圖片已是 Google Drive URL"})
+
+        # 平行轉換
+        results = {}
+        def convert_one(item):
+            row_idx, col_idx, url = item
+            new_url = upload_image_to_drive(url)
+            return row_idx, col_idx, new_url
+
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = {pool.submit(convert_one, item): item for item in to_convert}
+            for future in as_completed(futures):
+                row_idx, col_idx, new_url = future.result()
+                results[(row_idx, col_idx)] = new_url
+
+        # 回寫 Google Sheets
+        updated = 0
+        for (row_idx, col_idx), new_url in results.items():
+            original_url = to_convert[[i for i, x in enumerate(to_convert) if x[0] == row_idx][0]][2]
+            if new_url != original_url:
+                ws.update_cell(row_idx, col_idx, new_url)
+                updated += 1
+
+        log(f"圖片遷移完成：共轉換 {updated} 筆")
+        return jsonify({"ok": True, "updated": updated, "total": len(to_convert),
+                        "msg": f"完成！共轉換 {updated} 張圖片到 Google Drive"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 @app.route("/api/customs/export", methods=["POST"])
 @login_required
@@ -4669,17 +4849,23 @@ def api_customs_export():
 
             # ── 嵌入圖片 ──
             img_buf = img_map.get(i)
+            img_url = row.get("image", "")
             if img_buf:
                 try:
                     xl_img = XLImage(img_buf)
                     xl_img.width  = IMG_MAX_PX
                     xl_img.height = IMG_MAX_PX
-                    col_letter = "R"
-                    ws.add_image(xl_img, f"{col_letter}{r}")
+                    ws.add_image(xl_img, f"R{r}")
                 except Exception:
-                    ws.cell(r, 18, row.get("image", ""))
+                    if img_url:
+                        cell = ws.cell(r, 18, "點擊看圖")
+                        cell.hyperlink = img_url
+                        cell.font = Font(color="FF0563C1", underline="single")
             else:
-                ws.cell(r, 18, row.get("image", ""))
+                if img_url:
+                    cell = ws.cell(r, 18, "點擊看圖")
+                    cell.hyperlink = img_url
+                    cell.font = Font(color="FF0563C1", underline="single")
 
             if row.get("status") != "ok":
                 for c in range(1, 19):
