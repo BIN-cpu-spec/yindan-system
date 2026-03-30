@@ -4199,7 +4199,6 @@ img.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;border:1px s
     <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-green" onclick="exportExcel()">&#128229; 匯出報關 Excel</button>
       <button class="btn btn-gray" onclick="resetPage()">&#128260; 重新上傳</button>
-      <button class="btn" style="background:#f57c00;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px" onclick="migrateImages()">&#128247; 一鍵轉換舊圖片到 Google Drive</button>
     </div>
   </div>
 </div>
@@ -4388,7 +4387,11 @@ function renderPreview() {
     var statusTag = r.status === 'ok'
       ? '<span class="tag-ok">&#10003; 已對應</span>'
       : '<span class="tag-miss">&#128560; 查無資料</span>';
-    var img = r.image ? '<img class="thumb" src="' + r.image + '">' : '—';
+    var imgUrl = (r.image || '').trim();
+    var isValidUrl = imgUrl && imgUrl.startsWith('http') && imgUrl.indexOf('.') > 0 && imgUrl.length > 15;
+    var img = isValidUrl
+      ? '<img class="thumb" src="' + imgUrl + '" onerror="this.parentNode.innerHTML=\'<span title=&quot;' + imgUrl + '&quot; style=&quot;font-size:18px;cursor:help&quot;>😵 圖片失蹤了！</span>\'">'
+      : (imgUrl ? '<span title="網址格式有誤：' + imgUrl + '" style="font-size:13px;cursor:help;color:#e53935">🙈 這不像網址耶！</span>' : '—');
     return '<tr class="' + cls + '">' +
       '<td>' + (r.sku||'—') + '</td>' +
       '<td>' + (r.type||'') + '</td>' +
@@ -4430,12 +4433,24 @@ function exportExcel() {
 
   // 收集所有有圖片的列
   var imgRows = [];
+  var badUrls = [];
   allRows.forEach(function(r, i) {
-    if(r.image && r.image.trim()) imgRows.push({idx: i, url: r.image.trim()});
+    var url = (r.image || '').trim();
+    if(!url) return;
+    var isValid = url.startsWith('http') && url.indexOf('.') > 0 && url.length > 15;
+    if(isValid) {
+      imgRows.push({idx: i, url: url});
+    } else {
+      badUrls.push((r.sku || '第'+(i+1)+'列'));
+    }
   });
 
+  if(badUrls.length > 0) {
+    showToast('🙈 ' + badUrls.join('、') + ' 的圖片網址怪怪的，這幾筆會沒有圖片喔！', false);
+  }
+
   if(imgRows.length === 0) {
-    doExport([], cabinetNo, sealNo, shipDateStr, exporter, importer);
+    doExport({}, cabinetNo, sealNo, shipDateStr, exporter, importer);
     return;
   }
 
@@ -4506,71 +4521,6 @@ function imgToBase64(url, callback) {
   };
   img.onerror = function() { callback(null, 'load error'); };
   img.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
-}
-
-function migrateImages() {
-  if(!confirm('將用瀏覽器下載圖片並上傳到 Google Drive，全程自動執行。確定要開始嗎？')) return;
-  var totalUpdated = 0;
-  var totalFailed = 0;
-  var grandTotal = 0;
-
-  function processBatch(offset) {
-    showMsg('讀取待轉換清單... offset=' + offset, true);
-    fetch('/api/customs/get-pending-images', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({offset: offset})
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(d) {
-      if(!d.ok) { showMsg('錯誤：' + d.msg, false); showToast('錯誤：' + d.msg, false); return; }
-      if(d.items.length === 0) {
-        var finalMsg = '全部完成！成功 ' + totalUpdated + ' 張，失敗 ' + totalFailed + ' 張';
-        showMsg(finalMsg, true);
-        showToast(finalMsg, true);
-        return;
-      }
-      grandTotal = d.total;
-      uploadItems(d.items, 0, d.remaining, d.next_offset);
-    })
-    .catch(function(e){ showMsg('連線錯誤：' + e, false); });
-  }
-
-  function uploadItems(items, i, remaining, nextOffset) {
-    if(i >= items.length) {
-      if(remaining > 0) {
-        showMsg('轉換中... 已完成 ' + (grandTotal - remaining) + '/' + grandTotal + ' 張', true);
-        setTimeout(function(){ processBatch(nextOffset); }, 300);
-      } else {
-        var finalMsg = '全部完成！成功 ' + totalUpdated + ' 張，失敗 ' + totalFailed + ' 張';
-        showMsg(finalMsg, true);
-        showToast(finalMsg, true);
-      }
-      return;
-    }
-    var item = items[i];
-    showMsg('轉換中 ' + (grandTotal - remaining - items.length + i + 1) + '/' + grandTotal + '...', true);
-    imgToBase64(item.url, function(b64, err) {
-      if(!b64 || err) {
-        totalFailed++;
-        uploadItems(items, i + 1, remaining, nextOffset);
-        return;
-      }
-      fetch('/api/customs/upload-image-base64', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({data: b64, row_idx: item.row_idx, col_idx: item.col_idx})
-      })
-      .then(function(r){ return r.json(); })
-      .then(function(res) {
-        if(res.ok) totalUpdated++; else totalFailed++;
-        uploadItems(items, i + 1, remaining, nextOffset);
-      })
-      .catch(function(){ totalFailed++; uploadItems(items, i + 1, remaining, nextOffset); });
-    });
-  }
-
-  processBatch(0);
 }
 
 function showToast(msg, ok) {
