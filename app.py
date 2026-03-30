@@ -4580,31 +4580,60 @@ function showErrors(errors) {
   var old = document.getElementById('error-list-modal');
   if(old) old.remove();
   var PAGE = 5;
-  var shown = Math.min(PAGE, errors.length);
   function render(count) {
     var old2 = document.getElementById('error-list-modal');
     if(old2) old2.remove();
+
     var overlay = document.createElement('div');
     overlay.id = 'error-list-modal';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9998;display:flex;align-items:center;justify-content:center';
+
     var box = document.createElement('div');
     box.style.cssText = 'background:#fff;border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3)';
-    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
-    html += '<h3 style="color:#c62828;margin:0">🙈 發現 ' + errors.length + ' 筆圖片網址有誤</h3>';
-    html += '<button onclick="document.getElementById(\'error-list-modal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999">✕</button></div>';
-    html += '<ul style="margin:0;padding-left:20px">';
-    errors.slice(0, count).forEach(function(e) {
-      html += '<li style="margin-bottom:8px;font-size:13px"><strong>' + e.sku + '</strong>：<span style="color:#e53935">' + e.url + '</span></li>';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px';
+
+    var title = document.createElement('h3');
+    title.style.cssText = 'color:#c62828;margin:0';
+    title.textContent = '發現 ' + errors.length + ' 筆圖片網址有誤';
+    header.appendChild(title);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;color:#999';
+    closeBtn.onclick = function() { overlay.remove(); };
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    var ul = document.createElement('ul');
+    ul.style.cssText = 'margin:0;padding-left:20px';
+    errors.slice(0, count).forEach(function(item) {
+      var li = document.createElement('li');
+      li.style.cssText = 'margin-bottom:8px;font-size:13px';
+      var strong = document.createElement('strong');
+      strong.textContent = item.sku;
+      var span = document.createElement('span');
+      span.style.color = '#e53935';
+      span.textContent = '：' + item.url;
+      li.appendChild(strong);
+      li.appendChild(span);
+      ul.appendChild(li);
     });
-    html += '</ul>';
+    box.appendChild(ul);
+
     if(count < errors.length) {
-      html += '<button onclick="(' + render.toString() + ')(' + Math.min(count+PAGE, errors.length) + ')" style="margin-top:12px;padding:8px 16px;background:#1565c0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">載入更多（還有 ' + (errors.length-count) + ' 筆）</button>';
+      var moreBtn = document.createElement('button');
+      moreBtn.style.cssText = 'margin-top:12px;padding:8px 16px;background:#1565c0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px';
+      moreBtn.textContent = '載入更多（還有 ' + (errors.length - count) + ' 筆）';
+      moreBtn.onclick = function() { render(Math.min(count + PAGE, errors.length)); };
+      box.appendChild(moreBtn);
     }
-    box.innerHTML = html;
+
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   }
-  render(shown);
+  render(Math.min(PAGE, errors.length));
 }
 
 // ── 圖片建檔：URL預覽 ──
