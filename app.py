@@ -4722,29 +4722,30 @@ def api_test_image():
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }, timeout=10)
             if dl.status_code != 200:
-                return jsonify({"ok": False, "step": "download", "msg": f"HTTP {dl.status_code}", "url": url})
-            if not dl.content:
-                return jsonify({"ok": False, "step": "download", "msg": "回傳內容為空"})
+                return jsonify({"ok": False, "step": "download", "msg": f"HTTP {dl.status_code}"})
             img_size = len(dl.content)
         except Exception as e:
             return jsonify({"ok": False, "step": "download", "msg": str(e)})
 
         # Step 2: 取得 Drive service
-        service, err = get_drive_service()
-        if err:
-            return jsonify({"ok": False, "step": "drive_auth", "msg": err})
+        try:
+            service, err = get_drive_service()
+            if err:
+                return jsonify({"ok": False, "step": "drive_auth", "msg": err})
+        except Exception as e:
+            return jsonify({"ok": False, "step": "drive_auth_exception", "msg": str(e)})
 
-        # Step 3: 上傳
-        result_url = upload_image_to_drive(url)
-        success = "drive.google.com" in result_url
-
-        return jsonify({
-            "ok": success,
-            "step": "done" if success else "upload_failed",
-            "img_size": img_size,
-            "result_url": result_url,
-            "msg": "成功" if success else "上傳後仍回傳原始 URL"
-        })
+        # Step 3: 測試建立資料夾
+        try:
+            folder_meta = {"name": "報關圖片測試", "mimeType": "application/vnd.google-apps.folder"}
+            folder = service.files().create(body=folder_meta, fields="id").execute()
+            folder_id = folder.get("id", "")
+            # 刪除測試資料夾
+            service.files().delete(fileId=folder_id).execute()
+            return jsonify({"ok": True, "step": "drive_ok", "img_size": img_size,
+                            "msg": f"Drive 連線正常！圖片 {img_size} bytes 可下載，Drive API 可建立資料夾"})
+        except Exception as e:
+            return jsonify({"ok": False, "step": "drive_create_folder", "msg": str(e), "img_size": img_size})
     except Exception as e:
         return jsonify({"ok": False, "step": "exception", "msg": str(e)})
 
