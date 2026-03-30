@@ -4422,17 +4422,46 @@ function exportExcel() {
   var shipDate  = document.getElementById('ship-date').value;
   var exporter  = document.getElementById('exporter').value.trim();
   var importer  = document.getElementById('importer').value.trim();
-  // 日期格式轉換 yyyy-mm-dd → yyyy年mm月dd日
   var shipDateStr = '';
   if(shipDate) {
     var parts = shipDate.split('-');
     shipDateStr = parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
   }
-  showMsg('&#8987; 正在產生 Excel...', true);
+
+  // 收集所有有圖片的列
+  var imgRows = [];
+  allRows.forEach(function(r, i) {
+    if(r.image && r.image.trim()) imgRows.push({idx: i, url: r.image.trim()});
+  });
+
+  if(imgRows.length === 0) {
+    doExport([], cabinetNo, sealNo, shipDateStr, exporter, importer);
+    return;
+  }
+
+  showMsg('正在下載圖片（0/' + imgRows.length + ' 張）...', true);
+  var imgMap = {};
+  var done = 0;
+
+  imgRows.forEach(function(item) {
+    imgToBase64(item.url, function(b64) {
+      if(b64) imgMap[item.idx] = b64;
+      done++;
+      showMsg('正在下載圖片（' + done + '/' + imgRows.length + ' 張）...', true);
+      if(done === imgRows.length) {
+        showMsg('圖片下載完成，正在產生 Excel...', true);
+        doExport(imgMap, cabinetNo, sealNo, shipDateStr, exporter, importer);
+      }
+    });
+  });
+}
+
+function doExport(imgMap, cabinetNo, sealNo, shipDateStr, exporter, importer) {
   fetch('/api/customs/export', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       rows: allRows,
+      img_map: imgMap,
       cabinet_no: cabinetNo,
       seal_no:    sealNo,
       ship_date:  shipDateStr,
@@ -4446,8 +4475,9 @@ function exportExcel() {
     var fname = '報關清單' + (cabinetNo ? '_' + cabinetNo : '') + '_' + new Date().toISOString().slice(0,10) + '.xlsx';
     a.download = fname;
     a.click();
-    showMsg('&#127881; 匯出成功！', true);
-  });
+    showMsg('匯出成功！', true);
+    showToast('匯出成功！', true);
+  }).catch(function(e){ showMsg('匯出失敗：' + e, false); });
 }
 
 function resetPage() {
@@ -4461,13 +4491,15 @@ function imgToBase64(url, callback) {
   var img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = function() {
+    var MAX = 60;  // 最大像素，縮小檔案
     var canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    var ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
+    canvas.width = Math.round(img.naturalWidth * ratio);
+    canvas.height = Math.round(img.naturalHeight * ratio);
     var ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     try {
-      callback(canvas.toDataURL('image/jpeg', 0.85), null);
+      callback(canvas.toDataURL('image/jpeg', 0.7), null);  // 壓縮品質 0.7
     } catch(e) {
       callback(null, e.message);
     }
@@ -5004,41 +5036,33 @@ def api_customs_export():
         exporter   = data.get("exporter", "")
         importer   = data.get("importer", "")
 
-        # ── 平行下載所有圖片 ──────────────────────────────
-        IMG_HEADERS = {
-            "Referer": "https://www.1688.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        IMG_ROW_H  = 75   # 列高（點）
-        IMG_MAX_PX = 90   # 圖片最大像素（正方形）
+        # ── 圖片：優先用前端傳來的 base64，省去防盜鏈問題 ──────
+        import base64 as b64lib
+        IMG_ROW_H  = 75
+        IMG_MAX_PX = 90
 
-        def fetch_image(idx_url):
-            idx, url = idx_url
-            if not url:
-                return idx, None
-            try:
-                r = req_lib.get(url, headers=IMG_HEADERS, timeout=8)
-                if r.status_code == 200 and r.content:
-                    buf = io.BytesIO(r.content)
-                    # 縮圖避免 Excel 檔案過大
-                    pil = PILImage.open(buf)
+        frontend_img_map = data.get("img_map", {})  # {str(idx): base64_data_url}
+
+        img_map = {}  # idx(int) -> BytesIO or None
+        for i, row in enumerate(rows):
+            b64data = frontend_img_map.get(str(i)) or frontend_img_map.get(i)
+            if b64data:
+                try:
+                    if "," in b64data:
+                        b64str = b64data.split(",", 1)[1]
+                    else:
+                        b64str = b64data
+                    raw = b64lib.b64decode(b64str)
+                    pil = PILImage.open(io.BytesIO(raw))
                     pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
                     out = io.BytesIO()
                     pil.save(out, format="PNG")
                     out.seek(0)
-                    return idx, out
-            except Exception:
-                pass
-            return idx, None
-
-        # 收集所有圖片 URL 並平行下載
-        url_list = [(i, row.get("image", "")) for i, row in enumerate(rows)]
-        img_map = {}  # idx -> BytesIO or None
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = {pool.submit(fetch_image, item): item[0] for item in url_list}
-            for future in as_completed(futures):
-                idx, buf = future.result()
-                img_map[idx] = buf
+                    img_map[i] = out
+                except Exception:
+                    img_map[i] = None
+            else:
+                img_map[i] = None
 
         wb = openpyxl.Workbook()
         ws = wb.active
