@@ -4388,10 +4388,10 @@ function renderPreview() {
       ? '<span class="tag-ok">&#10003; 已對應</span>'
       : '<span class="tag-miss">&#128560; 查無資料</span>';
     var imgUrl = (r.image || '').trim();
-    var isValidUrl = imgUrl && imgUrl.startsWith('http') && imgUrl.indexOf('.') > 0 && imgUrl.length > 15;
+    var isValidUrl = imgUrl && imgUrl.startsWith('http') && imgUrl.length > 15;
     var img = isValidUrl
-      ? '<img class="thumb" src="' + imgUrl + '" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'<span style=\\\"font-size:18px\\\">😵</span>\'">'
-      : (imgUrl ? '<span style="font-size:13px;color:#e53935">🙈 網址有誤</span>' : '—');
+      ? '<img class="thumb" src="' + imgUrl + '">'
+      : (imgUrl ? '<span style="color:#e53935;font-size:12px">🙈 網址有誤</span>' : '—');
     return '<tr class="' + cls + '">' +
       '<td>' + (r.sku||'—') + '</td>' +
       '<td>' + (r.type||'') + '</td>' +
