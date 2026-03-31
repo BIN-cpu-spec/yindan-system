@@ -4545,24 +4545,44 @@ function resetPage() {
 }
 
 function imgToBase64(url, callback) {
+  var MAX = 60;
+  // 先嘗試瀏覽器 Canvas 方式（Windows Chrome 可行）
   var img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = function() {
-    var MAX = 60;  // 最大像素，縮小檔案
     var canvas = document.createElement('canvas');
     var ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
     canvas.width = Math.round(img.naturalWidth * ratio);
     canvas.height = Math.round(img.naturalHeight * ratio);
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
     try {
-      callback(canvas.toDataURL('image/jpeg', 0.7), null);  // 壓縮品質 0.7
+      var b64 = canvas.toDataURL('image/jpeg', 0.7);
+      callback(b64, null);
     } catch(e) {
-      callback(null, e.message);
+      // Canvas CORS 被擋（Safari / 嚴格瀏覽器），改用後端 proxy 下載
+      fetchViaProxy(url, callback);
     }
   };
-  img.onerror = function() { callback(null, 'load error'); };
+  img.onerror = function() {
+    // 圖片載入失敗，也試試後端 proxy
+    fetchViaProxy(url, callback);
+  };
   img.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+}
+
+function fetchViaProxy(url, callback) {
+  // 後端 proxy 下載圖片，繞過 CORS 和防盜鏈
+  fetch('/api/customs/proxy-image', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: url})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.ok && d.data) callback(d.data, null);
+    else callback(null, d.msg || 'proxy failed');
+  })
+  .catch(function(e){ callback(null, 'proxy error'); });
 }
 
 function showToast(msg, ok) {
@@ -4918,6 +4938,37 @@ def api_customs_new_item():
         return jsonify({"ok": False, "msg": err})
     log(f"新品建檔：{data.get('sku')} {data.get('customs_name')}")
     return jsonify({"ok": True, "image": data.get("image", "")})
+
+
+@app.route("/api/customs/proxy-image", methods=["POST"])
+@login_required
+def api_proxy_image():
+    """後端 proxy 下載圖片並回傳 base64（解決 Safari CORS 問題）"""
+    try:
+        import requests as req_lib, base64 as b64lib
+        from PIL import Image as PILImage
+        data = request.get_json(silent=True) or {}
+        url = data.get("url", "").strip()
+        if not url or not url.startswith("http"):
+            return jsonify({"ok": False, "msg": "無效的圖片網址"})
+
+        dl = req_lib.get(url, headers={
+            "Referer": "https://www.1688.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }, timeout=10)
+        if dl.status_code != 200 or not dl.content:
+            return jsonify({"ok": False, "msg": f"下載失敗 HTTP {dl.status_code}"})
+
+        # 縮圖壓縮
+        pil = PILImage.open(io.BytesIO(dl.content))
+        pil.thumbnail((60, 60), PILImage.LANCZOS)
+        out = io.BytesIO()
+        pil.save(out, format="JPEG", quality=70)
+        out.seek(0)
+        b64 = "data:image/jpeg;base64," + b64lib.b64encode(out.read()).decode()
+        return jsonify({"ok": True, "data": b64})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 
 @app.route("/api/customs/fetch-1688-image", methods=["POST"])
