@@ -6204,17 +6204,11 @@ textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}
   <p class="subtitle">整合知蝦熱搜數據，AI 自動生成標題 x3 + 內文 + 規格條列</p>
 
   <div class="cookie-box">
-    <div class="cookie-header">
-      &#x1F511; 知蝦自動抓詞設定（選填）
-      <span class="cookie-saved" id="cookie-saved" style="display:none">&#x2713; Cookie 已儲存</span>
-    </div>
-    <div style="display:flex;gap:8px;align-items:flex-start">
-      <div style="flex:1">
-        <label>知蝦 Cookie（貼入後工具可自動抓取關鍵字，不填則手動輸入）</label>
-        <input type="text" id="zhixia-cookie" placeholder="貼入知蝦的 Cookie 字串（從 F12 Network 的 Request Headers 複製）" style="font-size:12px">
-        <div class="hint">Cookie 只存在你的瀏覽器 localStorage，不會上傳到伺服器</div>
-      </div>
-      <button class="btn btn-green" onclick="saveCookie()" style="margin-top:18px;white-space:nowrap">儲存 Cookie</button>
+    <div class="cookie-header">&#x26A1; 知蝦自動抓詞</div>
+    <div style="font-size:12px;color:#aaa;line-height:1.7">
+      確保你的瀏覽器已登入 <strong style="color:#4dd0a0">shopee.mobduos.com</strong>（知蝦），
+      輸入商品名稱後直接點「&#x1F50D; 自動抓詞」即可，<strong style="color:#4dd0a0">不需要 Token 或 Cookie！</strong><br>
+      若抓取失敗，請先在新分頁開啟知蝦並確認已登入。
     </div>
   </div>
 
@@ -6283,43 +6277,61 @@ function switchTab(t){
   document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
 }
 function fetchKeywords(){
-  var cookie=getCookie();
-  if(!cookie){alert('請先設定知蝦 Cookie（上方綠色框）');return;}
   var name=document.getElementById('s-name').value.trim();
   var search=document.getElementById('s-search').value.trim()||name;
   if(!search){alert('請先輸入商品名稱或搜尋關鍵字');return;}
   var btn=document.getElementById('s-fetch-btn');
   btn.disabled=true;
   btn.innerHTML='<span class="spinner-g"></span>抓取中...';
-  fetch('/api/ai-title/fetch-keywords',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({keyword:search,cookie:cookie,catId:0})})
+  var encoded=encodeURIComponent(search);
+  var url='https://shopee.mobduos.com/api/shopee-report-service/pro/hotWordChopeeProduct/getChooseHeadData?_t='+Date.now()+'&siteId=1&word='+encoded;
+  fetch(url,{credentials:'include'})
   .then(function(r){return r.json();})
   .then(function(d){
     btn.disabled=false; btn.innerHTML='&#x1F50D; 自動抓詞';
-    if(!d.ok){alert('抓取失敗：'+d.msg);return;}
+    if(d.code&&d.code!==200){alert('知蝦回傳錯誤：'+d.msg+'\n請確認已登入知蝦');return;}
+    var data=d.data||d;
     var words=[];
-    var r=d.result||{};
-    if(r.hotWords&&r.hotWords.length) words=words.concat(r.hotWords);
-    if(r.relatedWords&&r.relatedWords.length){
-      r.relatedWords.forEach(function(w){ if(typeof w==='string'&&w&&words.indexOf(w)<0) words.push(w); else if(w&&w.word&&words.indexOf(w.word)<0) words.push(w.word); });
-    }
-    if(!words.length){alert('沒有抓到關鍵字，請確認 Cookie 是否有效');return;}
-    var container=document.getElementById('s-tag-list');
-    container.innerHTML='';
-    words.slice(0,25).forEach(function(w){
-      var tag=document.createElement('span');
-      tag.className='kw-tag'; tag.textContent=w;
-      tag.onclick=function(){
-        var kw=document.getElementById('s-kw');
-        var cur=kw.value.trim();
-        if(cur.split('\n').indexOf(w)<0) kw.value=cur?(cur+'\n'+w):w;
-      };
-      container.appendChild(tag);
+    var lists=['relatedWords','keywordList','wordList','hotWordList'];
+    lists.forEach(function(k){
+      if(data[k]&&data[k].length){
+        data[k].forEach(function(w){
+          var word=typeof w==='string'?w:(w.word||w.hotWord||w.keyword||'');
+          if(word&&words.indexOf(word)<0) words.push(word);
+        });
+      }
     });
-    document.getElementById('s-fetched-tags').style.display='';
-    document.getElementById('s-kw').value=words.slice(0,10).join('\n');
+    if(!words.length){
+      var url2='https://shopee.mobduos.com/api/shopee-report-service/pro/hotWord/hotWordList?_t='+Date.now()+'&siteId=1&catId=100629&pageNum=1&pageSize=20&isBorder=0&field=&orderType=&level=1';
+      return fetch(url2,{credentials:'include'}).then(function(r2){return r2.json();}).then(function(d2){
+        var items=(d2.data&&d2.data.list)||d2.data||[];
+        if(Array.isArray(items)) items.forEach(function(w){
+          var word=w.hotWord||w.word||'';
+          if(word&&words.indexOf(word)<0) words.push(word);
+        });
+        showWords(words);
+      });
+    }
+    showWords(words);
   })
-  .catch(function(e){btn.disabled=false;btn.innerHTML='&#x1F50D; 自動抓詞';alert('錯誤：'+e.message);});
+  .catch(function(e){btn.disabled=false;btn.innerHTML='&#x1F50D; 自動抓詞';alert('請先在新分頁開啟知蝦並登入，再回來使用自動抓詞！\n錯誤：'+e.message);});
+}
+function showWords(words){
+  if(!words.length){alert('沒有抓到關鍵字，請先在新分頁開啟並登入 shopee.mobduos.com');return;}
+  var container=document.getElementById('s-tag-list');
+  container.innerHTML='';
+  words.slice(0,25).forEach(function(w){
+    var tag=document.createElement('span');
+    tag.className='kw-tag'; tag.textContent=w;
+    tag.onclick=function(){
+      var kw=document.getElementById('s-kw');
+      var cur=kw.value.trim();
+      if(cur.split('\n').indexOf(w)<0) kw.value=cur?(cur+'\n'+w):w;
+    };
+    container.appendChild(tag);
+  });
+  document.getElementById('s-fetched-tags').style.display='';
+  document.getElementById('s-kw').value=words.slice(0,10).join('\n');
 }
 function charBadge(text){
   var len=Array.from(text).length;
