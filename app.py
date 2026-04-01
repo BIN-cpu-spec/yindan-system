@@ -6426,8 +6426,12 @@ def api_fetch_zhixia_keywords():
         return jsonify({"ok": False, "msg": "請輸入關鍵字"})
     if not cookie:
         return jsonify({"ok": False, "msg": "請先設定知蝦 Cookie"})
+    # token 可以是 "Bearer xxx" 或直接是 token 字串
+    auth_value = cookie.strip()
+    if not auth_value.startswith('Bearer '):
+        auth_value = 'Bearer ' + auth_value
     hdrs = {
-        "Cookie": cookie,
+        "Authorization": auth_value,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://shopee.mobduos.com/",
         "Accept": "application/json, text/plain, */*",
