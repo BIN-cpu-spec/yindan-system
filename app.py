@@ -2608,6 +2608,8 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 .card-customs:hover{border-color:rgba(244,161,0,.7);box-shadow:0 16px 40px rgba(244,161,0,.12)}
 .card-tools{border-color:rgba(0,150,136,.3)}
 .card-tools:hover{border-color:rgba(0,150,136,.7);box-shadow:0 16px 40px rgba(0,150,136,.12)}
+.card-ai{border-color:rgba(156,39,176,.3)}
+.card-ai:hover{border-color:rgba(156,39,176,.7);box-shadow:0 16px 40px rgba(156,39,176,.12)}
 </style></head><body>
 <div class="topbar">
   <div class="logo">&#x1F3ED; <span>超人特工倉</span></div>
@@ -2635,6 +2637,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <span class="card-icon">&#x1F4E6;</span>
     <div class="card-title">貨架入庫</div>
     <div class="card-desc">掃描貨號入庫到重型貨架，記錄每個儲位的商品，一秒查詢貨號在哪個儲位。</div>
+  </a>
+  <a href="/ai-title" class="card card-ai">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <span class="card-icon">&#x1F9E0;</span>
+    <div class="card-title">蝦皮 AI 標題生成</div>
+    <div class="card-desc">貼入知蝦熱搜關鍵字，AI 自動生成蝦皮標題、商品內文、規格條列，單品或批量皆可。</div>
   </a>
 </div>
 </body></html>"""
@@ -4971,6 +4979,78 @@ def api_proxy_image():
         return jsonify({"ok": False, "msg": str(e)})
 
 
+@app.route("/api/customs/extract-cell-images", methods=["POST"])
+@login_required
+def api_extract_cell_images():
+    """用 Sheets API v4 讀取 in-cell 圖片，回填 URL 到 J 欄"""
+    try:
+        import requests as req_lib, re as _re
+
+        # 取得 Google OAuth token
+        creds = get_gspread_client().auth
+        token = creds.token
+
+        ss_id = GOOGLE_SHEETS_ID
+        sheet_name = "商品報關資料庫"
+        img_col_index = 9  # J 欄 = index 9 (0-based)
+
+        # 用 Sheets API v4 取得完整試算表資料（含圖片）
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?includeGridData=true&ranges={requests.utils.quote(sheet_name)}&fields=sheets.data.rowData.values.userEnteredValue,sheets.data.rowData.values.effectiveValue"
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = req_lib.get(url, headers=headers, timeout=30)
+        data = resp.json()
+
+        if "error" in data:
+            return jsonify({"ok": False, "msg": data["error"]["message"]})
+
+        rows = data.get("sheets", [{}])[0].get("data", [{}])[0].get("rowData", [])
+
+        # 找出 J 欄有圖片但沒有 URL 的列
+        # Sheets API 對 in-cell 圖片的回傳方式
+        updated = 0
+        skipped = 0
+        img_urls = []
+
+        sheet = get_gspread_client().open_by_key(ss_id).worksheet(sheet_name)
+
+        for row_idx, row in enumerate(rows[1:], start=2):  # 從第 2 列開始（跳過標題）
+            values = row.get("values", [])
+            if len(values) <= img_col_index:
+                continue
+
+            cell = values[img_col_index]
+            user_val = cell.get("userEnteredValue", {})
+            effective_val = cell.get("effectiveValue", {})
+
+            # 檢查是否已有 URL
+            existing = user_val.get("stringValue", "") or effective_val.get("stringValue", "")
+            if existing:
+                skipped += 1
+                continue
+
+            # 找 in-cell 圖片的 URL（藏在 formulaValue 或 imageValue）
+            formula = user_val.get("formulaValue", "")
+            if formula and "IMAGE" in formula.upper():
+                # =IMAGE("url") 格式
+                m = _re.search(r'"([^"]+)"', formula)
+                if m:
+                    img_url = m.group(1)
+                    sheet.update_cell(row_idx, img_col_index + 1, img_url)
+                    img_urls.append({"row": row_idx, "url": img_url})
+                    updated += 1
+
+        return jsonify({
+            "ok": True,
+            "updated": updated,
+            "skipped": skipped,
+            "total_rows": len(rows) - 1,
+            "img_urls": img_urls[:5]  # 回傳前 5 筆預覽
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "msg": str(e), "trace": traceback.format_exc()[-500:]})
+
+
 @app.route("/api/customs/fetch-1688-image", methods=["POST"])
 @login_required
 def api_fetch_1688_image():
@@ -6043,6 +6123,235 @@ def api_warehouse_records():
                    for r in rows]
         records.reverse()
         return jsonify({"ok": True, "records": records[:100]})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+
+
+# ============================================================
+# 蝦皮 AI 標題生成工具
+# ============================================================
+
+AI_TITLE_HTML = (
+    "<!DOCTYPE html><html lang='zh-TW'><head>"
+    "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>蝦皮 AI 標題生成 - 超人特工倉</title>"
+    "<style>"
+    "*{box-sizing:border-box;margin:0;padding:0}"
+    "body{font-family:'Microsoft JhengHei',sans-serif;background:#0f1923;min-height:100vh;color:#fff}"
+    ".topbar{background:rgba(255,255,255,.05);height:56px;padding:0 32px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.08)}"
+    ".logo{font-size:16px;font-weight:700;margin-right:auto;letter-spacing:.5px}"
+    ".logo span{color:#f4a100}"
+    ".back-btn{color:#aaa;font-size:12px;text-decoration:none;padding:6px 12px;border:1px solid #333;border-radius:5px}"
+    ".back-btn:hover{border-color:#666;color:#fff}"
+    ".wrap{max-width:960px;margin:0 auto;padding:32px 20px 60px}"
+    "h2{font-size:22px;font-weight:700;margin-bottom:6px}"
+    "h2 span{color:#ce93d8}"
+    ".subtitle{font-size:13px;color:#666;margin-bottom:28px}"
+    ".tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:24px}"
+    ".tab{padding:9px 18px;font-size:13px;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}"
+    ".tab.active{color:#ce93d8;border-bottom-color:#ce93d8;font-weight:500}"
+    "label{font-size:12px;color:#888;display:block;margin-bottom:6px}"
+    "textarea,input[type=text]{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;font-size:14px;color:#fff;font-family:inherit;resize:vertical}"
+    "textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}"
+    ".row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}"
+    ".note{background:rgba(156,39,176,.08);border-left:3px solid rgba(156,39,176,.4);border-radius:0 6px 6px 0;padding:10px 14px;font-size:12px;color:#aaa;margin-bottom:20px;line-height:1.6}"
+    ".note strong{color:#ce93d8}"
+    ".btn-row{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:20px}"
+    ".btn{padding:10px 22px;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;border:none;font-weight:500}"
+    ".btn-primary{background:linear-gradient(135deg,#7b1fa2,#ce93d8);color:#fff}"
+    ".btn-primary:hover{opacity:.88}"
+    ".btn-primary:disabled{opacity:.4;cursor:not-allowed}"
+    ".status{font-size:13px;color:#888}"
+    ".section{margin-bottom:18px}"
+    ".out-label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}"
+    ".out-box{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:14px;font-size:14px;line-height:1.7;color:#e0e0e0;white-space:pre-wrap;word-break:break-all;position:relative}"
+    ".char-badge{position:absolute;top:8px;right:8px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}"
+    ".badge-ok{background:rgba(46,125,50,.3);color:#81c784}"
+    ".badge-warn{background:rgba(245,127,23,.3);color:#ffa726}"
+    ".badge-over{background:rgba(183,28,28,.3);color:#ef9a9a}"
+    ".copy-btn{font-size:12px;padding:5px 12px;margin-top:6px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#aaa;cursor:pointer;font-family:inherit}"
+    ".copy-btn:hover{color:#fff;border-color:#aaa}"
+    ".title-list{display:flex;flex-direction:column;gap:10px}"
+    ".spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#ce93d8;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}"
+    "@keyframes spin{to{transform:rotate(360deg)}}"
+    ".batch-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:16px 18px;margin-bottom:14px}"
+    ".batch-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:13px;font-weight:500}"
+    ".dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}"
+    ".dot-pending{background:#555}"
+    ".dot-loading{background:#ffa726;animation:pulse 1s infinite}"
+    ".dot-done{background:#81c784}"
+    ".dot-fail{background:#ef9a9a}"
+    "@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}"
+    ".hint{font-size:11px;color:#555;margin-top:5px}"
+    "</style></head><body>"
+    "<div class='topbar'>"
+    "  <div class='logo'>&#x1F3ED; <span>超人特工倉</span></div>"
+    "  <a href='/' class='back-btn'>&#x2302; 返回首頁</a>"
+    "</div>"
+    "<div class='wrap'>"
+    "  <h2>&#x1F9E0; 蝦皮 <span>AI 標題生成</span></h2>"
+    "  <p class='subtitle'>貼入知蝦熱搜關鍵字，自動生成標題 x3 + 內文 + 規格條列</p>"
+    "  <div class='note'><strong>標題</strong> 以關鍵字自然融入為主（上限 100 字元）；<strong>賣點</strong> 用於生成內文與規格，不直接堆入標題。</div>"
+    "  <div class='tabs'>"
+    "    <button class='tab active' onclick=\"switchTab('single')\">單品生成</button>"
+    "    <button class='tab' onclick=\"switchTab('batch')\">批量生成</button>"
+    "  </div>"
+    "  <div id='tab-single'>"
+    "    <div class='section'><label>商品名稱</label><input type='text' id='s-name' placeholder='例：不鏽鋼保溫杯 500ml'></div>"
+    "    <div class='section row2'>"
+    "      <div><label>知蝦熱門關鍵字（一行一個）</label><textarea id='s-kw' rows='5' placeholder='保溫杯\n不鏽鋼保溫杯\n316不鏽鋼\n大容量保溫瓶'></textarea><div class='hint'>AI 自然融入標題，不堆砌</div></div>"
+    "      <div><label>主要賣點（一行一個）</label><textarea id='s-pts' rows='5' placeholder='316食品級不鏽鋼\n保溫12小時\n防漏設計\n輕量280g'></textarea><div class='hint'>用於內文與規格，不塞入標題</div></div>"
+    "    </div>"
+    "    <div class='section'><label>目標客群（選填）</label><input type='text' id='s-target' placeholder='例：上班族、學生、戶外運動愛好者'></div>"
+    "    <div class='btn-row'><span class='status' id='s-status'></span><button class='btn btn-primary' id='s-btn' onclick='generateSingle()'>AI 生成內容</button></div>"
+    "    <div id='s-output'></div>"
+    "  </div>"
+    "  <div id='tab-batch' style='display:none'>"
+    "    <div class='section'><label>批量輸入（每行：商品名稱 | 關鍵字1,關鍵字2 | 賣點1,賣點2）</label>"
+    "    <textarea id='b-input' rows='8' placeholder='不鏽鋼保溫杯 | 保溫杯,316不鏽鋼,大容量 | 保溫12小時,防漏,輕量\n矽膠廚房手套 | 防燙手套,廚房手套,矽膠 | 耐高溫,防滑,可清洗'></textarea>"
+    "    <div class='hint'>最多 10 個商品</div></div>"
+    "    <div class='btn-row'><span class='status' id='b-status'></span><button class='btn btn-primary' id='b-btn' onclick='generateBatch()'>批量生成</button></div>"
+    "    <div id='b-output'></div>"
+    "  </div>"
+    "</div>"
+    "<script>"
+    "function switchTab(t){"
+    "  document.querySelectorAll('.tab').forEach(function(el,i){el.classList.toggle('active',(i===0&&t==='single')||(i===1&&t==='batch'));});"
+    "  document.getElementById('tab-single').style.display=t==='single'?'':'none';"
+    "  document.getElementById('tab-batch').style.display=t==='batch'?'':'none';"
+    "}"
+    "function charBadge(text){"
+    "  var len=Array.from(text).length;"
+    "  var cls=len<=80?'badge-ok':len<=100?'badge-warn':'badge-over';"
+    "  return '<span class=\"char-badge '+cls+'\">'+len+'/100</span>';"
+    "}"
+    "function copyText(id){"
+    "  var el=document.getElementById(id);if(!el)return;"
+    "  navigator.clipboard.writeText(el.innerText.trim());"
+    "  var btn=el.nextElementSibling;if(btn){btn.textContent='已複製 ✓';setTimeout(function(){btn.textContent='複製';},1800);}"
+    "}"
+    "function renderOutput(data,containerId){"
+    "  var html='';"
+    "  if(data.titles){"
+    "    html+='<div style=\"margin-top:20px\"><div class=\"out-label\">蝦皮標題（3 個版本）</div><div class=\"title-list\">';"
+    "    data.titles.forEach(function(t,i){"
+    "      var id='title-'+containerId+'-'+i;"
+    "      html+='<div><div class=\"out-box\" id=\"'+id+'\" style=\"padding-right:76px\">'+t+charBadge(t)+'</div><button class=\"copy-btn\" onclick=\"copyText(\\''+id+'\\')\" >複製</button></div>';"
+    "    });"
+    "    html+='</div></div>';"
+    "  }"
+    "  if(data.description){var id2='desc-'+containerId;html+='<div style=\"margin-top:16px\"><div class=\"out-label\">商品內文描述</div><div class=\"out-box\" id=\"'+id2+'\">'+data.description+'</div><button class=\"copy-btn\" onclick=\"copyText(\\''+id2+'\\')\" >複製</button></div>';}"
+    "  if(data.specs){var id3='spec-'+containerId;html+='<div style=\"margin-top:16px\"><div class=\"out-label\">規格 / 賣點條列</div><div class=\"out-box\" id=\"'+id3+'\">'+data.specs+'</div><button class=\"copy-btn\" onclick=\"copyText(\\''+id3+'\\')\" >複製</button></div>';}"
+    "  document.getElementById(containerId).innerHTML=html;"
+    "}"
+    "function callAI(name,kw,pts,target,callback){"
+    "  fetch('/api/ai-title/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,keywords:kw,points:pts,target:target})})"
+    "  .then(function(r){return r.json();})"
+    "  .then(function(d){if(d.ok)callback(null,d.result);else callback(d.msg||'生成失敗');})"
+    "  .catch(function(e){callback(e.message||'網路錯誤');});"
+    "}"
+    "function generateSingle(){"
+    "  var name=document.getElementById('s-name').value.trim();"
+    "  if(!name){alert('請輸入商品名稱');return;}"
+    "  var kw=document.getElementById('s-kw').value.trim();"
+    "  var pts=document.getElementById('s-pts').value.trim();"
+    "  var target=document.getElementById('s-target').value.trim();"
+    "  var btn=document.getElementById('s-btn');"
+    "  var status=document.getElementById('s-status');"
+    "  btn.disabled=true;"
+    "  status.innerHTML='<span class=\"spinner\"></span>AI 生成中...';"
+    "  document.getElementById('s-output').innerHTML='';"
+    "  callAI(name,kw,pts,target,function(err,data){"
+    "    btn.disabled=false;"
+    "    if(err){status.innerHTML='<span style=\"color:#ef9a9a\">'+err+'</span>';return;}"
+    "    status.innerHTML='<span style=\"color:#81c784\">✓ 生成完成</span>';"
+    "    renderOutput(data,'s-output');"
+    "  });"
+    "}"
+    "function generateBatch(){"
+    "  var raw=document.getElementById('b-input').value.trim();"
+    "  if(!raw){alert('請輸入商品資料');return;}"
+    "  var lines=raw.split('\\n').filter(function(l){return l.trim();}).slice(0,10);"
+    "  var btn=document.getElementById('b-btn');"
+    "  var status=document.getElementById('b-status');"
+    "  btn.disabled=true;"
+    "  var container=document.getElementById('b-output');"
+    "  container.innerHTML='';"
+    "  var items=lines.map(function(line,i){"
+    "    var parts=line.split('|').map(function(p){return p.trim();});"
+    "    return {name:parts[0]||'',kw:(parts[1]||'').replace(/,/g,'\\n'),pts:(parts[2]||'').replace(/,/g,'\\n'),id:'batch-'+i};"
+    "  });"
+    "  items.forEach(function(item,i){"
+    "    var div=document.createElement('div');div.className='batch-item';"
+    "    div.innerHTML='<div class=\"batch-header\"><span><span class=\"dot dot-pending\" id=\"dot-'+item.id+'\"></span>'+(item.name||'商品 '+(i+1))+'</span><span style=\"color:#555;font-size:12px\" id=\"lbl-'+item.id+'\">等待中</span></div><div id=\"'+item.id+'\"></div>';"
+    "    container.appendChild(div);"
+    "  });"
+    "  var idx=0;"
+    "  function next(){"
+    "    if(idx>=items.length){btn.disabled=false;status.innerHTML='<span style=\"color:#81c784\">✓ 全部完成</span>';return;}"
+    "    var item=items[idx++];"
+    "    document.getElementById('dot-'+item.id).className='dot dot-loading';"
+    "    document.getElementById('lbl-'+item.id).innerHTML='<span class=\"spinner\" style=\"width:10px;height:10px;border-width:1.5px\"></span>生成中';"
+    "    callAI(item.name,item.kw,item.pts,'',function(err,data){"
+    "      if(err){document.getElementById('dot-'+item.id).className='dot dot-fail';document.getElementById('lbl-'+item.id).innerHTML='<span style=\"color:#ef9a9a\">失敗</span>';}"
+    "      else{document.getElementById('dot-'+item.id).className='dot dot-done';document.getElementById('lbl-'+item.id).innerHTML='<span style=\"color:#81c784\">完成</span>';renderOutput(data,item.id);}"
+    "      setTimeout(next,500);"
+    "    });"
+    "  }"
+    "  next();"
+    "}"
+    "</script></body></html>"
+)
+
+
+@app.route("/ai-title")
+@login_required
+def ai_title_page():
+    from flask import Response
+    return Response(AI_TITLE_HTML, mimetype='text/html; charset=utf-8')
+
+
+@app.route("/api/ai-title/generate", methods=["POST"])
+@login_required
+def api_ai_title_generate():
+    import urllib.request
+    data = request.get_json()
+    name   = data.get("name", "").strip()
+    kw     = data.get("keywords", "").strip()
+    pts    = data.get("points", "").strip()
+    target = data.get("target", "").strip()
+    if not name:
+        return jsonify({"ok": False, "msg": "請輸入商品名稱"})
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key:
+        return jsonify({"ok": False, "msg": "伺服器未設定 ANTHROPIC_API_KEY 環境變數"})
+    system_p = ("你是蝦皮電商內容專家，幫台灣賣家生成高轉換率的上架文案。"
+                "【標題規則】嚴格限制100字元以內；關鍵字自然融入，禁止逗號堆砌；不把賣點直接塞入標題。"
+                "【內文規則】繁體中文台灣用語，200-300字，有情境感不誇大。"
+                '只回傳JSON不要其他文字：{"titles":["版本1","版本2","版本3"],"description":"內文(換行用\\n)","specs":"✦ 賣點1\\n✦ 賣點2\\n✦ 賣點3"}')
+    user_p = f"商品名稱：{name}\n熱門關鍵字（用於標題）：{kw or '（未提供）'}\n主要賣點（用於內文/規格）：{pts or '（未提供）'}"
+    if target:
+        user_p += f"\n目標客群：{target}"
+    body = json.dumps({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1000,
+        "system": system_p,
+        "messages": [{"role": "user", "content": user_p}]
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={"Content-Type":"application/json","x-api-key":anthropic_key,"anthropic-version":"2023-06-01"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        text = "".join(c.get("text","") for c in result.get("content",[]))
+        text = text.replace("```json","").replace("```","").strip()
+        parsed = json.loads(text)
+        return jsonify({"ok": True, "result": parsed})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
