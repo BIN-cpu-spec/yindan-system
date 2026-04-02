@@ -6140,14 +6140,15 @@ AI_TITLE_HTML = """<!DOCTYPE html>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:100vh;color:#fff}
 .topbar{background:rgba(255,255,255,.05);height:56px;padding:0 32px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.08)}
-.logo{font-size:16px;font-weight:700;margin-right:auto;letter-spacing:.5px}
-.logo span{color:#f4a100}
+.logo{font-size:16px;font-weight:700;margin-right:auto}.logo span{color:#f4a100}
 .back-btn{color:#aaa;font-size:12px;text-decoration:none;padding:6px 12px;border:1px solid #333;border-radius:5px}
-.back-btn:hover{border-color:#666;color:#fff}
 .wrap{max-width:980px;margin:0 auto;padding:28px 20px 60px}
-h2{font-size:22px;font-weight:700;margin-bottom:6px}
-h2 span{color:#ce93d8}
+h2{font-size:22px;font-weight:700;margin-bottom:6px}h2 span{color:#ce93d8}
 .subtitle{font-size:13px;color:#666;margin-bottom:20px}
+.note-green{background:rgba(0,150,100,.08);border-left:3px solid rgba(0,200,130,.4);border-radius:0 6px 6px 0;padding:12px 16px;font-size:13px;color:#aaa;margin-bottom:20px;line-height:1.7}
+.note-green strong{color:#4dd0a0}
+.note{background:rgba(156,39,176,.08);border-left:3px solid rgba(156,39,176,.4);border-radius:0 6px 6px 0;padding:10px 14px;font-size:12px;color:#aaa;margin-bottom:18px;line-height:1.6}
+.note strong{color:#ce93d8}
 .tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:22px}
 .tab{padding:9px 18px;font-size:13px;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
 .tab.active{color:#ce93d8;border-bottom-color:#ce93d8;font-weight:500}
@@ -6155,18 +6156,12 @@ label{font-size:12px;color:#888;display:block;margin-bottom:6px}
 textarea,input[type=text]{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;font-size:14px;color:#fff;font-family:inherit;resize:vertical}
 textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.note{background:rgba(156,39,176,.08);border-left:3px solid rgba(156,39,176,.4);border-radius:0 6px 6px 0;padding:10px 14px;font-size:12px;color:#aaa;margin-bottom:18px;line-height:1.6}
-.note strong{color:#ce93d8}
+.section{margin-bottom:16px}
 .btn-row{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:18px}
 .btn{padding:10px 22px;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;border:none;font-weight:500}
 .btn-primary{background:linear-gradient(135deg,#7b1fa2,#ce93d8);color:#fff}
-.btn-primary:hover{opacity:.88}
-.btn-primary:disabled{opacity:.4;cursor:not-allowed}
-.btn-green{background:linear-gradient(135deg,#0f6e56,#4dd0a0);color:#fff;padding:8px 16px;font-size:13px}
-.btn-green:hover{opacity:.88}
-.btn-green:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary:hover{opacity:.88}.btn-primary:disabled{opacity:.4;cursor:not-allowed}
 .status{font-size:13px;color:#888}
-.section{margin-bottom:16px}
 .out-label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
 .out-box{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:14px;font-size:14px;line-height:1.7;color:#e0e0e0;white-space:pre-wrap;word-break:break-all;position:relative}
 .char-badge{position:absolute;top:8px;right:8px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
@@ -6177,23 +6172,13 @@ textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}
 .copy-btn:hover{color:#fff;border-color:#aaa}
 .title-list{display:flex;flex-direction:column;gap:10px}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#ce93d8;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-.spinner-g{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.2);border-top-color:#4dd0a0;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .batch-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:16px 18px;margin-bottom:14px}
 .batch-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:13px;font-weight:500}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.dot-pending{background:#555}
-.dot-loading{background:#ffa726;animation:pulse 1s infinite}
-.dot-done{background:#81c784}
-.dot-fail{background:#ef9a9a}
+.dot-pending{background:#555}.dot-loading{background:#ffa726;animation:pulse 1s infinite}.dot-done{background:#81c784}.dot-fail{background:#ef9a9a}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .hint{font-size:11px;color:#555;margin-top:5px}
-.kw-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.kw-tag{background:rgba(156,39,176,.15);border:1px solid rgba(156,39,176,.3);border-radius:20px;padding:3px 10px;font-size:12px;color:#ce93d8;cursor:pointer}
-.kw-tag:hover{background:rgba(156,39,176,.3)}
-.cookie-box{background:rgba(0,150,100,.06);border:1px solid rgba(0,200,130,.2);border-radius:10px;padding:16px;margin-bottom:20px}
-.cookie-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13px;font-weight:500;color:#4dd0a0}
-.cookie-saved{color:#4dd0a0;font-size:12px}
 </style></head><body>
 <div class="topbar">
   <div class="logo">&#x1F3ED; <span>超人特工倉</span></div>
@@ -6202,158 +6187,54 @@ textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}
 <div class="wrap">
   <h2>&#x1F9E0; 蝦皮 <span>AI 標題生成</span></h2>
   <p class="subtitle">整合知蝦熱搜數據，AI 自動生成標題 x3 + 內文 + 規格條列</p>
-
-  <div class="cookie-box">
-    <div class="cookie-header">&#x26A1; 知蝦自動抓詞</div>
-    <div style="font-size:12px;color:#aaa;line-height:1.7">
-      確保你的瀏覽器已登入 <strong style="color:#4dd0a0">shopee.mobduos.com</strong>（知蝦），
-      輸入商品名稱後直接點「&#x1F50D; 自動抓詞」即可，<strong style="color:#4dd0a0">不需要 Token 或 Cookie！</strong><br>
-      若抓取失敗，請先在新分頁開啟知蝦並確認已登入。
-    </div>
+  <div class="note-green">
+    <strong>&#x26A1; 知蝦自動抓詞：</strong>安裝擴充功能後，在知蝦搜尋商品關鍵字，點擴充功能圖示即可自動填入。
   </div>
-
   <div class="note"><strong>標題</strong> 以關鍵字自然融入為主（上限 100 字元）；<strong>賣點</strong> 用於生成內文與規格，不直接堆入標題。</div>
-
   <div class="tabs">
     <button class="tab active" onclick="switchTab('single')">單品生成</button>
     <button class="tab" onclick="switchTab('batch')">批量生成</button>
   </div>
-
   <div id="tab-single">
-    <div class="section row2">
-      <div><label>商品名稱</label><input type="text" id="s-name" placeholder="例：不鏽鋼保溫杯 500ml"></div>
-      <div style="display:flex;align-items:flex-end;gap:8px">
-        <div style="flex:1"><label>知蝦搜尋詞（留空則用商品名稱）</label><input type="text" id="s-search" placeholder="例：保溫杯"></div>
-        <button class="btn btn-green" id="s-fetch-btn" onclick="fetchKeywords()" style="white-space:nowrap;margin-bottom:0">&#x1F50D; 自動抓詞</button>
-      </div>
-    </div>
-    <div id="s-fetched-tags" style="display:none" class="section">
-      <label>知蝦抓到的關鍵字（點擊加入下方）</label>
-      <div class="kw-tags" id="s-tag-list"></div>
-    </div>
+    <div class="section"><label>商品名稱</label><input type="text" id="s-name" placeholder="例：不鏽鋼保溫杯 500ml"></div>
     <div class="section row2">
       <div>
         <label>熱門關鍵字（一行一個）</label>
-        <textarea id="s-kw" rows="5" placeholder="保溫杯&#10;不鏽鋼保溫杯&#10;316不鏽鋼&#10;大容量保溫瓶"></textarea>
-        <div class="hint">可手動輸入或點上方標籤自動填入</div>
+        <textarea id="s-kw" rows="6" placeholder="保溫杯&#10;不鏽鋼保溫杯&#10;316不鏽鋼&#10;大容量保溫瓶"></textarea>
+        <div class="hint">從知蝦複製或由擴充功能自動填入</div>
       </div>
       <div>
         <label>主要賣點（一行一個）</label>
-        <textarea id="s-pts" rows="5" placeholder="316食品級不鏽鋼&#10;保溫12小時&#10;防漏設計&#10;輕量280g"></textarea>
+        <textarea id="s-pts" rows="6" placeholder="316食品級不鏽鋼&#10;保溫12小時&#10;防漏設計&#10;輕量280g"></textarea>
       </div>
     </div>
     <div class="section"><label>目標客群（選填）</label><input type="text" id="s-target" placeholder="例：上班族、學生、戶外運動愛好者"></div>
-    <div class="btn-row"><span class="status" id="s-status"></span><button class="btn btn-primary" id="s-btn" onclick="generateSingle()">AI 生成內容</button></div>
+    <div class="btn-row">
+      <span class="status" id="s-status"></span>
+      <button class="btn btn-primary" id="s-btn" onclick="generateSingle()">AI 生成內容</button>
+    </div>
     <div id="s-output"></div>
   </div>
-
   <div id="tab-batch" style="display:none">
     <div class="section">
       <label>批量輸入（每行：商品名稱 | 關鍵字1,關鍵字2 | 賣點1,賣點2）</label>
       <textarea id="b-input" rows="8" placeholder="不鏽鋼保溫杯 | 保溫杯,316不鏽鋼,大容量 | 保溫12小時,防漏,輕量&#10;矽膠廚房手套 | 防燙手套,廚房手套,矽膠 | 耐高溫,防滑,可清洗"></textarea>
       <div class="hint">最多 10 個商品</div>
     </div>
-    <div class="btn-row"><span class="status" id="b-status"></span><button class="btn btn-primary" id="b-btn" onclick="generateBatch()">批量生成</button></div>
+    <div class="btn-row">
+      <span class="status" id="b-status"></span>
+      <button class="btn btn-primary" id="b-btn" onclick="generateBatch()">批量生成</button>
+    </div>
     <div id="b-output"></div>
   </div>
 </div>
 <script>
-var COOKIE_KEY='zhixia_cookie';
-function saveCookie(){
-  var v=document.getElementById('zhixia-cookie').value.trim();
-  if(!v){alert('請貼入 Cookie');return;}
-  localStorage.setItem(COOKIE_KEY,v);
-  document.getElementById('cookie-saved').style.display='';
-  setTimeout(function(){document.getElementById('cookie-saved').style.display='none';},3000);
-}
-function getCookie(){ return localStorage.getItem(COOKIE_KEY)||''; }
-window.addEventListener('DOMContentLoaded',function(){
-  var saved=getCookie();
-  if(saved){ document.getElementById('zhixia-cookie').value=saved.substring(0,80)+'...'; }
-});
-// 讀取擴充功能傳來的 ?kw= 參數（在 DOMContentLoaded 外，確保立即執行）
-(function(){
-  function fillKw(){
-    var params=new URLSearchParams(window.location.search);
-    var kw=params.get('kw');
-    if(!kw) return;
-    var kwBox=document.getElementById('s-kw');
-    if(!kwBox){ setTimeout(fillKw, 200); return; }
-    kwBox.value=kw;
-    var tip=document.createElement('div');
-    tip.style.cssText='position:fixed;top:20px;right:20px;background:#2e7d32;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.4)';
-    tip.innerHTML='&#x2713; 已自動填入 '+kw.split('\n').filter(function(w){return w.trim();}).length+' 個知蝦關鍵字！';
-    document.body.appendChild(tip);
-    setTimeout(function(){tip.remove();},3000);
-    history.replaceState({},'',window.location.pathname);
-  }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', fillKw);
-  } else {
-    fillKw();
-  }
-})();
 function switchTab(t){
-  document.querySelectorAll('.tab').forEach(function(el,i){el.classList.toggle('active',(i===0&&t==='single')||(i===1&&t==='batch'));});
+  document.querySelectorAll('.tab').forEach(function(el,i){
+    el.classList.toggle('active',(i===0&&t==='single')||(i===1&&t==='batch'));
+  });
   document.getElementById('tab-single').style.display=t==='single'?'':'none';
   document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
-}
-function fetchKeywords(){
-  var name=document.getElementById('s-name').value.trim();
-  var search=document.getElementById('s-search').value.trim()||name;
-  if(!search){alert('請先輸入商品名稱或搜尋關鍵字');return;}
-  var btn=document.getElementById('s-fetch-btn');
-  btn.disabled=true;
-  btn.innerHTML='<span class="spinner-g"></span>抓取中...';
-  var encoded=encodeURIComponent(search);
-  var url='https://shopee.mobduos.com/api/shopee-report-service/pro/hotWordChopeeProduct/getChooseHeadData?_t='+Date.now()+'&siteId=1&word='+encoded;
-  fetch(url,{credentials:'include'})
-  .then(function(r){return r.json();})
-  .then(function(d){
-    btn.disabled=false; btn.innerHTML='&#x1F50D; 自動抓詞';
-    if(d.code&&d.code!==200){alert('知蝦回傳錯誤：'+d.msg+'\n請確認已登入知蝦');return;}
-    var data=d.data||d;
-    var words=[];
-    var lists=['relatedWords','keywordList','wordList','hotWordList'];
-    lists.forEach(function(k){
-      if(data[k]&&data[k].length){
-        data[k].forEach(function(w){
-          var word=typeof w==='string'?w:(w.word||w.hotWord||w.keyword||'');
-          if(word&&words.indexOf(word)<0) words.push(word);
-        });
-      }
-    });
-    if(!words.length){
-      var url2='https://shopee.mobduos.com/api/shopee-report-service/pro/hotWord/hotWordList?_t='+Date.now()+'&siteId=1&catId=100629&pageNum=1&pageSize=20&isBorder=0&field=&orderType=&level=1';
-      return fetch(url2,{credentials:'include'}).then(function(r2){return r2.json();}).then(function(d2){
-        var items=(d2.data&&d2.data.list)||d2.data||[];
-        if(Array.isArray(items)) items.forEach(function(w){
-          var word=w.hotWord||w.word||'';
-          if(word&&words.indexOf(word)<0) words.push(word);
-        });
-        showWords(words);
-      });
-    }
-    showWords(words);
-  })
-  .catch(function(e){btn.disabled=false;btn.innerHTML='&#x1F50D; 自動抓詞';alert('請先在新分頁開啟知蝦並登入，再回來使用自動抓詞！\n錯誤：'+e.message);});
-}
-function showWords(words){
-  if(!words.length){alert('沒有抓到關鍵字，請先在新分頁開啟並登入 shopee.mobduos.com');return;}
-  var container=document.getElementById('s-tag-list');
-  container.innerHTML='';
-  words.slice(0,25).forEach(function(w){
-    var tag=document.createElement('span');
-    tag.className='kw-tag'; tag.textContent=w;
-    tag.onclick=function(){
-      var kw=document.getElementById('s-kw');
-      var cur=kw.value.trim();
-      if(cur.split('\n').indexOf(w)<0) kw.value=cur?(cur+'\n'+w):w;
-    };
-    container.appendChild(tag);
-  });
-  document.getElementById('s-fetched-tags').style.display='';
-  document.getElementById('s-kw').value=words.slice(0,10).join('\n');
 }
 function charBadge(text){
   var len=Array.from(text).length;
@@ -6363,7 +6244,8 @@ function charBadge(text){
 function copyText(id){
   var el=document.getElementById(id);if(!el)return;
   navigator.clipboard.writeText(el.innerText.trim());
-  var btn=el.nextElementSibling;if(btn){btn.textContent='已複製 ✓';setTimeout(function(){btn.textContent='複製';},1800);}
+  var btn=el.nextElementSibling;
+  if(btn){btn.textContent='已複製 ✓';setTimeout(function(){btn.textContent='複製';},1800);}
 }
 function renderOutput(data,containerId){
   var html='';
@@ -6371,16 +6253,31 @@ function renderOutput(data,containerId){
     html+='<div style="margin-top:20px"><div class="out-label">蝦皮標題（3 個版本）</div><div class="title-list">';
     data.titles.forEach(function(t,i){
       var id='title-'+containerId+'-'+i;
-      html+='<div><div class="out-box" id="'+id+'" style="padding-right:76px">'+t+charBadge(t)+'</div><button class="copy-btn" onclick="copyText(\''+id+'\')">複製</button></div>';
+      html+='<div><div class="out-box" id="'+id+'" style="padding-right:76px">'+t+charBadge(t)+'</div>';
+      html+='<button class="copy-btn" onclick="copyText(\'' +id+ '\')">複製</button></div>';
     });
     html+='</div></div>';
   }
-  if(data.description){var id2='desc-'+containerId;html+='<div style="margin-top:16px"><div class="out-label">商品內文描述</div><div class="out-box" id="'+id2+'">'+data.description+'</div><button class="copy-btn" onclick="copyText(\''+id2+'\')">複製</button></div>';}
-  if(data.specs){var id3='spec-'+containerId;html+='<div style="margin-top:16px"><div class="out-label">規格 / 賣點條列</div><div class="out-box" id="'+id3+'">'+data.specs+'</div><button class="copy-btn" onclick="copyText(\''+id3+'\')">複製</button></div>';}
+  if(data.description){
+    var id2='desc-'+containerId;
+    html+='<div style="margin-top:16px"><div class="out-label">商品內文描述</div>';
+    html+='<div class="out-box" id="'+id2+'">'+data.description+'</div>';
+    html+='<button class="copy-btn" onclick="copyText(\'' +id2+ '\')">複製</button></div>';
+  }
+  if(data.specs){
+    var id3='spec-'+containerId;
+    html+='<div style="margin-top:16px"><div class="out-label">規格 / 賣點條列</div>';
+    html+='<div class="out-box" id="'+id3+'">'+data.specs+'</div>';
+    html+='<button class="copy-btn" onclick="copyText(\'' +id3+ '\')">複製</button></div>';
+  }
   document.getElementById(containerId).innerHTML=html;
 }
 function callAI(name,kw,pts,target,callback){
-  fetch('/api/ai-title/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,keywords:kw,points:pts,target:target})})
+  fetch('/api/ai-title/generate',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:name,keywords:kw,points:pts,target:target})
+  })
   .then(function(r){return r.json();})
   .then(function(d){if(d.ok)callback(null,d.result);else callback(d.msg||'生成失敗');})
   .catch(function(e){callback(e.message||'網路錯誤');});
@@ -6435,8 +6332,25 @@ function generateBatch(){
   }
   next();
 }
+setTimeout(function(){
+  var m=location.search.match(/[?&]kw=([^&]*)/);
+  if(!m)return;
+  var kw=decodeURIComponent(m[1]);
+  if(!kw)return;
+  var ta=document.getElementById('s-kw');
+  if(!ta)return;
+  ta.value=kw;
+  var tip=document.createElement('div');
+  tip.style.cssText='position:fixed;top:20px;right:20px;background:#2e7d32;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.4)';
+  tip.innerHTML='&#x2713; 已自動填入 '+kw.split('\n').filter(function(w){return w.trim();}).length+' 個知蝦關鍵字！';
+  document.body.appendChild(tip);
+  setTimeout(function(){tip.remove();},3000);
+  history.replaceState({},'',location.pathname);
+},300);
 </script>
 </body></html>"""
+
+
 
 
 
