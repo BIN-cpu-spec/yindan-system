@@ -6270,6 +6270,23 @@ function getCookie(){ return localStorage.getItem(COOKIE_KEY)||''; }
 window.addEventListener('DOMContentLoaded',function(){
   var saved=getCookie();
   if(saved){ document.getElementById('zhixia-cookie').value=saved.substring(0,80)+'...'; }
+  // 讀取擴充功能傳來的 ?kw= 參數，自動填入關鍵字欄位
+  var params=new URLSearchParams(window.location.search);
+  var kw=params.get('kw');
+  if(kw){
+    var kwBox=document.getElementById('s-kw');
+    if(kwBox){
+      kwBox.value=kw;
+      // 顯示成功提示
+      var tip=document.createElement('div');
+      tip.style.cssText='position:fixed;top:20px;right:20px;background:#2e7d32;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.4)';
+      tip.innerHTML='&#x2713; 已自動填入 '+kw.split('\n').filter(function(w){return w.trim();}).length+' 個知蝦關鍵字！';
+      document.body.appendChild(tip);
+      setTimeout(function(){tip.remove();},3000);
+      // 清除 URL 參數
+      history.replaceState({},'',window.location.pathname);
+    }
+  }
 });
 function switchTab(t){
   document.querySelectorAll('.tab').forEach(function(el,i){el.classList.toggle('active',(i===0&&t==='single')||(i===1&&t==='batch'));});
