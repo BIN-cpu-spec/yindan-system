@@ -2615,6 +2615,22 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 .card-tools:hover{border-color:rgba(0,150,136,.7);box-shadow:0 16px 40px rgba(0,150,136,.12)}
 .card-ai{border-color:rgba(156,39,176,.3)}
 .card-ai:hover{border-color:rgba(156,39,176,.7);box-shadow:0 16px 40px rgba(156,39,176,.12)}
+.card-glasses{border-color:rgba(29,158,117,.35)}
+.card-glasses:hover{border-color:rgba(93,202,165,.8);box-shadow:0 16px 40px rgba(29,158,117,.18)}
+.sg-divider{max-width:960px;margin:0 auto 16px;padding:0 24px;display:flex;align-items:center;gap:12px}
+.sg-divider-line{flex:1;height:1px;background:rgba(255,255,255,.07)}
+.sg-divider-text{font-size:12px;color:#555;letter-spacing:1px;white-space:nowrap}
+.install-steps{margin-top:14px;padding:14px 16px;background:rgba(0,0,0,.25);border-radius:10px;border:1px solid rgba(29,158,117,.2)}
+.install-steps ol{padding-left:16px;margin:0}
+.install-steps li{font-size:12px;color:#888;line-height:2;letter-spacing:.3px}
+.install-steps li strong{color:#5DCAA5}
+.sg-logo-wrap{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.sg-logo-text{font-size:20px;font-weight:700;color:#5DCAA5;letter-spacing:.05em}
+.sg-logo-sub{font-size:11px;color:#1D9E75;letter-spacing:.15em}
+.dl-btn{display:inline-block;margin-top:14px;padding:9px 20px;background:#0F6E56;
+  color:#5DCAA5;border-radius:8px;font-size:13px;font-weight:500;text-decoration:none;
+  border:1px solid #1D9E75;transition:all .2s;letter-spacing:.05em}
+.dl-btn:hover{background:#1D9E75;color:#fff}
 </style></head><body>
 <div class="topbar">
   <div class="logo">&#x1F3ED; <span>超人特工倉</span></div>
@@ -2645,6 +2661,116 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   </a>
 
 </div>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x1F9E0; CHROME 擴充工具</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div class="cards" style="padding-bottom:80px">
+  <div class="card card-glasses">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <div class="sg-logo-wrap">
+      <canvas id="sg-logo-home" width="96" height="54" style="border-radius:8px;"></canvas>
+      <div>
+        <div class="sg-logo-text">超人眼鏡</div>
+        <div class="sg-logo-sub">DATA VISION · BIGSELLER</div>
+      </div>
+    </div>
+    <div class="card-desc">在 BigSeller 在線產品頁面，即時顯示每個 SKU 的成本、售價與利潤率。讓運營判斷數據更直覺，未來持續新增更多功能。</div>
+    <div class="install-steps">
+      <ol>
+        <li>點擊下方按鈕下載 <strong>superman_glasses.zip</strong></li>
+        <li>解壓縮到任意資料夾（之後不要刪）</li>
+        <li>Chrome 網址列輸入 <strong>chrome://extensions</strong></li>
+        <li>開啟右上角 <strong>開發人員模式</strong></li>
+        <li>點 <strong>載入未封裝項目</strong>，選擇解壓縮的資料夾</li>
+        <li>完成！打開 BigSeller 在線產品即可使用</li>
+      </ol>
+    </div>
+    <a href="/api/superman-glasses/download" class="dl-btn">&#x2B07; 下載超人眼鏡</a>
+  </div>
+</div>
+
+<script>
+(function(){
+  const cv = document.getElementById('sg-logo-home');
+  if (!cv) return;
+  const s = cv.width / 320;
+  let pd = 12.5, pt = 38.4, pw = false, pwu = 0;
+  const pool = [22.1,31.8,44.2,38.4,51.0,29.7,47.3,35.6,62.1,28.9];
+  function nt(){ return pool[Math.floor(Math.random()*pool.length)]; }
+  function draw(){
+    const ctx = cv.getContext('2d');
+    const W=cv.width, H=cv.height, now=Date.now()/1000;
+    const teal='#1D9E75',tL='#5DCAA5',tD='#0F6E56',bg='rgba(4,52,44,0.92)';
+    const lx=14*s,ly=28*s,lw=108*s,lh=80*s,r=14*s;
+    const rx=198*s,ry=28*s,rw=108*s,rh=80*s,bY=ly+lh/2;
+    ctx.clearRect(0,0,W,H);
+    function rr(x,y,w,h,rd){
+      ctx.beginPath();ctx.moveTo(x+rd,y);ctx.lineTo(x+w-rd,y);ctx.quadraticCurveTo(x+w,y,x+w,y+rd);
+      ctx.lineTo(x+w,y+h-rd);ctx.quadraticCurveTo(x+w,y+h,x+w-rd,y+h);
+      ctx.lineTo(x+rd,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-rd);
+      ctx.lineTo(x,y+rd);ctx.quadraticCurveTo(x,y,x+rd,y);ctx.closePath();
+    }
+    rr(lx,ly,lw,lh,r);ctx.fillStyle=bg;ctx.fill();
+    rr(rx,ry,rw,rh,r);ctx.fillStyle=bg;ctx.fill();
+    ctx.save();rr(lx,ly,lw,lh,r);ctx.clip();
+    const chars=['0','1','$','%','T','W','D','↑','∞','▲'];
+    const cols=9,colW=lw/cols;
+    for(let c=0;c<cols;c++){
+      const cx=lx+c*colW+colW/2,spd=0.6+(c*.15)%.8,off=(c*3.7)%7;
+      for(let row=0;row<5;row++){
+        const t=(now*spd+off+row*1.4)%5,yp=ly+(t/5)*(lh+16*s)-8*s;
+        const a=1-(row/5)*.85,ci=Math.floor((now*3+c*7+row*13))%chars.length;
+        ctx.fillStyle=`rgba(93,202,165,${a*(row===0?1:.5)})`;
+        ctx.font=`${Math.floor(10*s)}px monospace`;ctx.textAlign='center';
+        ctx.fillText(chars[ci],cx,yp);
+      }
+    }
+    ctx.restore();
+    ctx.save();rr(rx,ry,rw,rh,r);ctx.clip();
+    const rcx=rx+rw/2,rcy=ry+rh/2;
+    for(let i=3;i>=1;i--){ctx.beginPath();ctx.arc(rcx,rcy,i*20*s,0,Math.PI*2);ctx.strokeStyle=`rgba(29,158,117,${.08*i})`;ctx.lineWidth=1*s;ctx.stroke();}
+    const ang=(now*1.2)%(Math.PI*2);
+    ctx.beginPath();ctx.moveTo(rcx,rcy);ctx.arc(rcx,rcy,44*s,ang,ang+Math.PI*.6);
+    ctx.closePath();ctx.fillStyle='rgba(29,158,117,.12)';ctx.fill();
+    ctx.beginPath();ctx.arc(rcx,rcy,44*s,ang,ang+Math.PI*.6);ctx.strokeStyle=tL;ctx.lineWidth=1.5*s;ctx.stroke();
+    ctx.beginPath();ctx.arc(rcx+Math.cos(ang+.3)*44*s,rcy+Math.sin(ang+.3)*44*s,3*s,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+    ctx.beginPath();ctx.arc(rcx,rcy,6*s,0,Math.PI*2);ctx.fillStyle=teal;ctx.fill();
+    ctx.beginPath();ctx.arc(rcx,rcy,3*s,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+    const diff=pt-pd;
+    if(Math.abs(diff)<.1){pd=pt;if(!pw){pw=true;pwu=now+1.2;}if(pw&&now>pwu){pt=nt();pw=false;}}
+    else{pd+=diff*.08;}
+    ctx.fillStyle='rgba(4,52,44,.7)';ctx.fillRect(rx+2*s,ry+rh-32*s,rw-4*s,30*s);
+    ctx.fillStyle=teal;ctx.font=`500 ${Math.floor(8*s)}px -apple-system,sans-serif`;
+    ctx.textAlign='center';ctx.fillText('利潤率',rcx,ry+rh-20*s);
+    const jo=diff*.15*s;
+    ctx.save();ctx.beginPath();ctx.rect(rx+4*s,ry+rh-20*s,rw-8*s,18*s);ctx.clip();
+    ctx.fillStyle=pd>=0?'#5DCAA5':'#E24B4A';
+    ctx.font=`500 ${Math.floor(15*s)}px -apple-system,sans-serif`;ctx.textAlign='center';
+    ctx.fillText((pd>=0?'+':'')+pd.toFixed(1)+'%',rcx,ry+rh-8*s+jo);ctx.restore();
+    const ir=pt>pd;
+    ctx.fillStyle=`rgba(${ir?'93,202,165':'232,75,74'},${.5+Math.sin(now*4)*.5})`;
+    ctx.font=`${Math.floor(10*s)}px monospace`;ctx.textAlign='right';
+    ctx.fillText(ir?'▲':'▼',rx+rw-6*s,ry+rh-20*s);ctx.restore();
+    rr(lx,ly,lw,lh,r);ctx.strokeStyle=teal;ctx.lineWidth=2.5*s;ctx.stroke();
+    rr(rx,ry,rw,rh,r);ctx.strokeStyle=teal;ctx.lineWidth=2.5*s;ctx.stroke();
+    const bx1=lx+lw,bx2=rx,bm=(bx1+bx2)/2;
+    ctx.beginPath();ctx.moveTo(bx1,bY-8*s);ctx.lineTo(bm+4*s,bY-4*s);
+    ctx.lineTo(bm-4*s,bY+4*s);ctx.lineTo(bx2,bY+8*s);
+    ctx.strokeStyle=tL;ctx.lineWidth=3*s;ctx.lineJoin='round';ctx.stroke();
+    ctx.beginPath();ctx.arc(bm,bY,4*s,0,Math.PI*2);ctx.fillStyle=tL;ctx.fill();
+    ctx.beginPath();ctx.moveTo(lx,ly+18*s);ctx.lineTo(lx-12*s,ly-4*s);
+    ctx.strokeStyle=tD;ctx.lineWidth=3*s;ctx.lineCap='round';ctx.stroke();
+    ctx.beginPath();ctx.moveTo(rx+rw,ry+18*s);ctx.lineTo(rx+rw+12*s,ry-4*s);ctx.stroke();
+  }
+  function loop(){draw();requestAnimationFrame(loop);}
+  loop();
+})();
+</script>
+
 </body></html>"""
 
 # ── Token 登入紀錄（記憶體，重啟後清空） ──────────────────────
@@ -6177,6 +6303,450 @@ def api_warehouse_records():
         return jsonify({"ok": True, "records": records[:100]})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
+
+
+# ============================================================
+# 超人眼鏡 Chrome Extension API
+# ============================================================
+
+# profit_script.js 內容（直接內嵌，避免讀檔問題）
+_SUPERMAN_GLASSES_SCRIPT = r"""
+/* 超人眼鏡 - BigSeller 利潤計算核心腳本
+   由 Railway 超人特工倉提供，版本統一管理 v1.0 */
+(function () {
+  'use strict';
+  if (window.__supermanGlassesLoaded) return;
+  window.__supermanGlassesLoaded = true;
+
+  const PANEL_ID  = 'sg-profit-panel';
+  const TOGGLE_ID = 'sg-profit-toggle';
+
+  function profitColor(margin) {
+    if (margin == null || isNaN(margin)) return '#888';
+    if (margin >= 40) return '#1D9E75';
+    if (margin >= 20) return '#BA7517';
+    return '#E24B4A';
+  }
+
+  async function fetchCostMap() {
+    const map = {};
+    let page = 1, total = 1;
+    while (page <= total) {
+      const r = await fetch('/api/v1/inventory/pageList.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pageNo: page, pageSize: 200, searchType: 'skuName', searchContent: '',
+          inquireType: 0, stockStatus: '', isGroup: '', fullCid: '',
+          warehouseIds: '', saleState: '', zoneId: '', hideZeroInventorySku: 0
+        })
+      });
+      const d = await r.json();
+      if (d.code !== 0) break;
+      total = d.data?.page?.totalPage || 1;
+      (d.data?.page?.rows || []).forEach(row => {
+        if (row.sku && row.cost != null) map[row.sku.trim()] = parseFloat(row.cost);
+      });
+      page++;
+    }
+    return map;
+  }
+
+  async function fetchListings() {
+    const items = [];
+    let page = 1, total = 1;
+    while (page <= total) {
+      const r = await fetch(
+        `/api/v1/product/listing/shopee/active.json?orderBy=create_time&desc=true` +
+        `&timeType=create_time&startDateStr=&endDateStr=&searchType=productName` +
+        `&inquireType=0&shopeeStatus=live&status=active&pageNo=${page}&pageSize=50`
+      );
+      const d = await r.json();
+      if (d.code !== 0) break;
+      total = d.data?.page?.totalPage || 1;
+      (d.data?.page?.rows || []).forEach(row => {
+        if (row.hasVariation && row.variations?.length) {
+          row.variations.forEach(v => items.push({
+            name: row.name, parentSku: row.itemSku, sku: v.variationSku,
+            originalPrice: v.originalPrice, salePrice: v.price,
+            promotionPrice: v.promotionPrice, joinPromotion: v.joinPromotion === 1, stock: v.stock
+          }));
+        } else {
+          items.push({
+            name: row.name, parentSku: row.itemSku, sku: row.itemSku,
+            originalPrice: row.originalPrice, salePrice: row.price,
+            promotionPrice: row.promotionPrice, joinPromotion: row.joinPromotion === 1, stock: row.stock
+          });
+        }
+      });
+      page++;
+    }
+    return items;
+  }
+
+  function calcProfits(listings, costMap) {
+    return listings.map(item => {
+      const cost = costMap[item.sku] ?? costMap[item.parentSku] ?? null;
+      const activePrice = item.joinPromotion ? item.promotionPrice : item.salePrice;
+      const profit = cost != null && activePrice != null ? activePrice - cost : null;
+      const margin = profit != null && activePrice ? profit / activePrice * 100 : null;
+      return { ...item, cost, activePrice, profit, margin };
+    });
+  }
+
+  function injectStyles() {
+    if (document.getElementById('sg-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'sg-styles';
+    s.textContent = `
+#${TOGGLE_ID}{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:9998;
+  background:#0F6E56;color:#fff;border:none;border-radius:8px 0 0 8px;
+  padding:14px 6px;cursor:pointer;writing-mode:vertical-rl;font-size:13px;
+  font-weight:500;letter-spacing:.05em;box-shadow:-2px 0 8px rgba(0,0,0,.2);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+#${TOGGLE_ID}:hover{background:#1D9E75;}
+#${PANEL_ID}{position:fixed;top:56px;right:0;width:420px;height:calc(100vh - 56px);
+  background:#fff;border-left:1px solid #e8e8e8;box-shadow:-4px 0 20px rgba(0,0,0,.1);
+  z-index:9999;display:flex;flex-direction:column;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;}
+#${PANEL_ID} .sg-head{padding:12px 14px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;flex-shrink:0;background:#04342C;}
+#${PANEL_ID} .sg-title{font-size:15px;font-weight:500;color:#5DCAA5;flex:1;letter-spacing:.05em;}
+#${PANEL_ID} .sg-version{font-size:10px;color:#1D9E75;letter-spacing:.05em;}
+#${PANEL_ID} .sg-close{cursor:pointer;color:#1D9E75;font-size:18px;padding:4px;}
+#${PANEL_ID} .sg-close:hover{color:#5DCAA5;}
+#${PANEL_ID} .sg-toolbar{padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
+#${PANEL_ID} .sg-search{flex:1;min-width:100px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;}
+#${PANEL_ID} .sg-search:focus{border-color:#1D9E75;}
+#${PANEL_ID} .sg-select{padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;cursor:pointer;background:#fff;}
+#${PANEL_ID} .sg-reload{padding:5px 10px;border:1px solid #9FE1CB;border-radius:6px;background:#e1f5ee;color:#0F6E56;font-size:12px;cursor:pointer;white-space:nowrap;}
+#${PANEL_ID} .sg-reload:hover{background:#9FE1CB;}
+#${PANEL_ID} .sg-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px 12px;border-bottom:1px solid #f0f0f0;flex-shrink:0;}
+#${PANEL_ID} .sg-metric{background:#fafafa;border-radius:8px;padding:6px 8px;text-align:center;}
+#${PANEL_ID} .sg-metric-label{font-size:10px;color:#999;margin-bottom:2px;}
+#${PANEL_ID} .sg-metric-val{font-size:15px;font-weight:500;color:#1a1a1a;}
+#${PANEL_ID} .sg-body{overflow-y:auto;flex:1;}
+#${PANEL_ID} .sg-row{padding:9px 12px;border-bottom:1px solid #f8f8f8;display:grid;grid-template-columns:1fr auto;gap:4px;align-items:start;}
+#${PANEL_ID} .sg-row:hover{background:#f9fffe;}
+#${PANEL_ID} .sg-name{font-size:12px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px;}
+#${PANEL_ID} .sg-sku{font-size:11px;color:#aaa;font-family:monospace;}
+#${PANEL_ID} .sg-prices{text-align:right;line-height:1.7;}
+#${PANEL_ID} .sg-prow{font-size:11px;color:#888;}
+#${PANEL_ID} .sg-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500;margin-top:2px;}
+#${PANEL_ID} .sg-promo{background:#fff0e6;color:#c05200;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:3px;}
+#${PANEL_ID} .sg-loading{padding:40px 16px;text-align:center;color:#999;}
+#${PANEL_ID} .sg-spinner{display:inline-block;width:20px;height:20px;border:2px solid #e8e8e8;border-top-color:#1D9E75;border-radius:50%;animation:sgSpin .7s linear infinite;margin-bottom:8px;}
+@keyframes sgSpin{to{transform:rotate(360deg)}}
+#${PANEL_ID} .sg-empty{padding:40px 16px;text-align:center;color:#bbb;font-size:13px;}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function createLogoCanvas(w, h) {
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const s = w / 320;
+    let pd = 12.5, pt = 38.4, pw = false, pwu = 0;
+    const pool = [22.1,31.8,44.2,38.4,51.0,29.7,47.3,35.6,62.1,28.9];
+    function nt(){ return pool[Math.floor(Math.random()*pool.length)]; }
+    function draw() {
+      const ctx = cv.getContext('2d');
+      const now = Date.now()/1000;
+      const W=cv.width, H=cv.height;
+      const teal='#1D9E75',tL='#5DCAA5',tD='#0F6E56',bg='rgba(4,52,44,0.92)';
+      const lx=14*s,ly=28*s,lw=108*s,lh=80*s,r=14*s;
+      const rx=198*s,ry=28*s,rw=108*s,rh=80*s,bY=ly+lh/2;
+      ctx.clearRect(0,0,W,H);
+      function rr(x,y,w,h,rd){
+        ctx.beginPath();ctx.moveTo(x+rd,y);ctx.lineTo(x+w-rd,y);ctx.quadraticCurveTo(x+w,y,x+w,y+rd);
+        ctx.lineTo(x+w,y+h-rd);ctx.quadraticCurveTo(x+w,y+h,x+w-rd,y+h);
+        ctx.lineTo(x+rd,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-rd);
+        ctx.lineTo(x,y+rd);ctx.quadraticCurveTo(x,y,x+rd,y);ctx.closePath();
+      }
+      rr(lx,ly,lw,lh,r);ctx.fillStyle=bg;ctx.fill();
+      rr(rx,ry,rw,rh,r);ctx.fillStyle=bg;ctx.fill();
+      ctx.save();rr(lx,ly,lw,lh,r);ctx.clip();
+      const chars=['0','1','$','%','T','W','D','↑','∞','▲'];
+      const cols=9,colW=lw/cols;
+      for(let c=0;c<cols;c++){
+        const cx=lx+c*colW+colW/2,spd=0.6+(c*.15)%.8,off=(c*3.7)%7;
+        for(let row=0;row<5;row++){
+          const t=(now*spd+off+row*1.4)%5,yp=ly+(t/5)*(lh+16*s)-8*s;
+          const a=1-(row/5)*.85,ci=Math.floor((now*3+c*7+row*13))%chars.length;
+          ctx.fillStyle=`rgba(93,202,165,${a*(row===0?1:.5)})`;
+          ctx.font=`${Math.floor(10*s)}px monospace`;ctx.textAlign='center';
+          ctx.fillText(chars[ci],cx,yp);
+        }
+      }
+      ctx.restore();
+      ctx.save();rr(rx,ry,rw,rh,r);ctx.clip();
+      const rcx=rx+rw/2,rcy=ry+rh/2;
+      for(let i=3;i>=1;i--){ctx.beginPath();ctx.arc(rcx,rcy,i*20*s,0,Math.PI*2);ctx.strokeStyle=`rgba(29,158,117,${.08*i})`;ctx.lineWidth=1*s;ctx.stroke();}
+      const ang=(now*1.2)%(Math.PI*2);
+      ctx.beginPath();ctx.moveTo(rcx,rcy);ctx.arc(rcx,rcy,44*s,ang,ang+Math.PI*.6);
+      ctx.closePath();ctx.fillStyle='rgba(29,158,117,.12)';ctx.fill();
+      ctx.beginPath();ctx.arc(rcx,rcy,44*s,ang,ang+Math.PI*.6);ctx.strokeStyle=tL;ctx.lineWidth=1.5*s;ctx.stroke();
+      ctx.beginPath();ctx.arc(rcx+Math.cos(ang+.3)*44*s,rcy+Math.sin(ang+.3)*44*s,3*s,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+      ctx.beginPath();ctx.arc(rcx,rcy,6*s,0,Math.PI*2);ctx.fillStyle=teal;ctx.fill();
+      ctx.beginPath();ctx.arc(rcx,rcy,3*s,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+      const diff=pt-pd;
+      if(Math.abs(diff)<.1){pd=pt;if(!pw){pw=true;pwu=now+1.2;}if(pw&&now>pwu){pt=nt();pw=false;}}
+      else{pd+=diff*.08;}
+      ctx.fillStyle='rgba(4,52,44,.7)';ctx.fillRect(rx+2*s,ry+rh-32*s,rw-4*s,30*s);
+      ctx.fillStyle=teal;ctx.font=`500 ${Math.floor(8*s)}px -apple-system,sans-serif`;
+      ctx.textAlign='center';ctx.fillText('利潤率',rcx,ry+rh-20*s);
+      const jo=diff*.15*s;
+      ctx.save();ctx.beginPath();ctx.rect(rx+4*s,ry+rh-20*s,rw-8*s,18*s);ctx.clip();
+      ctx.fillStyle=pd>=0?'#5DCAA5':'#E24B4A';
+      ctx.font=`500 ${Math.floor(15*s)}px -apple-system,sans-serif`;ctx.textAlign='center';
+      ctx.fillText((pd>=0?'+':'')+pd.toFixed(1)+'%',rcx,ry+rh-8*s+jo);ctx.restore();
+      const ir=pt>pd;
+      ctx.fillStyle=`rgba(${ir?'93,202,165':'232,75,74'},${.5+Math.sin(now*4)*.5})`;
+      ctx.font=`${Math.floor(10*s)}px monospace`;ctx.textAlign='right';
+      ctx.fillText(ir?'▲':'▼',rx+rw-6*s,ry+rh-20*s);ctx.restore();
+      rr(lx,ly,lw,lh,r);ctx.strokeStyle=teal;ctx.lineWidth=2.5*s;ctx.stroke();
+      rr(rx,ry,rw,rh,r);ctx.strokeStyle=teal;ctx.lineWidth=2.5*s;ctx.stroke();
+      const bx1=lx+lw,bx2=rx,bm=(bx1+bx2)/2;
+      ctx.beginPath();ctx.moveTo(bx1,bY-8*s);ctx.lineTo(bm+4*s,bY-4*s);
+      ctx.lineTo(bm-4*s,bY+4*s);ctx.lineTo(bx2,bY+8*s);
+      ctx.strokeStyle=tL;ctx.lineWidth=3*s;ctx.lineJoin='round';ctx.stroke();
+      ctx.beginPath();ctx.arc(bm,bY,4*s,0,Math.PI*2);ctx.fillStyle=tL;ctx.fill();
+      ctx.beginPath();ctx.moveTo(lx,ly+18*s);ctx.lineTo(lx-12*s,ly-4*s);
+      ctx.strokeStyle=tD;ctx.lineWidth=3*s;ctx.lineCap='round';ctx.stroke();
+      ctx.beginPath();ctx.moveTo(rx+rw,ry+18*s);ctx.lineTo(rx+rw+12*s,ry-4*s);ctx.stroke();
+    }
+    function loop(){draw();requestAnimationFrame(loop);}
+    loop();
+    return cv;
+  }
+
+  let _rows = [];
+
+  function renderRows() {
+    const body = document.getElementById('sg-body');
+    if (!body) return;
+    const search = (document.getElementById('sg-search')?.value || '').toLowerCase();
+    const sort   = document.getElementById('sg-sort')?.value   || 'profit_desc';
+    const filter = document.getElementById('sg-filter')?.value || 'all';
+    let rows = [..._rows];
+    if (search) rows = rows.filter(r =>
+      r.sku?.toLowerCase().includes(search) || r.name?.toLowerCase().includes(search));
+    if (filter === 'promo')    rows = rows.filter(r => r.joinPromotion);
+    else if (filter === 'loss') rows = rows.filter(r => r.profit != null && r.profit < 0);
+    else if (filter === 'low')  rows = rows.filter(r => r.margin != null && r.margin >= 0 && r.margin < 20);
+    else if (filter === 'ok')   rows = rows.filter(r => r.margin != null && r.margin >= 20 && r.margin < 40);
+    else if (filter === 'high') rows = rows.filter(r => r.margin != null && r.margin >= 40);
+    else if (filter === 'no_cost') rows = rows.filter(r => r.cost == null);
+    rows.sort((a,b)=>{
+      if(sort==='margin_asc')  return (a.margin??-999)-(b.margin??-999);
+      if(sort==='margin_desc') return (b.margin??-999)-(a.margin??-999);
+      if(sort==='profit_asc')  return (a.profit??-999999)-(b.profit??-999999);
+      if(sort==='profit_desc') return (b.profit??-999999)-(a.profit??-999999);
+      if(sort==='price_desc')  return (b.activePrice??0)-(a.activePrice??0);
+      if(sort==='sku_asc')     return (a.sku||'').localeCompare(b.sku||'');
+      return 0;
+    });
+    const withM = rows.filter(r=>r.margin!=null);
+    const avg = withM.length ? (withM.reduce((s,r)=>s+r.margin,0)/withM.length).toFixed(1)+'%' : '-';
+    const loss  = rows.filter(r=>r.profit!=null&&r.profit<0).length;
+    const promo = rows.filter(r=>r.joinPromotion).length;
+    document.getElementById('sg-avg').textContent   = avg;
+    document.getElementById('sg-loss').textContent  = loss;
+    document.getElementById('sg-promo').textContent = promo;
+    document.getElementById('sg-cnt').textContent   = rows.length;
+    if (!rows.length) { body.innerHTML = '<div class="sg-empty">沒有符合條件的商品</div>'; return; }
+    body.innerHTML = rows.map(r => {
+      const c = profitColor(r.margin);
+      const ps = r.profit != null ? (r.profit >= 0 ? '+' : '') + r.profit.toFixed(0) : '-';
+      const ms = r.margin != null ? r.margin.toFixed(1) + '%' : '無成本';
+      const pr = r.joinPromotion ? '<span class="sg-promo">促銷</span>' : '';
+      return `<div class="sg-row">
+        <div>
+          <div class="sg-name" title="${r.name||''}">${r.name||'-'}</div>
+          <div class="sg-sku">${r.sku||'-'}${pr}</div>
+        </div>
+        <div class="sg-prices">
+          <div class="sg-prow">成本 ${r.cost!=null?'TWD '+r.cost.toFixed(0):'—'}</div>
+          <div class="sg-prow">售價 TWD ${r.activePrice!=null?r.activePrice.toFixed(0):'—'}</div>
+          <span class="sg-badge" style="background:${c}18;color:${c};">${ps} TWD｜${ms}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function loadData() {
+    const body = document.getElementById('sg-body');
+    if (!body) return;
+    body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入庫存成本...</div></div>';
+    try {
+      const costMap = await fetchCostMap();
+      body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
+      const listings = await fetchListings();
+      _rows = calcProfits(listings, costMap);
+      renderRows();
+    } catch(e) {
+      body.innerHTML = `<div class="sg-empty" style="color:#E24B4A">載入失敗：${e.message}</div>`;
+    }
+  }
+
+  function createPanel() {
+    if (document.getElementById(PANEL_ID)) return;
+    injectStyles();
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    const head = document.createElement('div');
+    head.className = 'sg-head';
+    const logo = createLogoCanvas(80, 45);
+    logo.style.cssText = 'border-radius:6px;';
+    head.appendChild(logo);
+    const tw = document.createElement('div');
+    tw.style.flex = '1';
+    tw.innerHTML = `<div class="sg-title">超人眼鏡</div><div class="sg-version">Data Vision · BigSeller</div>`;
+    head.appendChild(tw);
+    const cb = document.createElement('span');
+    cb.className = 'sg-close'; cb.innerHTML = '&#x2715;';
+    cb.onclick = () => { panel.style.display='none'; document.getElementById(TOGGLE_ID).style.display=''; };
+    head.appendChild(cb);
+    panel.appendChild(head);
+    panel.insertAdjacentHTML('beforeend', `
+      <div class="sg-toolbar">
+        <input class="sg-search" id="sg-search" type="text" placeholder="搜尋 SKU / 商品名稱..." />
+        <select class="sg-select" id="sg-sort">
+          <option value="profit_desc">利潤額 ↓</option>
+          <option value="profit_asc">利潤額 ↑</option>
+          <option value="margin_desc">利潤率 ↓</option>
+          <option value="margin_asc">利潤率 ↑</option>
+          <option value="price_desc">售價 ↓</option>
+          <option value="sku_asc">SKU</option>
+        </select>
+        <select class="sg-select" id="sg-filter">
+          <option value="all">全部</option>
+          <option value="promo">促銷中</option>
+          <option value="loss">虧損</option>
+          <option value="low">低利潤(&lt;20%)</option>
+          <option value="ok">中利潤(20-40%)</option>
+          <option value="high">高利潤(&gt;40%)</option>
+          <option value="no_cost">無成本資料</option>
+        </select>
+        <button class="sg-reload" id="sg-reload">重新載入</button>
+      </div>
+      <div class="sg-summary">
+        <div class="sg-metric"><div class="sg-metric-label">平均利潤率</div><div class="sg-metric-val" id="sg-avg">-</div></div>
+        <div class="sg-metric"><div class="sg-metric-label">虧損 SKU</div><div class="sg-metric-val" id="sg-loss" style="color:#E24B4A">-</div></div>
+        <div class="sg-metric"><div class="sg-metric-label">促銷中</div><div class="sg-metric-val" id="sg-promo" style="color:#BA7517">-</div></div>
+        <div class="sg-metric"><div class="sg-metric-label">顯示筆數</div><div class="sg-metric-val" id="sg-cnt">-</div></div>
+      </div>
+      <div class="sg-body" id="sg-body">
+        <div class="sg-loading"><div class="sg-spinner"></div><div>初始化中...</div></div>
+      </div>
+    `);
+    document.body.appendChild(panel);
+    let st;
+    document.getElementById('sg-search').oninput = () => { clearTimeout(st); st = setTimeout(renderRows, 200); };
+    document.getElementById('sg-sort').onchange   = renderRows;
+    document.getElementById('sg-filter').onchange = renderRows;
+    document.getElementById('sg-reload').onclick  = loadData;
+  }
+
+  function createToggle() {
+    if (document.getElementById(TOGGLE_ID)) return;
+    const btn = document.createElement('button');
+    btn.id = TOGGLE_ID; btn.textContent = '超人眼鏡';
+    btn.onclick = () => { const p=document.getElementById(PANEL_ID); if(p){p.style.display='flex';btn.style.display='none';} };
+    document.body.appendChild(btn);
+  }
+
+  function init() { createToggle(); createPanel(); loadData(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else setTimeout(init, 1500);
+})();
+"""
+
+import io, zipfile
+
+@app.route("/api/superman-glasses/script.js")
+def superman_glasses_script():
+    """回傳最新的利潤計算腳本給 Chrome Extension"""
+    from flask import Response
+    resp = Response(_SUPERMAN_GLASSES_SCRIPT, mimetype='application/javascript')
+    resp.headers['Access-Control-Allow-Origin'] = 'https://www.bigseller.com'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+@app.route("/api/superman-glasses/version")
+def superman_glasses_version():
+    """回傳版本號，Extension 可用來判斷是否需要更新"""
+    return jsonify({"version": "1.0", "name": "超人眼鏡", "updated": "2026-04-14"})
+
+@app.route("/api/superman-glasses/download")
+def superman_glasses_download():
+    """動態打包 Chrome Extension zip 並提供下載"""
+    manifest = """{
+  "manifest_version": 3,
+  "name": "超人眼鏡 - BigSeller Data Vision",
+  "version": "1.0",
+  "description": "在 BigSeller 直接看利潤數據，讓運營判斷更直覺",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.bigseller.com/*",
+    "https://yindan-system-production.up.railway.app/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.bigseller.com/web/listing/shopee/active/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}"""
+
+    content_js = """/* 超人眼鏡 - Content Script v1.0
+   此檔案是殼，功能邏輯從 Railway 動態載入。
+   更新功能只需在 Railway 修改，不需重新安裝 Extension。 */
+const RAILWAY_URL = 'https://yindan-system-production.up.railway.app/api/superman-glasses/script.js';
+if (!window.__sgInjected) {
+  window.__sgInjected = true;
+  fetch(RAILWAY_URL, { cache: 'no-cache' })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(code => { const s = document.createElement('script'); s.textContent = code; document.head.appendChild(s); })
+    .catch(e => console.warn('[超人眼鏡] 載入失敗，請確認 Railway 正常運作：', e.message));
+}"""
+
+    readme = """超人眼鏡 Chrome Extension 安裝說明
+=====================================
+
+1. 解壓縮這個 zip 到任意資料夾（之後不要刪除此資料夾）
+
+2. 打開 Chrome，網址列輸入：
+   chrome://extensions
+
+3. 開啟右上角的「開發人員模式」
+
+4. 點擊「載入未封裝項目」
+
+5. 選擇剛才解壓縮的資料夾
+
+6. 完成！打開 BigSeller 在線產品頁面即可使用
+
+更新說明：
+- 功能更新由公司 Railway 系統統一推送
+- Extension 本身不需要重新安裝
+- 如需重新安裝，請從超人特工倉首頁重新下載
+
+技術支援：請聯繫系統管理員
+"""
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('superman_glasses/manifest.json', manifest)
+        zf.writestr('superman_glasses/content.js', content_js)
+        zf.writestr('superman_glasses/README.txt', readme)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name='superman_glasses.zip'
+    )
 
 
 if __name__ == "__main__":
