@@ -6699,17 +6699,7 @@ def superman_glasses_download():
   ]
 }"""
 
-    content_js = """/* 超人眼鏡 - Content Script v1.0
-   此檔案是殼，功能邏輯從 Railway 動態載入。
-   更新功能只需在 Railway 修改，不需重新安裝 Extension。 */
-const RAILWAY_URL = 'https://yindan-system-production.up.railway.app/api/superman-glasses/script.js';
-if (!window.__sgInjected) {
-  window.__sgInjected = true;
-  fetch(RAILWAY_URL, { cache: 'no-cache' })
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-    .then(code => { const s = document.createElement('script'); s.textContent = code; document.head.appendChild(s); })
-    .catch(e => console.warn('[超人眼鏡] 載入失敗，請確認 Railway 正常運作：', e.message));
-}"""
+    content_js = _SUPERMAN_GLASSES_SCRIPT
 
     readme = """超人眼鏡 Chrome Extension 安裝說明
 =====================================
