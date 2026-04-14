@@ -2540,6 +2540,11 @@ app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 LOGIN_USER = os.environ.get("LOGIN_USER", "admin")
 LOGIN_PASS = os.environ.get("LOGIN_PASS", "admin123")
 
+# ── Token 免登入設定 ──────────────────────────────────────────
+# 在 Railway 環境變數設定 ACCESS_TOKEN（建議 32 位隨機字串）
+# 員工書籤連結：https://你的網域/auth?token=<ACCESS_TOKEN>
+ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN", "")  # 空字串 = 停用 token 登入
+
 SYSTEM_NAME = "&#x1F3ED; 超人特工倉"
 SYSTEM_SUBTITLE = "Super Warehouse Agent System"
 
@@ -2638,14 +2643,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">貨架入庫</div>
     <div class="card-desc">掃描貨號入庫到重型貨架，記錄每個儲位的商品，一秒查詢貨號在哪個儲位。</div>
   </a>
-  <a href="/ai-title" class="card card-ai">
-    <span class="card-badge badge-ready">&#x2713; 上線中</span>
-    <span class="card-icon">&#x1F9E0;</span>
-    <div class="card-title">蝦皮 AI 標題生成</div>
-    <div class="card-desc">貼入知蝦熱搜關鍵字，AI 自動生成蝦皮標題、商品內文、規格條列，單品或批量皆可。</div>
-  </a>
+
 </div>
 </body></html>"""
+
+# ── Token 登入紀錄（記憶體，重啟後清空） ──────────────────────
+_token_login_log = []   # [{"time": str, "ip": str, "status": str}]
 
 def login_required(f):
     from functools import wraps
@@ -2655,6 +2658,53 @@ def login_required(f):
             return redirect("/login")
         return f(*args, **kwargs)
     return decorated
+
+@app.route("/auth")
+def token_auth():
+    """Token 免登入入口：員工書籤存 /auth?token=xxx&next=/split"""
+    if not ACCESS_TOKEN:
+        return redirect("/login")
+    import hmac
+    token = request.args.get("token", "")
+    next_page = request.args.get("next", "/")
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    if not hmac.compare_digest(token, ACCESS_TOKEN):
+        _token_login_log.append({"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ip": ip, "status": "FAIL"})
+        return render_template_string(
+            "<h3 style='font-family:sans-serif;color:#b71c1c;margin:40px auto;text-align:center'>Token 無效，請確認連結是否正確。</h3>"
+        ), 403
+    _token_login_log.append({"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ip": ip, "status": "OK"})
+    if len(_token_login_log) > 200:
+        _token_login_log.pop(0)
+    session["logged_in"] = True
+    session["login_method"] = "token"
+    if not next_page.startswith("/") or next_page.startswith("//"):
+        next_page = "/"
+    return redirect(next_page)
+
+@app.route("/api/token-log")
+@login_required
+def token_log():
+    """查看 token 登入紀錄（需登入才能看）"""
+    rows = "".join(
+        f"<tr><td>{r['time']}</td><td>{r['ip']}</td>"
+        f"<td style='color:{'#2e7d32' if r['status']=='OK' else '#b71c1c'}'>{r['status']}</td></tr>"
+        for r in reversed(_token_login_log)
+    ) or "<tr><td colspan=3 style='text-align:center;color:#888'>尚無紀錄</td></tr>"
+    html = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'>
+    <title>Token 登入紀錄</title>
+    <style>body{{font-family:sans-serif;padding:32px;background:#f5f5f5}}
+    table{{border-collapse:collapse;width:100%;max-width:700px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}}
+    th{{background:#1a5fa8;color:#fff;padding:12px 16px;text-align:left;font-size:13px}}
+    td{{padding:10px 16px;border-bottom:1px solid #eee;font-size:13px}}
+    h2{{margin-bottom:16px;color:#1a1a1a}}</style></head><body>
+    <h2>Token 登入紀錄（最新在前）</h2>
+    <table><thead><tr><th>時間</th><th>IP 位址</th><th>狀態</th></tr></thead>
+    <tbody>{rows}</tbody></table>
+    <p style='margin-top:12px;font-size:12px;color:#888'>共 {len(_token_login_log)} 筆（最多保留 200 筆，重啟清空）</p>
+    <p style='margin-top:4px;font-size:12px'><a href='/'>← 返回首頁</a></p>
+    </body></html>"""
+    return html
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -4899,10 +4949,12 @@ def api_customs_upload():
             except:
                 total_rmb = ""
 
+            # C 模式：尺寸一律用資料庫的，資料庫沒有才 fallback 到 XLS
+            db_size = db.get(sku, {}).get("product_size", "") if sku in db else ""
             row = {
                 "sku":               sku,
                 "type":              get_col(r, "type", 1),
-                "product_size_orig": get_col(r, "product_size_orig", 2),
+                "product_size_orig": db_size if db_size else get_col(r, "product_size_orig", 2),
                 "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if sku in db else get_col(r, "material", 3),
                 "customs_name":      db.get(sku, {}).get("customs_name", "") if sku in db else "",
                 "box_no":            get_col(r, "box_no", 5),
@@ -6123,339 +6175,6 @@ def api_warehouse_records():
                    for r in rows]
         records.reverse()
         return jsonify({"ok": True, "records": records[:100]})
-    except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)})
-
-
-
-# ============================================================
-# 蝦皮 AI 標題生成工具
-# ============================================================
-
-AI_TITLE_HTML = """<!DOCTYPE html>
-<html lang="zh-TW"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>蝦皮 AI 標題生成 - 超人特工倉</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:100vh;color:#fff}
-.topbar{background:rgba(255,255,255,.05);height:56px;padding:0 32px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.08)}
-.logo{font-size:16px;font-weight:700;margin-right:auto}.logo span{color:#f4a100}
-.back-btn{color:#aaa;font-size:12px;text-decoration:none;padding:6px 12px;border:1px solid #333;border-radius:5px}
-.wrap{max-width:980px;margin:0 auto;padding:28px 20px 60px}
-h2{font-size:22px;font-weight:700;margin-bottom:6px}h2 span{color:#ce93d8}
-.subtitle{font-size:13px;color:#666;margin-bottom:20px}
-.note-green{background:rgba(0,150,100,.08);border-left:3px solid rgba(0,200,130,.4);border-radius:0 6px 6px 0;padding:12px 16px;font-size:13px;color:#aaa;margin-bottom:20px;line-height:1.7}
-.note-green strong{color:#4dd0a0}
-.note{background:rgba(156,39,176,.08);border-left:3px solid rgba(156,39,176,.4);border-radius:0 6px 6px 0;padding:10px 14px;font-size:12px;color:#aaa;margin-bottom:18px;line-height:1.6}
-.note strong{color:#ce93d8}
-.tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:22px}
-.tab{padding:9px 18px;font-size:13px;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
-.tab.active{color:#ce93d8;border-bottom-color:#ce93d8;font-weight:500}
-label{font-size:12px;color:#888;display:block;margin-bottom:6px}
-textarea,input[type=text]{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;font-size:14px;color:#fff;font-family:inherit;resize:vertical}
-textarea:focus,input:focus{outline:none;border-color:rgba(156,39,176,.6)}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.section{margin-bottom:16px}
-.btn-row{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:18px}
-.btn{padding:10px 22px;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;border:none;font-weight:500}
-.btn-primary{background:linear-gradient(135deg,#7b1fa2,#ce93d8);color:#fff}
-.btn-primary:hover{opacity:.88}.btn-primary:disabled{opacity:.4;cursor:not-allowed}
-.status{font-size:13px;color:#888}
-.out-label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
-.out-box{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:14px;font-size:14px;line-height:1.7;color:#e0e0e0;white-space:pre-wrap;word-break:break-all;position:relative}
-.char-badge{position:absolute;top:8px;right:8px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
-.badge-ok{background:rgba(46,125,50,.3);color:#81c784}
-.badge-warn{background:rgba(245,127,23,.3);color:#ffa726}
-.badge-over{background:rgba(183,28,28,.3);color:#ef9a9a}
-.copy-btn{font-size:12px;padding:5px 12px;margin-top:6px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#aaa;cursor:pointer;font-family:inherit}
-.copy-btn:hover{color:#fff;border-color:#aaa}
-.title-list{display:flex;flex-direction:column;gap:10px}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#ce93d8;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.batch-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:16px 18px;margin-bottom:14px}
-.batch-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:13px;font-weight:500}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.dot-pending{background:#555}.dot-loading{background:#ffa726;animation:pulse 1s infinite}.dot-done{background:#81c784}.dot-fail{background:#ef9a9a}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.hint{font-size:11px;color:#555;margin-top:5px}
-</style></head><body>
-<div class="topbar">
-  <div class="logo">&#x1F3ED; <span>超人特工倉</span></div>
-  <a href="/" class="back-btn">&#x2302; 返回首頁</a>
-</div>
-<div class="wrap">
-  <h2>&#x1F9E0; 蝦皮 <span>AI 標題生成</span></h2>
-  <p class="subtitle">整合知蝦熱搜數據，AI 自動生成標題 x3 + 內文 + 規格條列</p>
-  <div class="note-green">
-    <strong>&#x26A1; 知蝦自動抓詞：</strong>安裝擴充功能後，在知蝦搜尋商品關鍵字，點擴充功能圖示即可自動填入。
-  </div>
-  <div class="note"><strong>標題</strong> 以關鍵字自然融入為主（上限 100 字元）；<strong>賣點</strong> 用於生成內文與規格，不直接堆入標題。</div>
-  <div class="tabs">
-    <button class="tab active" onclick="switchTab('single')">單品生成</button>
-    <button class="tab" onclick="switchTab('batch')">批量生成</button>
-  </div>
-  <div id="tab-single">
-    <div class="section"><label>商品名稱</label><input type="text" id="s-name" placeholder="例：不鏽鋼保溫杯 500ml"></div>
-    <div class="section row2">
-      <div>
-        <label>熱門關鍵字（一行一個）</label>
-        <textarea id="s-kw" rows="6" placeholder="保溫杯&#10;不鏽鋼保溫杯&#10;316不鏽鋼&#10;大容量保溫瓶"></textarea>
-        <div class="hint">從知蝦複製或由擴充功能自動填入</div>
-      </div>
-      <div>
-        <label>主要賣點（一行一個）</label>
-        <textarea id="s-pts" rows="6" placeholder="316食品級不鏽鋼&#10;保溫12小時&#10;防漏設計&#10;輕量280g"></textarea>
-      </div>
-    </div>
-    <div class="section"><label>目標客群（選填）</label><input type="text" id="s-target" placeholder="例：上班族、學生、戶外運動愛好者"></div>
-    <div class="btn-row">
-      <span class="status" id="s-status"></span>
-      <button class="btn btn-primary" id="s-btn" onclick="generateSingle()">AI 生成內容</button>
-    </div>
-    <div id="s-output"></div>
-  </div>
-  <div id="tab-batch" style="display:none">
-    <div class="section">
-      <label>批量輸入（每行：商品名稱 | 關鍵字1,關鍵字2 | 賣點1,賣點2）</label>
-      <textarea id="b-input" rows="8" placeholder="不鏽鋼保溫杯 | 保溫杯,316不鏽鋼,大容量 | 保溫12小時,防漏,輕量&#10;矽膠廚房手套 | 防燙手套,廚房手套,矽膠 | 耐高溫,防滑,可清洗"></textarea>
-      <div class="hint">最多 10 個商品</div>
-    </div>
-    <div class="btn-row">
-      <span class="status" id="b-status"></span>
-      <button class="btn btn-primary" id="b-btn" onclick="generateBatch()">批量生成</button>
-    </div>
-    <div id="b-output"></div>
-  </div>
-</div>
-<script>
-function switchTab(t){
-  document.querySelectorAll('.tab').forEach(function(el,i){
-    el.classList.toggle('active',(i===0&&t==='single')||(i===1&&t==='batch'));
-  });
-  document.getElementById('tab-single').style.display=t==='single'?'':'none';
-  document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
-}
-function charBadge(text){
-  var len=Array.from(text).length;
-  var cls=len<=80?'badge-ok':len<=100?'badge-warn':'badge-over';
-  return '<span class="char-badge '+cls+'">'+len+'/100</span>';
-}
-function copyText(id){
-  var el=document.getElementById(id);if(!el)return;
-  navigator.clipboard.writeText(el.innerText.trim());
-  var btn=el.nextElementSibling;
-  if(btn){btn.textContent='已複製 ✓';setTimeout(function(){btn.textContent='複製';},1800);}
-}
-function renderOutput(data,containerId){
-  var html='';
-  if(data.titles){
-    html+='<div style="margin-top:20px"><div class="out-label">蝦皮標題（3 個版本）</div><div class="title-list">';
-    data.titles.forEach(function(t,i){
-      var id='title-'+containerId+'-'+i;
-      html+='<div><div class="out-box" id="'+id+'" style="padding-right:76px">'+t+charBadge(t)+'</div>';
-      html+='<button class="copy-btn" onclick="copyText(\'' +id+ '\')">複製</button></div>';
-    });
-    html+='</div></div>';
-  }
-  if(data.description){
-    var id2='desc-'+containerId;
-    html+='<div style="margin-top:16px"><div class="out-label">商品內文描述</div>';
-    html+='<div class="out-box" id="'+id2+'">'+data.description+'</div>';
-    html+='<button class="copy-btn" onclick="copyText(\'' +id2+ '\')">複製</button></div>';
-  }
-  if(data.specs){
-    var id3='spec-'+containerId;
-    html+='<div style="margin-top:16px"><div class="out-label">規格 / 賣點條列</div>';
-    html+='<div class="out-box" id="'+id3+'">'+data.specs+'</div>';
-    html+='<button class="copy-btn" onclick="copyText(\'' +id3+ '\')">複製</button></div>';
-  }
-  document.getElementById(containerId).innerHTML=html;
-}
-function callAI(name,kw,pts,target,callback){
-  fetch('/api/ai-title/generate',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:name,keywords:kw,points:pts,target:target})
-  })
-  .then(function(r){return r.json();})
-  .then(function(d){if(d.ok)callback(null,d.result);else callback(d.msg||'生成失敗');})
-  .catch(function(e){callback(e.message||'網路錯誤');});
-}
-function generateSingle(){
-  var name=document.getElementById('s-name').value.trim();
-  if(!name){alert('請輸入商品名稱');return;}
-  var kw=document.getElementById('s-kw').value.trim();
-  var pts=document.getElementById('s-pts').value.trim();
-  var target=document.getElementById('s-target').value.trim();
-  var btn=document.getElementById('s-btn');
-  var status=document.getElementById('s-status');
-  btn.disabled=true;
-  status.innerHTML='<span class="spinner"></span>AI 生成中...';
-  document.getElementById('s-output').innerHTML='';
-  callAI(name,kw,pts,target,function(err,data){
-    btn.disabled=false;
-    if(err){status.innerHTML='<span style="color:#ef9a9a">'+err+'</span>';return;}
-    status.innerHTML='<span style="color:#81c784">&#x2713; 生成完成</span>';
-    renderOutput(data,'s-output');
-  });
-}
-function generateBatch(){
-  var raw=document.getElementById('b-input').value.trim();
-  if(!raw){alert('請輸入商品資料');return;}
-  var lines=raw.split('\n').filter(function(l){return l.trim();}).slice(0,10);
-  var btn=document.getElementById('b-btn');
-  var status=document.getElementById('b-status');
-  btn.disabled=true;
-  var container=document.getElementById('b-output');
-  container.innerHTML='';
-  var items=lines.map(function(line,i){
-    var parts=line.split('|').map(function(p){return p.trim();});
-    return {name:parts[0]||'',kw:(parts[1]||'').replace(/,/g,'\n'),pts:(parts[2]||'').replace(/,/g,'\n'),id:'batch-'+i};
-  });
-  items.forEach(function(item,i){
-    var div=document.createElement('div');div.className='batch-item';
-    div.innerHTML='<div class="batch-header"><span><span class="dot dot-pending" id="dot-'+item.id+'"></span>'+(item.name||'商品 '+(i+1))+'</span><span style="color:#555;font-size:12px" id="lbl-'+item.id+'">等待中</span></div><div id="'+item.id+'"></div>';
-    container.appendChild(div);
-  });
-  var idx=0;
-  function next(){
-    if(idx>=items.length){btn.disabled=false;status.innerHTML='<span style="color:#81c784">&#x2713; 全部完成</span>';return;}
-    var item=items[idx++];
-    document.getElementById('dot-'+item.id).className='dot dot-loading';
-    document.getElementById('lbl-'+item.id).innerHTML='<span class="spinner" style="width:10px;height:10px;border-width:1.5px"></span>生成中';
-    callAI(item.name,item.kw,item.pts,'',function(err,data){
-      if(err){document.getElementById('dot-'+item.id).className='dot dot-fail';document.getElementById('lbl-'+item.id).innerHTML='<span style="color:#ef9a9a">失敗</span>';}
-      else{document.getElementById('dot-'+item.id).className='dot dot-done';document.getElementById('lbl-'+item.id).innerHTML='<span style="color:#81c784">完成</span>';renderOutput(data,item.id);}
-      setTimeout(next,500);
-    });
-  }
-  next();
-}
-setTimeout(function(){
-  var m=location.search.match(/[?&]kw=([^&]*)/);
-  if(!m)return;
-  var kw=decodeURIComponent(m[1]);
-  if(!kw)return;
-  var ta=document.getElementById('s-kw');
-  if(!ta)return;
-  ta.value=kw;
-  var tip=document.createElement('div');
-  tip.style.cssText='position:fixed;top:20px;right:20px;background:#2e7d32;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.4)';
-  tip.innerHTML='&#x2713; 已自動填入 '+kw.split('\n').filter(function(w){return w.trim();}).length+' 個知蝦關鍵字！';
-  document.body.appendChild(tip);
-  setTimeout(function(){tip.remove();},3000);
-  history.replaceState({},'',location.pathname);
-},300);
-</script>
-</body></html>"""
-
-
-
-
-
-
-@app.route("/ai-title")
-@login_required
-def ai_title_page():
-    from flask import Response
-    return Response(AI_TITLE_HTML, mimetype='text/html; charset=utf-8')
-
-
-@app.route("/api/ai-title/fetch-keywords", methods=["POST"])
-@login_required
-def api_fetch_zhixia_keywords():
-    import urllib.request, urllib.parse, time as _time
-    data    = request.get_json()
-    keyword = data.get("keyword", "").strip()
-    cookie  = data.get("cookie", "").strip()
-    cat_id  = data.get("catId", 0)
-    if not keyword:
-        return jsonify({"ok": False, "msg": "請輸入關鍵字"})
-    if not cookie:
-        return jsonify({"ok": False, "msg": "請先設定知蝦 Cookie"})
-    # token 可以是 "Bearer xxx" 或直接是 token 字串
-    auth_value = cookie.strip()
-    if not auth_value.startswith('Bearer '):
-        auth_value = 'Bearer ' + auth_value
-    hdrs = {
-        "Authorization": auth_value,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://shopee.mobduos.com/",
-        "Accept": "application/json, text/plain, */*",
-    }
-    results = {"hotWords": [], "relatedWords": []}
-    ts = int(_time.time() * 1000)
-    # 單品關鍵字洞察
-    try:
-        encoded = urllib.parse.quote(keyword)
-        url = f"https://shopee.mobduos.com/api/shopee-report-service/pro/hotWordChopeeProduct/getChooseHeadData?_t={ts}&siteId=1&word={encoded}"
-        req = urllib.request.Request(url, headers=hdrs)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            insight = d.get("data") or d
-            if isinstance(insight, dict):
-                results["relatedWords"] = insight.get("relatedWords") or insight.get("keywordList") or []
-                results["insight"] = {k: v for k, v in insight.items() if k not in ("relatedWords","keywordList")}
-    except Exception as e:
-        results["insight_error"] = str(e)
-    # 品類熱搜詞
-    if cat_id:
-        try:
-            ts2 = int(_time.time() * 1000)
-            url2 = f"https://shopee.mobduos.com/api/shopee-report-service/pro/hotWord/hotWordList?_t={ts2}&siteId=1&catId={cat_id}&pageNum=1&pageSize=30&isBorder=0&field=&orderType=&level=1"
-            req2 = urllib.request.Request(url2, headers=hdrs)
-            with urllib.request.urlopen(req2, timeout=10) as resp2:
-                d2 = json.loads(resp2.read().decode("utf-8"))
-                items = d2.get("data") or d2
-                if isinstance(items, dict):
-                    items = items.get("list", [])
-                results["hotWords"] = [item.get("hotWord") or item.get("word","") for item in (items or []) if item.get("hotWord") or item.get("word")]
-        except Exception as e:
-            results["hotWords_error"] = str(e)
-    return jsonify({"ok": True, "result": results})
-
-
-@app.route("/api/ai-title/generate", methods=["POST"])
-@login_required
-def api_ai_title_generate():
-    import urllib.request
-    data = request.get_json()
-    name   = data.get("name", "").strip()
-    kw     = data.get("keywords", "").strip()
-    pts    = data.get("points", "").strip()
-    target = data.get("target", "").strip()
-    if not name:
-        return jsonify({"ok": False, "msg": "請輸入商品名稱"})
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not anthropic_key:
-        return jsonify({"ok": False, "msg": "伺服器未設定 ANTHROPIC_API_KEY 環境變數"})
-    system_p = ("你是蝦皮電商內容專家，幫台灣賣家生成高轉換率的上架文案。"
-                "【標題規則】嚴格限制100字元以內；關鍵字自然融入，禁止逗號堆砌；不把賣點直接塞入標題。"
-                "【內文規則】繁體中文台灣用語，200-300字，有情境感不誇大。"
-                '只回傳JSON不要其他文字：{"titles":["版本1","版本2","版本3"],"description":"內文(換行用\\n)","specs":"✦ 賣點1\\n✦ 賣點2\\n✦ 賣點3"}')
-    user_p = f"商品名稱：{name}\n熱門關鍵字（用於標題）：{kw or '（未提供）'}\n主要賣點（用於內文/規格）：{pts or '（未提供）'}"
-    if target:
-        user_p += f"\n目標客群：{target}"
-    body = json.dumps({
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 1000,
-        "system": system_p,
-        "messages": [{"role": "user", "content": user_p}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={"Content-Type":"application/json","x-api-key":anthropic_key,"anthropic-version":"2023-06-01"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        text = "".join(c.get("text","") for c in result.get("content",[]))
-        text = text.replace("```json","").replace("```","").strip()
-        parsed = json.loads(text)
-        return jsonify({"ok": True, "result": parsed})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
