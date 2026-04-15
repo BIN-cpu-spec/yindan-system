@@ -6312,8 +6312,8 @@ def api_warehouse_records():
 # profit_script.js 內容（直接內嵌，避免讀檔問題）
 _SUPERMAN_GLASSES_SCRIPT = r"""
 /* 超人眼鏡 - BigSeller 利潤計算核心腳本
-   由 Railway 超人特工倉提供，版本統一管理 v1.1
-   v1.1: 加入 localStorage 快取，秒開，背景靜默更新 */
+   由 Railway 超人特工倉提供，版本統一管理 v1.2
+   v1.2: 成本改從庫存清單 DOM 讀取，準確可靠 */
 (function () {
   'use strict';
   if (window.__supermanGlassesLoaded) return;
@@ -6322,7 +6322,11 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   const PANEL_ID   = 'sg-profit-panel';
   const TOGGLE_ID  = 'sg-profit-toggle';
   const CACHE_KEY  = 'sg_cache_v1';
-  const CACHE_TTL  = 30 * 60 * 1000; // 30 分鐘快取
+  const COST_KEY   = 'sg_cost_map';   // 庫存頁面掃描後存這裡
+  const CACHE_TTL  = 60 * 60 * 1000; // 1 小時快取
+
+  const isInventoryPage = location.pathname.includes('/inventory/index');
+  const isListingPage   = location.pathname.includes('/listing/shopee/active');
 
   function profitColor(margin) {
     if (margin == null || isNaN(margin)) return '#888';
@@ -6331,65 +6335,160 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     return '#E24B4A';
   }
 
-  // ── 快取：存取 localStorage ──────────────────────────────────
-  function saveCache(costMap, listings) {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        ts: Date.now(), costMap, listings
-      }));
-    } catch(e) {}
-  }
-
-  function loadCache() {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return null;
-      const c = JSON.parse(raw);
-      if (Date.now() - c.ts > CACHE_TTL) return null;
-      return c;
-    } catch(e) { return null; }
-  }
-
   function cacheAge(ts) {
     const sec = Math.floor((Date.now() - ts) / 1000);
-    if (sec < 60) return `${sec} 秒前`;
-    const min = Math.floor(sec / 60);
-    return `${min} 分鐘前`;
+    if (sec < 60) return sec + ' 秒前';
+    return Math.floor(sec / 60) + ' 分鐘前';
   }
 
-  // 用 XHR 發送（不用 fetch），加上 isMergeWarehouse:1 才能取得正確成本
-  function xhrPost(url, body) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-      xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-      xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
-      xhr.onerror = () => reject(new Error('XHR error'));
-      xhr.send(JSON.stringify(body));
-    });
-  }
-
-  async function fetchCostMap() {
+  // ── 從庫存清單 DOM 讀取成本（在庫存頁面執行）────────────────
+  function readCostFromDOM() {
     const map = {};
-    let page = 1, total = 1;
-    while (page <= total) {
-      const d = await xhrPost('/api/v1/inventory/pageList.json', {
-        pageNo: page, pageSize: 200,
-        warehouseIds: '56099,54687',
-        searchType: 'skuName', searchContent: '',
-        inquireType: 0, stockStatus: '', isGroup: '', fullCid: '',
-        saleState: '', zoneId: '', hideZeroInventorySku: 0,
-        isMergeWarehouse: 1
-      });
-      if (d.code !== 0) break;
-      total = d.data?.page?.totalPage || 1;
-      (d.data?.page?.rows || []).forEach(row => {
-        if (row.sku && row.cost != null && parseFloat(row.cost) > 0)
-          map[row.sku.trim()] = parseFloat(row.cost);
-      });
-      page++;
-    }
+    const rows = document.querySelectorAll('.vxe-body--row');
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('.vxe-body--column');
+      if (cells.length < 16) return;
+      // 欄1=SKU，欄15=加權成本價
+      const skuText = cells[1]?.textContent?.trim() || '';
+      const skuMatch = skuText.match(/([A-Z]{2,}\d{3,}[-\w]*)/);
+      const sku = skuMatch?.[1];
+      const costText = cells[15]?.textContent?.trim() || '';
+      const costMatch = costText.match(/([\d]+\.[\d]+|[\d]+)/);
+      const cost = costMatch ? parseFloat(costMatch[1]) : 0;
+      if (sku && cost > 0) map[sku] = cost;
+    });
     return map;
+  }
+
+  // ── 翻頁掃描：自動點下一頁，收集所有成本 ─────────────────────
+  async function scanAllPages() {
+    const allMap = {};
+    let pageNum = 1;
+
+    const getNextBtn = () => {
+      const btns = document.querySelectorAll('.ant-pagination-next:not(.ant-pagination-disabled)');
+      return btns.length > 0 ? btns[0] : null;
+    };
+
+    const waitForLoad = () => new Promise(resolve => setTimeout(resolve, 800));
+
+    const getTotalItems = () => {
+      const m = document.body.textContent?.match(/共\s*([\d,]+)\s*[项條]/);
+      return m ? parseInt(m[1].replace(',', '')) : 0;
+    };
+
+    // 讀當前頁
+    const pageCosts = readCostFromDOM();
+    Object.assign(allMap, pageCosts);
+
+    const totalItems = getTotalItems();
+    const perPage = 50;
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    // 更新進度
+    const updateProgress = (cur, total) => {
+      const el = document.getElementById('sg-scan-progress');
+      if (el) el.textContent = `掃描中 ${cur}/${total} 頁...`;
+    };
+
+    while (pageNum < totalPages) {
+      const nextBtn = getNextBtn();
+      if (!nextBtn) break;
+      nextBtn.click();
+      await waitForLoad();
+      pageNum++;
+      updateProgress(pageNum, totalPages);
+      const pageCosts = readCostFromDOM();
+      Object.assign(allMap, pageCosts);
+    }
+
+    return allMap;
+  }
+
+  // ── 庫存頁面：建立掃描 UI ────────────────────────────────────
+  function initInventoryScanner() {
+    if (document.getElementById('sg-scanner-btn')) return;
+
+    const style = document.createElement('style');
+    style.textContent = `
+#sg-scanner-wrap{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+#sg-scanner-btn{background:#0F6E56;color:#5DCAA5;border:none;border-radius:8px;padding:10px 16px;
+  font-size:13px;font-weight:500;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.2);
+  font-family:-apple-system,sans-serif;display:flex;align-items:center;gap:8px;}
+#sg-scanner-btn:hover{background:#1D9E75;}
+#sg-scanner-btn canvas{border-radius:4px;}
+#sg-scan-status{background:#04342C;color:#5DCAA5;border-radius:8px;padding:8px 14px;
+  font-size:12px;font-family:monospace;box-shadow:0 2px 12px rgba(0,0,0,.2);display:none;max-width:260px;}
+    `;
+    document.head.appendChild(style);
+
+    const wrap = document.createElement('div');
+    wrap.id = 'sg-scanner-wrap';
+    wrap.innerHTML = `
+      <div id="sg-scan-status"></div>
+      <button id="sg-scanner-btn">
+        <span>&#x1F4E1;</span>
+        <span id="sg-scan-progress">掃描庫存成本</span>
+      </button>
+    `;
+    document.body.appendChild(wrap);
+
+    // 檢查快取狀態
+    try {
+      const saved = localStorage.getItem(COST_KEY);
+      if (saved) {
+        const c = JSON.parse(saved);
+        const age = cacheAge(c.ts);
+        const count = Object.keys(c.map || {}).length;
+        const status = document.getElementById('sg-scan-status');
+        status.textContent = `上次掃描：${age} | ${count} 個 SKU`;
+        status.style.display = 'block';
+      }
+    } catch(e) {}
+
+    document.getElementById('sg-scanner-btn').onclick = async () => {
+      const btn = document.getElementById('sg-scanner-btn');
+      const progress = document.getElementById('sg-scan-progress');
+      const status = document.getElementById('sg-scan-status');
+      btn.disabled = true;
+      btn.style.opacity = '0.7';
+      status.style.display = 'block';
+      status.textContent = '開始掃描...';
+      progress.textContent = '掃描中 1/? 頁...';
+
+      try {
+        const map = await scanAllPages();
+        const count = Object.keys(map).length;
+        localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map }));
+        progress.textContent = '掃描完成！';
+        status.textContent = `完成！共 ${count} 個 SKU 的成本已儲存`;
+        setTimeout(() => { progress.textContent = '重新掃描'; }, 3000);
+      } catch(e) {
+        status.textContent = '掃描失敗：' + e.message;
+        progress.textContent = '掃描庫存成本';
+      }
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    };
+  }
+
+  // ── 在線產品頁面：從 localStorage 讀成本 ─────────────────────
+  function getCostMapFromStorage() {
+    try {
+      const raw = localStorage.getItem(COST_KEY);
+      if (!raw) return {};
+      const c = JSON.parse(raw);
+      return c.map || {};
+    } catch(e) { return {}; }
+  }
+
+  function getCostAge() {
+    try {
+      const raw = localStorage.getItem(COST_KEY);
+      if (!raw) return null;
+      const c = JSON.parse(raw);
+      return c.ts ? cacheAge(c.ts) : null;
+    } catch(e) { return null; }
   }
 
   // 抓店鋪清單
@@ -6642,32 +6741,54 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     const shopId = document.getElementById('sg-shop')?.value || '';
     const cacheKey = CACHE_KEY + (shopId ? '_' + shopId : '');
 
-    // ── 先用快取秒開 ──
-    const cache = (() => { try { const raw = localStorage.getItem(cacheKey); if (!raw) return null; const c = JSON.parse(raw); if (Date.now() - c.ts > CACHE_TTL) return null; return c; } catch(e) { return null; } })();
+    // 從 localStorage 讀成本（由庫存頁面掃描器填入）
+    const costMap = getCostMapFromStorage();
+    const costAge = getCostAge();
+    const costCount = Object.keys(costMap).length;
+
+    // 更新成本狀態標示
+    const tsEl = document.getElementById('sg-cache-ts');
+    if (tsEl) {
+      if (costCount === 0) {
+        tsEl.textContent = '⚠ 尚無成本資料，請先到「庫存清單」頁面點擊「掃描庫存成本」';
+        tsEl.style.color = '#BA7517';
+      } else {
+        tsEl.textContent = `成本資料：${costCount} 個 SKU｜${costAge || ''}更新`;
+        tsEl.style.color = '#aaa';
+      }
+    }
+
+    // 讀在線產品快取
+    const cache = (() => {
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (!raw) return null;
+        const c = JSON.parse(raw);
+        if (Date.now() - c.ts > CACHE_TTL) return null;
+        return c;
+      } catch(e) { return null; }
+    })();
+
     if (cache && !forceRefresh) {
-      _rows = calcProfits(cache.listings, cache.costMap);
+      _rows = calcProfits(cache.listings, costMap);
       renderRows();
-      const ts = document.getElementById('sg-cache-ts');
-      if (ts) ts.textContent = `快取資料・${cacheAge(cache.ts)}更新・點「強制更新」取得最新`;
-      _fetchAndUpdate(false, shopId, cacheKey);
+      _fetchAndUpdate(false, shopId, cacheKey, costMap);
       return;
     }
-    body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入庫存成本...</div></div>';
-    await _fetchAndUpdate(true, shopId, cacheKey);
+
+    body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
+    await _fetchAndUpdate(true, shopId, cacheKey, costMap);
   }
 
-  async function _fetchAndUpdate(showLoading, shopId, cacheKey) {
+  async function _fetchAndUpdate(showLoading, shopId, cacheKey, costMap) {
     const body = document.getElementById('sg-body');
     try {
-      const costMap = await fetchCostMap();
       if (showLoading && body)
         body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
       const listings = await fetchListings(shopId);
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), costMap, listings })); } catch(e) {}
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), listings })); } catch(e) {}
       _rows = calcProfits(listings, costMap);
       renderRows();
-      const ts = document.getElementById('sg-cache-ts');
-      if (ts) ts.textContent = '資料剛剛更新 ✓';
     } catch(e) {
       if (showLoading && body)
         body.innerHTML = `<div class="sg-empty" style="color:#E24B4A">載入失敗：${e.message}</div>`;
@@ -6769,7 +6890,17 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     document.body.appendChild(btn);
   }
 
-  function init() { createToggle(); createPanel(); loadData(); }
+  function init() {
+    if (isInventoryPage) {
+      // 庫存清單頁面：只顯示掃描按鈕
+      setTimeout(initInventoryScanner, 2000);
+    } else if (isListingPage) {
+      // 在線產品頁面：顯示利潤面板
+      createToggle();
+      createPanel();
+      loadData();
+    }
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else setTimeout(init, 1500);
 })();
@@ -6797,7 +6928,7 @@ def superman_glasses_download():
     manifest = """{
   "manifest_version": 3,
   "name": "超人眼鏡 - BigSeller Data Vision",
-  "version": "1.0",
+  "version": "1.2",
   "description": "在 BigSeller 直接看利潤數據，讓運營判斷更直覺",
   "permissions": ["storage"],
   "host_permissions": [
@@ -6806,7 +6937,10 @@ def superman_glasses_download():
   ],
   "content_scripts": [
     {
-      "matches": ["https://www.bigseller.com/web/listing/shopee/active/*"],
+      "matches": [
+        "https://www.bigseller.com/web/listing/shopee/active/*",
+        "https://www.bigseller.com/web/inventory/index.htm*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
