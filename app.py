@@ -6375,7 +6375,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     while (page <= total) {
       const d = await xhrPost('/api/v1/inventory/pageList.json', {
         pageNo: page, pageSize: 200,
-        warehouseIds: '56099',
+        warehouseIds: '56099,54687',
         searchType: 'skuName', searchContent: '',
         inquireType: 0, stockStatus: '', isGroup: '', fullCid: '',
         saleState: '', zoneId: '', hideZeroInventorySku: 0,
@@ -6392,14 +6392,28 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     return map;
   }
 
-  async function fetchListings() {
+  // 抓店鋪清單
+  async function fetchShops() {
+    try {
+      const r = await fetch('/api/v1/shop/list.json?platform=shopee');
+      const d = await r.json();
+      if (d.code === 0) {
+        const list = d.data?.shopee || [];
+        return list.map(s => ({ id: s.id, name: s.name }));
+      }
+    } catch(e) {}
+    return [];
+  }
+
+  async function fetchListings(shopId) {
     const items = [];
     let page = 1, total = 1;
+    const shopParam = shopId ? `&shopId=${shopId}` : '';
     while (page <= total) {
       const r = await fetch(
         `/api/v1/product/listing/shopee/active.json?orderBy=create_time&desc=true` +
         `&timeType=create_time&startDateStr=&endDateStr=&searchType=productName` +
-        `&inquireType=0&shopeeStatus=live&status=active&pageNo=${page}&pageSize=50`
+        `&inquireType=0&shopeeStatus=live&status=active&pageNo=${page}&pageSize=50${shopParam}`
       );
       const d = await r.json();
       if (d.code !== 0) break;
@@ -6408,12 +6422,14 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         if (row.hasVariation && row.variations?.length) {
           row.variations.forEach(v => items.push({
             name: row.name, parentSku: row.itemSku, sku: v.variationSku,
+            shopName: row.shopName || '', shopId: row.shopId || '',
             originalPrice: v.originalPrice, salePrice: v.price,
             promotionPrice: v.promotionPrice, joinPromotion: v.joinPromotion === 1, stock: v.stock
           }));
         } else {
           items.push({
             name: row.name, parentSku: row.itemSku, sku: row.itemSku,
+            shopName: row.shopName || '', shopId: row.shopId || '',
             originalPrice: row.originalPrice, salePrice: row.price,
             promotionPrice: row.promotionPrice, joinPromotion: row.joinPromotion === 1, stock: row.stock
           });
@@ -6623,37 +6639,35 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   async function loadData(forceRefresh = false) {
     const body = document.getElementById('sg-body');
     if (!body) return;
+    const shopId = document.getElementById('sg-shop')?.value || '';
+    const cacheKey = CACHE_KEY + (shopId ? '_' + shopId : '');
 
     // ── 先用快取秒開 ──
-    const cache = loadCache();
+    const cache = (() => { try { const raw = localStorage.getItem(cacheKey); if (!raw) return null; const c = JSON.parse(raw); if (Date.now() - c.ts > CACHE_TTL) return null; return c; } catch(e) { return null; } })();
     if (cache && !forceRefresh) {
       _rows = calcProfits(cache.listings, cache.costMap);
       renderRows();
-      // 更新快取時間標示
       const ts = document.getElementById('sg-cache-ts');
-      if (ts) ts.textContent = `資料來自快取・${cacheAge(cache.ts)}更新`;
-      // 背景靜默更新
-      _fetchAndUpdate(false);
+      if (ts) ts.textContent = `快取資料・${cacheAge(cache.ts)}更新・點「強制更新」取得最新`;
+      _fetchAndUpdate(false, shopId, cacheKey);
       return;
     }
-
-    // ── 沒快取，顯示載入中 ──
     body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入庫存成本...</div></div>';
-    await _fetchAndUpdate(true);
+    await _fetchAndUpdate(true, shopId, cacheKey);
   }
 
-  async function _fetchAndUpdate(showLoading) {
+  async function _fetchAndUpdate(showLoading, shopId, cacheKey) {
     const body = document.getElementById('sg-body');
     try {
-      const costMap  = await fetchCostMap();
+      const costMap = await fetchCostMap();
       if (showLoading && body)
         body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
-      const listings = await fetchListings();
-      saveCache(costMap, listings);
+      const listings = await fetchListings(shopId);
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), costMap, listings })); } catch(e) {}
       _rows = calcProfits(listings, costMap);
       renderRows();
       const ts = document.getElementById('sg-cache-ts');
-      if (ts) ts.textContent = '資料剛剛更新';
+      if (ts) ts.textContent = '資料剛剛更新 ✓';
     } catch(e) {
       if (showLoading && body)
         body.innerHTML = `<div class="sg-empty" style="color:#E24B4A">載入失敗：${e.message}</div>`;
@@ -6692,6 +6706,9 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     panel.insertAdjacentHTML('beforeend', `
       <div class="sg-toolbar">
         <input class="sg-search" id="sg-search" type="text" placeholder="搜尋 SKU / 商品名稱..." />
+        <select class="sg-select" id="sg-shop" style="max-width:110px;">
+          <option value="">全部店鋪</option>
+        </select>
         <select class="sg-select" id="sg-sort">
           <option value="profit_desc">利潤額 ↓</option>
           <option value="profit_asc">利潤額 ↑</option>
@@ -6723,10 +6740,24 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       </div>
     `);
     document.body.appendChild(panel);
+
+    // 載入店鋪清單填入下拉選單
+    fetchShops().then(shops => {
+      const sel = document.getElementById('sg-shop');
+      if (sel && shops.length > 0) {
+        shops.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id; opt.textContent = s.name;
+          sel.appendChild(opt);
+        });
+      }
+    });
+
     let st;
     document.getElementById('sg-search').oninput = () => { clearTimeout(st); st = setTimeout(renderRows, 200); };
     document.getElementById('sg-sort').onchange   = renderRows;
     document.getElementById('sg-filter').onchange = renderRows;
+    document.getElementById('sg-shop').onchange   = () => loadData(true);
     document.getElementById('sg-reload').onclick  = () => loadData(true);
   }
 
