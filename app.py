@@ -6976,7 +6976,6 @@ def superman_glasses_cost_get():
         "count": _cost_store["count"],
         "uploader": _cost_store["uploader"]
     })
-    resp.headers['Access-Control-Allow-Origin'] = 'https://www.bigseller.com'
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
@@ -6999,9 +6998,16 @@ def superman_glasses_cost_post():
 @app.route("/api/superman-glasses/cost", methods=["OPTIONS"])
 def superman_glasses_cost_options():
     resp = jsonify({"ok": True})
-    resp.headers['Access-Control-Allow-Origin'] = 'https://www.bigseller.com'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
+
+@app.after_request
+def add_cors_headers(resp):
+    """統一為 superman-glasses API 加 CORS header"""
+    if request.path.startswith('/api/superman-glasses/'):
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        resp.headers['Access-Control-Max-Age'] = '86400'
     return resp
 
 @app.route("/api/superman-glasses/script.js")
@@ -7021,16 +7027,20 @@ def superman_glasses_version():
 @app.route("/api/superman-glasses/download")
 def superman_glasses_download():
     """動態打包 Chrome Extension zip 並提供下載"""
+
     manifest = """{
   "manifest_version": 3,
   "name": "超人眼鏡 - BigSeller Data Vision",
-  "version": "1.2",
+  "version": "1.3",
   "description": "在 BigSeller 直接看利潤數據，讓運營判斷更直覺",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://www.bigseller.com/*",
     "https://yindan-system-production.up.railway.app/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -7043,36 +7053,112 @@ def superman_glasses_download():
   ]
 }"""
 
-    content_js = _SUPERMAN_GLASSES_SCRIPT
+    # content.js：純殼，發訊息給 background 要腳本
+    content_js = """/* 超人眼鏡 content.js v1.3 - 純殼，不含邏輯，裝一次永久有效 */
+(function() {
+  if (window.__sgShellLoaded) return;
+  window.__sgShellLoaded = true;
 
-    readme = """超人眼鏡 Chrome Extension 安裝說明
-=====================================
+  // 向 background 要最新腳本
+  chrome.runtime.sendMessage({ type: 'GET_SCRIPT' }, function(resp) {
+    if (chrome.runtime.lastError || !resp?.code) {
+      console.warn('[超人眼鏡] 無法取得腳本:', chrome.runtime.lastError?.message);
+      return;
+    }
+    try {
+      const fn = new Function(resp.code);
+      fn();
+    } catch(e) {
+      console.error('[超人眼鏡] 腳本執行錯誤:', e);
+    }
+  });
+})();"""
 
+    # background.js：從 Railway 抓腳本並快取，回應 content.js 的請求
+    background_js = """/* 超人眼鏡 background.js v1.3 - Service Worker，從 Railway 動態載入腳本 */
+const SCRIPT_URL = 'https://yindan-system-production.up.railway.app/api/superman-glasses/script.js';
+const CACHE_KEY  = 'sg_script_cache';
+const CACHE_TTL  = 30 * 60 * 1000; // 30 分鐘
+
+let _cachedCode = null;
+let _cachedTs   = 0;
+
+async function fetchLatestScript() {
+  try {
+    const r = await fetch(SCRIPT_URL, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const code = await r.text();
+    _cachedCode = code;
+    _cachedTs   = Date.now();
+    // 存入 chrome.storage 以備 SW 重啟
+    chrome.storage.local.set({ [CACHE_KEY]: { code, ts: _cachedTs } });
+    return code;
+  } catch(e) {
+    console.warn('[超人眼鏡 BG] 無法從 Railway 取得腳本:', e.message);
+    return null;
+  }
+}
+
+async function getScript() {
+  // 記憶體快取還有效
+  if (_cachedCode && Date.now() - _cachedTs < CACHE_TTL) {
+    return _cachedCode;
+  }
+  // 從 chrome.storage 取
+  const stored = await chrome.storage.local.get(CACHE_KEY);
+  const cached = stored[CACHE_KEY];
+  if (cached?.code && Date.now() - cached.ts < CACHE_TTL) {
+    _cachedCode = cached.code;
+    _cachedTs   = cached.ts;
+    // 背景靜默更新
+    fetchLatestScript();
+    return _cachedCode;
+  }
+  // 完全沒快取，等待取得
+  return await fetchLatestScript();
+}
+
+// 監聽 content.js 的訊息
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'GET_SCRIPT') {
+    getScript().then(code => {
+      sendResponse({ code });
+    });
+    return true; // 保持 channel 開啟等待非同步
+  }
+});
+
+// 啟動時先抓一次
+fetchLatestScript();
+"""
+
+    readme = """超人眼鏡 Chrome Extension 安裝說明 v1.3
+=========================================
+
+【裝一次，永久有效，不需要更新】
+
+安裝步驟：
 1. 解壓縮這個 zip 到任意資料夾（之後不要刪除此資料夾）
+2. Chrome 網址列輸入：chrome://extensions
+3. 開啟右上角「開發人員模式」
+4. 點「載入未封裝項目」，選擇解壓縮的資料夾
+5. 完成！
 
-2. 打開 Chrome，網址列輸入：
-   chrome://extensions
-
-3. 開啟右上角的「開發人員模式」
-
-4. 點擊「載入未封裝項目」
-
-5. 選擇剛才解壓縮的資料夾
-
-6. 完成！打開 BigSeller 在線產品頁面即可使用
+使用方式：
+- 在線產品頁面：右側出現「超人眼鏡」按鈕，點開查看利潤
+- 庫存清單頁面：右下角出現「掃描庫存成本」按鈕
+  掃描完成後自動上傳，全公司20台電腦共用，只需一人掃描
 
 更新說明：
-- 功能更新由公司 Railway 系統統一推送
-- Extension 本身不需要重新安裝
-- 如需重新安裝，請從超人特工倉首頁重新下載
-
-技術支援：請聯繫系統管理員
+- 功能邏輯由 Railway 統一管理，自動更新
+- Extension 本身永遠不需要重新安裝
 """
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('superman_glasses/manifest.json', manifest)
         zf.writestr('superman_glasses/content.js', content_js)
+        zf.writestr('superman_glasses/background.js', background_js)
         zf.writestr('superman_glasses/README.txt', readme)
     buf.seek(0)
     return send_file(
