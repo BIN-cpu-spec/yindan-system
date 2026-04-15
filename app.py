@@ -6322,7 +6322,10 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   const PANEL_ID   = 'sg-profit-panel';
   const TOGGLE_ID  = 'sg-profit-toggle';
   const CACHE_KEY  = 'sg_cache_v1';
-  const COST_KEY   = 'sg_cost_map';   // 庫存頁面掃描後存這裡
+  const RAILWAY_URL = 'https://yindan-system-production.up.railway.app';
+  const COST_API    = RAILWAY_URL + '/api/superman-glasses/cost';
+  const COST_KEY    = 'sg_cost_cache'; // 本地快取 key
+  const COST_TTL    = 2 * 60 * 60 * 1000; // 2 小時本地快取
   const CACHE_TTL  = 60 * 60 * 1000; // 1 小時快取
 
   const isInventoryPage = location.pathname.includes('/inventory/index');
@@ -6330,9 +6333,20 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   function profitColor(margin) {
     if (margin == null || isNaN(margin)) return '#888';
-    if (margin >= 40) return '#1D9E75';
-    if (margin >= 20) return '#BA7517';
-    return '#E24B4A';
+    if (margin >= 60) return '#7F77DD';   // 王牌 紫
+    if (margin >= 50) return '#1D9E75';   // 精銳 綠
+    if (margin >= 45) return '#5DCAA5';   // 準特工 淺綠
+    if (margin >= 36) return '#BA7517';   // 準備撤退 橘
+    return '#E24B4A';                     // 陣亡（含虧損）紅
+  }
+
+  function profitLabel(margin) {
+    if (margin == null || isNaN(margin)) return '';
+    if (margin >= 60) return '🚀 王牌';
+    if (margin >= 50) return '💎 精銳';
+    if (margin >= 45) return '🟢 準特工';
+    if (margin >= 36) return '🔴 準備撤退';
+    return '💀 陣亡（虧損）';
   }
 
   function cacheAge(ts) {
@@ -6459,12 +6473,28 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       try {
         const map = await scanAllPages();
         const count = Object.keys(map).length;
-        localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map }));
-        progress.textContent = '掃描完成！';
-        status.textContent = `完成！共 ${count} 個 SKU 的成本已儲存`;
+
+        // 上傳到 Railway（全公司共用）
+        status.textContent = `掃描完成 ${count} 個 SKU，上傳中...`;
+        const uploadResp = await fetch(COST_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ map })
+        });
+        const uploadResult = await uploadResp.json();
+
+        if (uploadResult.ok) {
+          // 同時存本地快取
+          try { localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map })); } catch(e) {}
+          progress.textContent = '上傳成功！';
+          status.textContent = `完成！${count} 個 SKU 已同步給全公司 ✓`;
+        } else {
+          progress.textContent = '上傳失敗';
+          status.textContent = `掃描完成但上傳失敗：${uploadResult.msg}`;
+        }
         setTimeout(() => { progress.textContent = '重新掃描'; }, 3000);
       } catch(e) {
-        status.textContent = '掃描失敗：' + e.message;
+        status.textContent = '失敗：' + e.message;
         progress.textContent = '掃描庫存成本';
       }
       btn.disabled = false;
@@ -6472,14 +6502,31 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     };
   }
 
-  // ── 在線產品頁面：從 localStorage 讀成本 ─────────────────────
-  function getCostMapFromStorage() {
+  // ── 在線產品頁面：從 Railway 取成本（本地快取2小時）────────
+  async function fetchCostMap() {
+    // 先看本地快取
     try {
       const raw = localStorage.getItem(COST_KEY);
-      if (!raw) return {};
-      const c = JSON.parse(raw);
-      return c.map || {};
-    } catch(e) { return {}; }
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (Date.now() - c.ts < COST_TTL && Object.keys(c.map||{}).length > 0) {
+          return { map: c.map, fromCache: true, ts: c.ts };
+        }
+      }
+    } catch(e) {}
+
+    // 從 Railway 取最新
+    try {
+      const r = await fetch(COST_API, { cache: 'no-cache' });
+      const d = await r.json();
+      if (d.ok && d.count > 0) {
+        // 存本地快取
+        try { localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map: d.map })); } catch(e) {}
+        return { map: d.map, fromCache: false, ts: d.ts, count: d.count };
+      }
+    } catch(e) {}
+
+    return { map: {}, fromCache: false, ts: 0, count: 0 };
   }
 
   function getCostAge() {
@@ -6692,11 +6739,12 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     let rows = [..._rows];
     if (search) rows = rows.filter(r =>
       r.sku?.toLowerCase().includes(search) || r.name?.toLowerCase().includes(search));
-    if (filter === 'promo')    rows = rows.filter(r => r.joinPromotion);
-    else if (filter === 'loss') rows = rows.filter(r => r.profit != null && r.profit < 0);
-    else if (filter === 'low')  rows = rows.filter(r => r.margin != null && r.margin >= 0 && r.margin < 20);
-    else if (filter === 'ok')   rows = rows.filter(r => r.margin != null && r.margin >= 20 && r.margin < 40);
-    else if (filter === 'high') rows = rows.filter(r => r.margin != null && r.margin >= 40);
+    if (filter === 'promo')        rows = rows.filter(r => r.joinPromotion);
+    else if (filter === 'dead')    rows = rows.filter(r => r.margin == null || r.margin < 36);
+    else if (filter === 'retreat') rows = rows.filter(r => r.margin != null && r.margin >= 36 && r.margin < 45);
+    else if (filter === 'rookie')  rows = rows.filter(r => r.margin != null && r.margin >= 45 && r.margin < 50);
+    else if (filter === 'elite')   rows = rows.filter(r => r.margin != null && r.margin >= 50 && r.margin < 60);
+    else if (filter === 'ace')     rows = rows.filter(r => r.margin != null && r.margin >= 60);
     else if (filter === 'no_cost') rows = rows.filter(r => r.cost == null);
     rows.sort((a,b)=>{
       if(sort==='margin_asc')  return (a.margin??-999)-(b.margin??-999);
@@ -6718,6 +6766,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     if (!rows.length) { body.innerHTML = '<div class="sg-empty">沒有符合條件的商品</div>'; return; }
     body.innerHTML = rows.map(r => {
       const c = profitColor(r.margin);
+      const lbl = profitLabel(r.margin);
       const ps = r.profit != null ? (r.profit >= 0 ? '+' : '') + r.profit.toFixed(0) : '-';
       const ms = r.margin != null ? r.margin.toFixed(1) + '%' : '無成本';
       const pr = r.joinPromotion ? '<span class="sg-promo">促銷</span>' : '';
@@ -6729,7 +6778,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         <div class="sg-prices">
           <div class="sg-prow">成本 ${r.cost!=null?'TWD '+r.cost.toFixed(0):'—'}</div>
           <div class="sg-prow">售價 TWD ${r.activePrice!=null?r.activePrice.toFixed(0):'—'}</div>
-          <span class="sg-badge" style="background:${c}18;color:${c};">${ps} TWD｜${ms}</span>
+          <span class="sg-badge" style="background:${c}20;color:${c};border:1px solid ${c}40;">${lbl}　${ps}｜${ms}</span>
         </div>
       </div>`;
     }).join('');
@@ -6740,25 +6789,25 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     if (!body) return;
     const shopId = document.getElementById('sg-shop')?.value || '';
     const cacheKey = CACHE_KEY + (shopId ? '_' + shopId : '');
+    const tsEl = document.getElementById('sg-cache-ts');
 
-    // 從 localStorage 讀成本（由庫存頁面掃描器填入）
-    const costMap = getCostMapFromStorage();
-    const costAge = getCostAge();
+    // 從 Railway 取成本（有本地快取就秒回）
+    const costResult = await fetchCostMap();
+    const costMap = costResult.map || {};
     const costCount = Object.keys(costMap).length;
 
-    // 更新成本狀態標示
-    const tsEl = document.getElementById('sg-cache-ts');
     if (tsEl) {
       if (costCount === 0) {
-        tsEl.textContent = '⚠ 尚無成本資料，請先到「庫存清單」頁面點擊「掃描庫存成本」';
+        tsEl.textContent = '⚠ 尚無成本資料 — 請到庫存清單頁面點「掃描庫存成本」（只需做一次）';
         tsEl.style.color = '#BA7517';
       } else {
-        tsEl.textContent = `成本資料：${costCount} 個 SKU｜${costAge || ''}更新`;
-        tsEl.style.color = '#aaa';
+        const src = costResult.fromCache ? '本地快取' : 'Railway 同步';
+        tsEl.textContent = `成本：${costCount} 個 SKU｜${cacheAge(costResult.ts)}更新（${src}）`;
+        tsEl.style.color = '#1D9E75';
       }
     }
 
-    // 讀在線產品快取
+    // 在線產品快取
     const cache = (() => {
       try {
         const raw = localStorage.getItem(cacheKey);
@@ -6841,10 +6890,11 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         <select class="sg-select" id="sg-filter">
           <option value="all">全部</option>
           <option value="promo">促銷中</option>
-          <option value="loss">虧損</option>
-          <option value="low">低利潤(&lt;20%)</option>
-          <option value="ok">中利潤(20-40%)</option>
-          <option value="high">高利潤(&gt;40%)</option>
+          <option value="dead">💀 陣亡（虧損）(0-35%)</option>
+          <option value="retreat">🔴 準備撤退 (36-44%)</option>
+          <option value="rookie">🟢 準特工 (45-49%)</option>
+          <option value="elite">💎 精銳 (50-60%)</option>
+          <option value="ace">🚀 王牌 (60%+)</option>
           <option value="no_cost">無成本資料</option>
         </select>
         <button class="sg-reload" id="sg-reload">強制更新</button>
@@ -6907,6 +6957,52 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 """
 
 import io, zipfile
+
+# ── 成本資料共用存儲（記憶體，重啟後清空但 Extension 會重新上傳）──
+_cost_store = {
+    "map": {},      # { sku: cost }
+    "ts": 0,        # 上傳時間戳
+    "count": 0,     # SKU 數量
+    "uploader": ""  # 上傳者 IP
+}
+
+@app.route("/api/superman-glasses/cost", methods=["GET"])
+def superman_glasses_cost_get():
+    """所有 Extension 來這裡取得成本資料"""
+    resp = jsonify({
+        "ok": True,
+        "map": _cost_store["map"],
+        "ts": _cost_store["ts"],
+        "count": _cost_store["count"],
+        "uploader": _cost_store["uploader"]
+    })
+    resp.headers['Access-Control-Allow-Origin'] = 'https://www.bigseller.com'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+@app.route("/api/superman-glasses/cost", methods=["POST"])
+def superman_glasses_cost_post():
+    """掃描完成後上傳成本資料"""
+    try:
+        data = request.get_json(force=True)
+        cost_map = data.get("map", {})
+        if not cost_map:
+            return jsonify({"ok": False, "msg": "空資料"}), 400
+        _cost_store["map"] = cost_map
+        _cost_store["ts"] = int(time.time() * 1000)
+        _cost_store["count"] = len(cost_map)
+        _cost_store["uploader"] = request.remote_addr or "unknown"
+        return jsonify({"ok": True, "count": _cost_store["count"]})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/cost", methods=["OPTIONS"])
+def superman_glasses_cost_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = 'https://www.bigseller.com'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
 
 @app.route("/api/superman-glasses/script.js")
 def superman_glasses_script():
