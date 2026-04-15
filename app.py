@@ -6312,14 +6312,17 @@ def api_warehouse_records():
 # profit_script.js 內容（直接內嵌，避免讀檔問題）
 _SUPERMAN_GLASSES_SCRIPT = r"""
 /* 超人眼鏡 - BigSeller 利潤計算核心腳本
-   由 Railway 超人特工倉提供，版本統一管理 v1.0 */
+   由 Railway 超人特工倉提供，版本統一管理 v1.1
+   v1.1: 加入 localStorage 快取，秒開，背景靜默更新 */
 (function () {
   'use strict';
   if (window.__supermanGlassesLoaded) return;
   window.__supermanGlassesLoaded = true;
 
-  const PANEL_ID  = 'sg-profit-panel';
-  const TOGGLE_ID = 'sg-profit-toggle';
+  const PANEL_ID   = 'sg-profit-panel';
+  const TOGGLE_ID  = 'sg-profit-toggle';
+  const CACHE_KEY  = 'sg_cache_v1';
+  const CACHE_TTL  = 30 * 60 * 1000; // 30 分鐘快取
 
   function profitColor(margin) {
     if (margin == null || isNaN(margin)) return '#888';
@@ -6328,24 +6331,61 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     return '#E24B4A';
   }
 
+  // ── 快取：存取 localStorage ──────────────────────────────────
+  function saveCache(costMap, listings) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        ts: Date.now(), costMap, listings
+      }));
+    } catch(e) {}
+  }
+
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const c = JSON.parse(raw);
+      if (Date.now() - c.ts > CACHE_TTL) return null;
+      return c;
+    } catch(e) { return null; }
+  }
+
+  function cacheAge(ts) {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return `${sec} 秒前`;
+    const min = Math.floor(sec / 60);
+    return `${min} 分鐘前`;
+  }
+
+  // 用 XHR 發送（不用 fetch），加上 isMergeWarehouse:1 才能取得正確成本
+  function xhrPost(url, body) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+      xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+      xhr.onerror = () => reject(new Error('XHR error'));
+      xhr.send(JSON.stringify(body));
+    });
+  }
+
   async function fetchCostMap() {
     const map = {};
     let page = 1, total = 1;
     while (page <= total) {
-      const r = await fetch('/api/v1/inventory/pageList.json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pageNo: page, pageSize: 200, searchType: 'skuName', searchContent: '',
-          inquireType: 0, stockStatus: '', isGroup: '', fullCid: '',
-          warehouseIds: '', saleState: '', zoneId: '', hideZeroInventorySku: 0
-        })
+      const d = await xhrPost('/api/v1/inventory/pageList.json', {
+        pageNo: page, pageSize: 200,
+        warehouseIds: '56099',
+        searchType: 'skuName', searchContent: '',
+        inquireType: 0, stockStatus: '', isGroup: '', fullCid: '',
+        saleState: '', zoneId: '', hideZeroInventorySku: 0,
+        isMergeWarehouse: 1
       });
-      const d = await r.json();
       if (d.code !== 0) break;
       total = d.data?.page?.totalPage || 1;
       (d.data?.page?.rows || []).forEach(row => {
-        if (row.sku && row.cost != null) map[row.sku.trim()] = parseFloat(row.cost);
+        if (row.sku && row.cost != null && parseFloat(row.cost) > 0)
+          map[row.sku.trim()] = parseFloat(row.cost);
       });
       page++;
     }
@@ -6414,6 +6454,13 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 #${PANEL_ID} .sg-version{font-size:10px;color:#1D9E75;letter-spacing:.05em;}
 #${PANEL_ID} .sg-close{cursor:pointer;color:#1D9E75;font-size:18px;padding:4px;}
 #${PANEL_ID} .sg-close:hover{color:#5DCAA5;}
+#${PANEL_ID} .sg-minimize{cursor:pointer;color:#1D9E75;font-size:16px;padding:4px;margin-right:2px;line-height:1;user-select:none;}
+#${PANEL_ID} .sg-minimize:hover{color:#5DCAA5;}
+#${PANEL_ID}.sg-collapsed{height:auto!important;}
+#${PANEL_ID}.sg-collapsed .sg-toolbar,
+#${PANEL_ID}.sg-collapsed .sg-summary,
+#${PANEL_ID}.sg-collapsed .sg-body,
+#${PANEL_ID}.sg-collapsed #sg-cache-ts{display:none!important;}
 #${PANEL_ID} .sg-toolbar{padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
 #${PANEL_ID} .sg-search{flex:1;min-width:100px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;}
 #${PANEL_ID} .sg-search:focus{border-color:#1D9E75;}
@@ -6573,18 +6620,43 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     }).join('');
   }
 
-  async function loadData() {
+  async function loadData(forceRefresh = false) {
     const body = document.getElementById('sg-body');
     if (!body) return;
+
+    // ── 先用快取秒開 ──
+    const cache = loadCache();
+    if (cache && !forceRefresh) {
+      _rows = calcProfits(cache.listings, cache.costMap);
+      renderRows();
+      // 更新快取時間標示
+      const ts = document.getElementById('sg-cache-ts');
+      if (ts) ts.textContent = `資料來自快取・${cacheAge(cache.ts)}更新`;
+      // 背景靜默更新
+      _fetchAndUpdate(false);
+      return;
+    }
+
+    // ── 沒快取，顯示載入中 ──
     body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入庫存成本...</div></div>';
+    await _fetchAndUpdate(true);
+  }
+
+  async function _fetchAndUpdate(showLoading) {
+    const body = document.getElementById('sg-body');
     try {
-      const costMap = await fetchCostMap();
-      body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
+      const costMap  = await fetchCostMap();
+      if (showLoading && body)
+        body.innerHTML = '<div class="sg-loading"><div class="sg-spinner"></div><div>載入在線商品...</div></div>';
       const listings = await fetchListings();
+      saveCache(costMap, listings);
       _rows = calcProfits(listings, costMap);
       renderRows();
+      const ts = document.getElementById('sg-cache-ts');
+      if (ts) ts.textContent = '資料剛剛更新';
     } catch(e) {
-      body.innerHTML = `<div class="sg-empty" style="color:#E24B4A">載入失敗：${e.message}</div>`;
+      if (showLoading && body)
+        body.innerHTML = `<div class="sg-empty" style="color:#E24B4A">載入失敗：${e.message}</div>`;
     }
   }
 
@@ -6604,7 +6676,17 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     head.appendChild(tw);
     const cb = document.createElement('span');
     cb.className = 'sg-close'; cb.innerHTML = '&#x2715;';
+    cb.title = '關閉';
     cb.onclick = () => { panel.style.display='none'; document.getElementById(TOGGLE_ID).style.display=''; };
+    const mb = document.createElement('span');
+    mb.className = 'sg-minimize'; mb.innerHTML = '&#x2212;';
+    mb.title = '縮小';
+    mb.onclick = () => {
+      const collapsed = panel.classList.toggle('sg-collapsed');
+      mb.innerHTML = collapsed ? '&#x002B;' : '&#x2212;';
+      mb.title = collapsed ? '展開' : '縮小';
+    };
+    head.appendChild(mb);
     head.appendChild(cb);
     panel.appendChild(head);
     panel.insertAdjacentHTML('beforeend', `
@@ -6627,8 +6709,9 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           <option value="high">高利潤(&gt;40%)</option>
           <option value="no_cost">無成本資料</option>
         </select>
-        <button class="sg-reload" id="sg-reload">重新載入</button>
+        <button class="sg-reload" id="sg-reload">強制更新</button>
       </div>
+      <div style="padding:4px 12px;font-size:10px;color:#aaa;border-bottom:1px solid #f0f0f0;flex-shrink:0;" id="sg-cache-ts">載入中...</div>
       <div class="sg-summary">
         <div class="sg-metric"><div class="sg-metric-label">平均利潤率</div><div class="sg-metric-val" id="sg-avg">-</div></div>
         <div class="sg-metric"><div class="sg-metric-label">虧損 SKU</div><div class="sg-metric-val" id="sg-loss" style="color:#E24B4A">-</div></div>
@@ -6644,7 +6727,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     document.getElementById('sg-search').oninput = () => { clearTimeout(st); st = setTimeout(renderRows, 200); };
     document.getElementById('sg-sort').onchange   = renderRows;
     document.getElementById('sg-filter').onchange = renderRows;
-    document.getElementById('sg-reload').onclick  = loadData;
+    document.getElementById('sg-reload').onclick  = () => loadData(true);
   }
 
   function createToggle() {
