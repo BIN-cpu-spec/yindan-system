@@ -5655,13 +5655,29 @@ def api_customs_export():
                     ws.add_image(xl_img, f"R{r}")
                 except Exception:
                     if img_url:
+                        # 把 Drive 檔案分享連結轉成可檢視的格式
+                        link_url = img_url
+                        if "drive.google.com/file/d/" in img_url:
+                            import re
+                            m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
+                            if m:
+                                link_url = f"https://drive.google.com/file/d/{m.group(1)}/view"
+                        
                         cell = ws.cell(r, 18, "點擊看圖")
-                        cell.hyperlink = img_url
+                        cell.hyperlink = link_url
                         cell.font = Font(color="FF0563C1", underline="single")
             else:
                 if img_url:
+                    # 把 Drive 檔案分享連結轉成可檢視的格式
+                    link_url = img_url
+                    if "drive.google.com/file/d/" in img_url:
+                        import re
+                        m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
+                        if m:
+                            link_url = f"https://drive.google.com/file/d/{m.group(1)}/view"
+                    
                     cell = ws.cell(r, 18, "點擊看圖")
-                    cell.hyperlink = img_url
+                    cell.hyperlink = link_url
                     cell.font = Font(color="FF0563C1", underline="single")
 
             if row.get("status") != "ok":
