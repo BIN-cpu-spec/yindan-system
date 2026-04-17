@@ -5652,29 +5652,34 @@ def api_customs_export():
             # 如果前端沒有成功下載圖片，但有 Google Drive 連結，嘗試後端下載
             if not img_buf and img_url and "drive.google.com/file/d/" in img_url:
                 try:
-                    import requests as req_lib
-                    from PIL import Image as PILImage
-                    import base64 as b64lib
-                    
-                    # 轉換為可下載的格式
-                    download_url = img_url
-                    m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
-                    if m:
-                        download_url = f"https://drive.google.com/uc?export=download&id={m.group(1)}"
-                    
-                    # 下載圖片
-                    dl = req_lib.get(download_url, headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    }, timeout=15)
-                    
-                    if dl.status_code == 200 and dl.content:
-                        # 縮圖處理
-                        pil = PILImage.open(io.BytesIO(dl.content))
-                        pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
-                        out = io.BytesIO()
-                        pil.save(out, format="PNG")
-                        out.seek(0)
-                        img_buf = out
+                    # 使用認證的 Google Drive API 下載
+                    service, err = get_drive_service()
+                    if service and not err:
+                        # 提取檔案 ID
+                        m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
+                        if m:
+                            file_id = m.group(1)
+                            
+                            # 用 Drive API 下載檔案
+                            request = service.files().get_media(fileId=file_id)
+                            file_content = request.execute()
+                            
+                            # 檢查是否為有效圖片內容
+                            if len(file_content) > 100:  # 基本大小檢查
+                                # 處理圖片
+                                from PIL import Image as PILImage
+                                pil = PILImage.open(io.BytesIO(file_content))
+                                pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
+                                out = io.BytesIO()
+                                pil.save(out, format="PNG")
+                                out.seek(0)
+                                img_buf = out
+                                log(f"✅ 用 Google API 成功下載圖片: {file_id}")
+                            else:
+                                log(f"❌ 下載的檔案太小，可能不是圖片: {len(file_content)} bytes")
+                    else:
+                        log(f"❌ Google Drive API 連線失敗: {err}")
+                        
                 except Exception as e:
                     log(f"後端下載 Google Drive 圖片失敗: {img_url}, 錯誤: {e}")
                     img_buf = None
