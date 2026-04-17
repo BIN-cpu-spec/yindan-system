@@ -7303,12 +7303,25 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   function init() {
     if (isInventoryPage) {
       setTimeout(initInventoryScanner, 500);
+      // SPA 防護：監控 body，如果按鈕被移除就重新加
+      const observer = new MutationObserver(() => {
+        if (!document.getElementById('sg-scanner-wrap')) {
+          setTimeout(initInventoryScanner, 300);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: false });
     } else if (isListingPage) {
       createToggle();
       createPanel();
       loadData();
     } else if (isAdPage) {
       setTimeout(initAdAdjuster, 500);
+      const observer = new MutationObserver(() => {
+        if (!document.getElementById('sg-ad-wrap')) {
+          setTimeout(initAdAdjuster, 300);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: false });
     }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
