@@ -6539,6 +6539,24 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       btn.disabled = false;
       btn.style.opacity = '1';
     };
+
+    // ── 每6小時自動重整頁面，觸發重新掃描 ──
+    // 只有當這個頁面一直開著才需要，避免成本資料過期
+    const AUTO_RELOAD_TTL = 6 * 60 * 60 * 1000;
+    const scheduleAutoReload = () => {
+      try {
+        const saved = localStorage.getItem(COST_KEY);
+        const lastTs = saved ? JSON.parse(saved).ts : 0;
+        const nextReload = lastTs + AUTO_RELOAD_TTL - Date.now();
+        const delay = Math.max(nextReload, 60 * 1000); // 最少等1分鐘
+        setTimeout(() => {
+          if (location.pathname.includes('/inventory/index')) {
+            location.reload();
+          }
+        }, delay);
+      } catch(e) {}
+    };
+    scheduleAutoReload();
   }
 
   // ── 在線產品頁面：從 Railway 取成本（本地快取2小時）────────
