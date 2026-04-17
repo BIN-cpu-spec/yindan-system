@@ -6449,6 +6449,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     document.body.appendChild(wrap);
 
     // 檢查快取狀態
+    let shouldAutoScan = true; // 預設自動掃描
     try {
       const saved = localStorage.getItem(COST_KEY);
       if (saved) {
@@ -6458,8 +6459,45 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const status = document.getElementById('sg-scan-status');
         status.textContent = `上次掃描：${age} | ${count} 個 SKU`;
         status.style.display = 'block';
+        // 上次掃描在6小時內，不自動重掃
+        if (Date.now() - c.ts < 6 * 60 * 60 * 1000) shouldAutoScan = false;
       }
     } catch(e) {}
+
+    // 自動執行掃描（背景靜默進行）
+    if (shouldAutoScan) {
+      (async () => {
+        const progress = document.getElementById('sg-scan-progress');
+        const status = document.getElementById('sg-scan-status');
+        const btn = document.getElementById('sg-scanner-btn');
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        status.style.display = 'block';
+        status.textContent = '自動掃描中...';
+        progress.textContent = '掃描中...';
+        try {
+          const map = await scanAllPages();
+          const count = Object.keys(map).length;
+          status.textContent = `自動掃描完成 ${count} 個 SKU，上傳中...`;
+          const uploadResp = await fetch(COST_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ map })
+          });
+          const uploadResult = await uploadResp.json();
+          if (uploadResult.ok) {
+            try { localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map })); } catch(e) {}
+            progress.textContent = '掃描庫存成本';
+            status.textContent = `自動掃描完成！${count} 個 SKU ✓`;
+          }
+        } catch(e) {
+          status.textContent = '自動掃描失敗：' + e.message;
+          progress.textContent = '掃描庫存成本';
+        }
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      })();
+    }
 
     document.getElementById('sg-scanner-btn').onclick = async () => {
       const btn = document.getElementById('sg-scanner-btn');
