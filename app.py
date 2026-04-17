@@ -7302,17 +7302,17 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   function init() {
     if (isInventoryPage) {
-      setTimeout(initInventoryScanner, 2000);
+      setTimeout(initInventoryScanner, 500);
     } else if (isListingPage) {
       createToggle();
       createPanel();
       loadData();
     } else if (isAdPage) {
-      setTimeout(initAdAdjuster, 2000);
+      setTimeout(initAdAdjuster, 500);
     }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else setTimeout(init, 1500);
+  else init();
 })();
 """
 
