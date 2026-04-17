@@ -5526,6 +5526,7 @@ def api_customs_export():
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import requests as req_lib
         from PIL import Image as PILImage
+        import re
         data = request.get_json()
         rows       = data.get("rows", [])
         cabinet_no = data.get("cabinet_no", "")
@@ -5647,6 +5648,37 @@ def api_customs_export():
             # ── 嵌入圖片 ──
             img_buf = img_map.get(i)
             img_url = row.get("image", "")
+            
+            # 如果前端沒有成功下載圖片，但有 Google Drive 連結，嘗試後端下載
+            if not img_buf and img_url and "drive.google.com/file/d/" in img_url:
+                try:
+                    import requests as req_lib
+                    from PIL import Image as PILImage
+                    import base64 as b64lib
+                    
+                    # 轉換為可下載的格式
+                    download_url = img_url
+                    m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
+                    if m:
+                        download_url = f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+                    
+                    # 下載圖片
+                    dl = req_lib.get(download_url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    }, timeout=15)
+                    
+                    if dl.status_code == 200 and dl.content:
+                        # 縮圖處理
+                        pil = PILImage.open(io.BytesIO(dl.content))
+                        pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
+                        out = io.BytesIO()
+                        pil.save(out, format="PNG")
+                        out.seek(0)
+                        img_buf = out
+                except Exception as e:
+                    log(f"後端下載 Google Drive 圖片失敗: {img_url}, 錯誤: {e}")
+                    img_buf = None
+            
             if img_buf:
                 try:
                     xl_img = XLImage(img_buf)
@@ -5657,7 +5689,7 @@ def api_customs_export():
                     if img_url:
                         # 把 Drive 檔案分享連結轉成可檢視的格式
                         link_url = img_url
-                        if "drive.google.com/file/d/" in img_url:
+                        if "drive.google.com/file/d/" in img_url and not img_url.endswith("/view"):
                             import re
                             m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
                             if m:
@@ -5670,7 +5702,7 @@ def api_customs_export():
                 if img_url:
                     # 把 Drive 檔案分享連結轉成可檢視的格式
                     link_url = img_url
-                    if "drive.google.com/file/d/" in img_url:
+                    if "drive.google.com/file/d/" in img_url and not img_url.endswith("/view"):
                         import re
                         m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
                         if m:
