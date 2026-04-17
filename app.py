@@ -5519,6 +5519,15 @@ def api_customs_migrate_images():
 @app.route("/api/customs/export", methods=["POST"])
 @login_required
 def api_customs_export():
+    # 解決 request 變數作用域問題 - 移出 try 塊
+    data = request.get_json()
+    rows       = data.get("rows", [])
+    cabinet_no = data.get("cabinet_no", "")
+    seal_no    = data.get("seal_no", "")
+    ship_date  = data.get("ship_date", "")
+    exporter   = data.get("exporter", "")
+    importer   = data.get("importer", "")
+    
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -5526,14 +5535,6 @@ def api_customs_export():
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import requests as req_lib
         from PIL import Image as PILImage
-        import re
-        data = request.get_json()
-        rows       = data.get("rows", [])
-        cabinet_no = data.get("cabinet_no", "")
-        seal_no    = data.get("seal_no", "")
-        ship_date  = data.get("ship_date", "")
-        exporter   = data.get("exporter", "")
-        importer   = data.get("importer", "")
 
         # ── 圖片：優先用前端傳來的 base64，省去防盜鏈問題 ──────
         import base64 as b64lib
@@ -5648,42 +5649,6 @@ def api_customs_export():
             # ── 嵌入圖片 ──
             img_buf = img_map.get(i)
             img_url = row.get("image", "")
-            
-            # 如果前端沒有成功下載圖片，但有 Google Drive 連結，嘗試後端下載
-            if not img_buf and img_url and "drive.google.com/file/d/" in img_url:
-                try:
-                    # 使用認證的 Google Drive API 下載
-                    service, err = get_drive_service()
-                    if service and not err:
-                        # 提取檔案 ID
-                        m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
-                        if m:
-                            file_id = m.group(1)
-                            
-                            # 用 Drive API 下載檔案
-                            request = service.files().get_media(fileId=file_id)
-                            file_content = request.execute()
-                            
-                            # 檢查是否為有效圖片內容
-                            if len(file_content) > 100:  # 基本大小檢查
-                                # 處理圖片
-                                from PIL import Image as PILImage
-                                pil = PILImage.open(io.BytesIO(file_content))
-                                pil.thumbnail((IMG_MAX_PX, IMG_MAX_PX), PILImage.LANCZOS)
-                                out = io.BytesIO()
-                                pil.save(out, format="PNG")
-                                out.seek(0)
-                                img_buf = out
-                                log(f"✅ 用 Google API 成功下載圖片: {file_id}")
-                            else:
-                                log(f"❌ 下載的檔案太小，可能不是圖片: {len(file_content)} bytes")
-                    else:
-                        log(f"❌ Google Drive API 連線失敗: {err}")
-                        
-                except Exception as e:
-                    log(f"後端下載 Google Drive 圖片失敗: {img_url}, 錯誤: {e}")
-                    img_buf = None
-            
             if img_buf:
                 try:
                     xl_img = XLImage(img_buf)
@@ -5692,29 +5657,13 @@ def api_customs_export():
                     ws.add_image(xl_img, f"R{r}")
                 except Exception:
                     if img_url:
-                        # 把 Drive 檔案分享連結轉成可檢視的格式
-                        link_url = img_url
-                        if "drive.google.com/file/d/" in img_url and not img_url.endswith("/view"):
-                            import re
-                            m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
-                            if m:
-                                link_url = f"https://drive.google.com/file/d/{m.group(1)}/view"
-                        
                         cell = ws.cell(r, 18, "點擊看圖")
-                        cell.hyperlink = link_url
+                        cell.hyperlink = img_url
                         cell.font = Font(color="FF0563C1", underline="single")
             else:
                 if img_url:
-                    # 把 Drive 檔案分享連結轉成可檢視的格式
-                    link_url = img_url
-                    if "drive.google.com/file/d/" in img_url and not img_url.endswith("/view"):
-                        import re
-                        m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', img_url)
-                        if m:
-                            link_url = f"https://drive.google.com/file/d/{m.group(1)}/view"
-                    
                     cell = ws.cell(r, 18, "點擊看圖")
-                    cell.hyperlink = link_url
+                    cell.hyperlink = img_url
                     cell.font = Font(color="FF0563C1", underline="single")
 
             if row.get("status") != "ok":
