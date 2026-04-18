@@ -7563,6 +7563,61 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         <b>進行中廣告（autoRoas）：</b>${ads.length} 筆
       `;
 
+      // ── 分析完成後自動上傳利潤快照到 Google Sheets ──
+      (async () => {
+        try {
+          const costRaw = localStorage.getItem('sg_ext_cost_cache') || localStorage.getItem('sg_cost_cache');
+          const costMap = costRaw ? JSON.parse(costRaw).map || {} : {};
+          const snapRows = [];
+          for (const ad of ads) {
+            const item = itemIdMap[ad.itemId];
+            if (!item) continue;
+            // 計算毛利
+            let mTotal = 0, mCount = 0;
+            for (const sku of (item.skus||[])) {
+              const cost = costMap[sku];
+              const price = (item.skuPriceMap&&item.skuPriceMap[sku]) || item.price || 0;
+              if (!cost || !price) continue;
+              mTotal += ((price-cost)/price*100);
+              mCount++;
+            }
+            const margin = mCount > 0 ? (mTotal/mCount).toFixed(1) : '';
+            const targetRoas = margin ? getTargetRoas(parseFloat(margin)) : '';
+            const d7 = ads7d[ad.campaignId];
+            const d30 = ads30d[ad.campaignId];
+            // 判斷狀態
+            let status = ad.campaignStatus === 'ongoing' ? '進行中' : '已暫停';
+            let note = '';
+            if (margin && parseFloat(margin) <= 45) { status = '低毛利暫停'; note = `毛利${margin}%≤45%`; }
+            else if (d30 && d30.expense > 500 && d30.broadRoi > 0 && d30.broadRoi < (parseFloat(ad.roasTarget)||0) * 0.5) { note = '30天空燒'; }
+            snapRows.push({
+              shopName: ad.shopName || '',
+              adName: (ad.adName||'').substring(0,40),
+              itemId: ad.itemId,
+              currentRoas: ad.roasTarget,
+              actualRoas7: d7 ? parseFloat(d7.broadRoi||0).toFixed(1) : '',
+              expense7: d7 ? parseFloat(d7.expense||0).toFixed(0) : '',
+              expense30: d30 ? parseFloat(d30.expense||0).toFixed(0) : '',
+              budget: ad.campaignBudget,
+              margin,
+              targetRoas,
+              status,
+              note
+            });
+          }
+          if (snapRows.length > 0) {
+            await fetch('https://yindan-system-production.up.railway.app/api/superman-glasses/profit-snapshot', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ rows: snapRows })
+            });
+            console.log('[超人眼鏡] 利潤快照已寫入 Google Sheets，共', snapRows.length, '筆');
+          }
+        } catch(e) {
+          console.warn('[超人眼鏡] 快照寫入失敗:', e.message);
+        }
+      })();
+
       const totalAction = (roasDoneToday ? 0 : roasNeed) + budgetNeed + pauseNeed;
       if (totalAction > 0) {
         runBtn.disabled = false;
@@ -8094,6 +8149,67 @@ def superman_glasses_ad_log_sheet():
         return resp
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/profit-snapshot", methods=["POST"])
+def superman_glasses_profit_snapshot():
+    """將利潤快照寫入 Google Sheets 📊 利潤監控室"""
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+
+        client = get_gspread_client()
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "日期":
+                ws.insert_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], 1, value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=14)
+            ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
+
+        now = datetime.now()
+        date_str = now.strftime("%Y/%m/%d")
+        time_str = now.strftime("%H:%M")
+
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                date_str,
+                time_str,
+                r.get("shopName", ""),
+                r.get("adName", ""),
+                r.get("itemId", ""),
+                r.get("currentRoas", ""),
+                r.get("actualRoas7", ""),
+                r.get("expense7", ""),
+                r.get("expense30", ""),
+                r.get("budget", ""),
+                r.get("margin", ""),
+                r.get("targetRoas", ""),
+                r.get("status", ""),
+                r.get("note", ""),
+            ])
+
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/profit-snapshot", methods=["OPTIONS"])
+def superman_glasses_profit_snapshot_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
 
 @app.route("/api/superman-glasses/ad-log", methods=["GET"])
 def superman_glasses_ad_log():
