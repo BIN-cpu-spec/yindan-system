@@ -6767,8 +6767,12 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const saved = localStorage.getItem(COST_KEY);
         const lastTs = saved ? JSON.parse(saved).ts : 0;
         const nextReload = lastTs + AUTO_RELOAD_TTL - Date.now();
-        const delay = Math.max(nextReload, 60 * 1000); // 最少等1分鐘
+        // 至少等6小時才重整，避免掃描途中被打斷
+        const delay = Math.max(nextReload, AUTO_RELOAD_TTL);
         setTimeout(() => {
+          // 掃描進行中不重整
+          const scanBtn = document.getElementById('sg-scanner-btn');
+          if (scanBtn && scanBtn.disabled) return;
           if (location.pathname.includes('/inventory/index')) {
             location.reload();
           }
