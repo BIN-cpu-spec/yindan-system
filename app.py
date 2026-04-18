@@ -7868,7 +7868,7 @@ def _ad_log(msg, write_sheet=False):
 
     # 重要操作寫入 Google Sheets（ROAS調整/暫停/加碼/爆款）
     # 只記錄真正重要的操作，Cookie/成本等系統訊息不寫進 Sheets
-    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "低毛利", "空燒", "=== 開始", "=== 完成"])
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "=== 開始", "=== 完成"])
     skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if skip or (not important and not write_sheet):
         return
@@ -7876,7 +7876,8 @@ def _ad_log(msg, write_sheet=False):
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
         if not sheet_id:
             return
-        client = get_gspread_client()
+        client, err = get_sheets_client()
+        if err: return
         # 取得或建立「🚀 廣告戰情室」分頁
         try:
             ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
@@ -8211,8 +8212,9 @@ def run_hourly_budget_task():
             ad_type = ad.get("adType")
             shop_id = ad.get("shopId")
             name    = (ad.get("adName") or str(cid))[:20]
+            shop_name = ad.get("shopName") or ad.get("storeName") or str(shop_id)
             if _edit_ad(cid, ad_type, shop_id, 6, new_budget):
-                _ad_log(f"預算 ✅ {name} {budget:.0f}→{new_budget} TWD (ROAS {actual_roas:.1f} 用量{usage*100:.0f}%)")
+                _ad_log(f"預算 ✅ [{shop_name}] {name} {budget:.0f}→{new_budget} TWD (ROAS {actual_roas:.1f} 用量{usage*100:.0f}%)")
                 ok += 1
             else:
                 fail += 1
@@ -8268,7 +8270,8 @@ def superman_glasses_ad_log_sheet():
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
         if not sheet_id:
             return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
-        client = get_gspread_client()
+        client, err = get_sheets_client()
+        if err: return jsonify({"ok": False, "msg": err}), 500
         ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
         rows = ws.get_all_values()
         # 跳過標題列，取最新100筆（從後往前）
@@ -8294,7 +8297,9 @@ def superman_glasses_profit_snapshot():
         if not sheet_id:
             return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
 
-        client = get_gspread_client()
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
         try:
             ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
             first_row = ws.row_values(1)
@@ -8376,7 +8381,8 @@ def superman_glasses_profit_snapshot_read():
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
         if not sheet_id:
             return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
-        client = get_gspread_client()
+        client, err = get_sheets_client()
+        if err: return jsonify({"ok": False, "msg": err}), 500
         ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
         rows = ws.get_all_values()
         if len(rows) <= 1:
@@ -8459,7 +8465,9 @@ def superman_glasses_product_profit():
         if not sheet_id:
             return jsonify({"ok": True, "msg": "未設定SHEETS，跳過"})
 
-        client = get_gspread_client()
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
         try:
             ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
             first_row = ws.row_values(1)
