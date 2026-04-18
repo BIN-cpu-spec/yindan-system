@@ -2799,34 +2799,37 @@ async function loadAdLog() {
       </div>
     `;
 
-    // 執行日誌
+    // 執行日誌（log 是 [{msg, time}] 格式）
     const logs = d.log || [];
     if (logs.length === 0) {
       document.getElementById('ad-log-list').innerHTML = '<span style="color:#555;">尚無執行記錄</span>';
     } else {
       document.getElementById('ad-log-list').innerHTML = logs.map(l => {
+        const msg = typeof l === 'string' ? l : (l.msg || '');
+        const time = typeof l === 'object' ? l.time : '';
         let color = '#5DCAA5';
-        if (l.includes('失敗') || l.includes('ERROR') || l.includes('錯誤')) color = '#e57373';
-        else if (l.includes('爆款') || l.includes('加碼') || l.includes('暫停')) color = '#f4a100';
-        return `<div style="color:${color};border-bottom:1px solid rgba(255,255,255,.04);padding:2px 0;">${l}</div>`;
+        if (msg.includes('失敗') || msg.includes('ERROR') || msg.includes('錯誤')) color = '#e57373';
+        else if (msg.includes('爆款') || msg.includes('加碼') || msg.includes('暫停')) color = '#f4a100';
+        else if (msg.startsWith('---')) color = '#444';
+        return `<div style="display:flex;gap:8px;color:${color};border-bottom:1px solid rgba(255,255,255,.04);padding:3px 0;font-size:12px;font-family:monospace">
+          <span style="color:#444;white-space:nowrap">${time}</span>
+          <span>${msg}</span>
+        </div>`;
       }).join('');
     }
     document.getElementById('log-meta').textContent = `共 ${logs.length} 筆`;
 
-    // 利潤警示 - 從成本資料找毛利 < 40% 的廣告
+    // 利潤警示
     const pwarn = document.getElementById('profit-warn');
-    const pr = await fetch('/api/superman-glasses/cost');
-    const pd = await pr.json();
-    if (!pd.ok || !pd.map || Object.keys(pd.map).length === 0) {
-      pwarn.innerHTML = '<span style="color:#555;">尚無成本資料</span>';
-      return;
-    }
-    // 從 log 找低毛利警示
-    const warnLogs = logs.filter(l => l.includes('低毛利') || l.includes('margin') || l.includes('毛利'));
+    const warnLogs = logs.filter(l => {
+      const msg = typeof l === 'string' ? l : (l.msg || '');
+      return msg.includes('低毛利') || msg.includes('暫停') || msg.includes('毛利');
+    });
     if (warnLogs.length > 0) {
-      pwarn.innerHTML = warnLogs.slice(0, 10).map(l =>
-        `<div style="color:#f4a100;border-bottom:1px solid rgba(255,255,255,.04);padding:2px 0;">${l}</div>`
-      ).join('');
+      pwarn.innerHTML = warnLogs.slice(0, 10).map(l => {
+        const msg = typeof l === 'string' ? l : (l.msg || '');
+        return `<div style="color:#f4a100;border-bottom:1px solid rgba(255,255,255,.04);padding:2px 0;font-size:12px">${msg}</div>`;
+      }).join('');
     } else {
       pwarn.innerHTML = '<span style="color:#555;">目前無低毛利警示</span>';
     }
@@ -2920,37 +2923,67 @@ setInterval(loadAdLog, 60000); // 每分鐘自動更新
 async function loadAdLog() {
   const el = document.getElementById('ad-log-list');
   try {
-    const r = await fetch('/api/superman-glasses/ad-log');
-    const d = await r.json();
-    const daily = d.last_daily ? '每日任務：' + d.last_daily : '每日任務：尚未執行';
-    const hourly = d.last_hourly ? '預算任務：' + new Date(d.last_hourly*1000).toLocaleString('zh-TW') : '預算任務：尚未執行';
-    document.getElementById('log-daily-ts').textContent = daily;
-    document.getElementById('log-hourly-ts').textContent = hourly;
-    const logs = d.log || [];
+    // 優先從 Google Sheets 讀（永久記錄），失敗才讀記憶體
+    let logs = [];
+    let source = '';
+    let total = 0;
+    try {
+      const rs = await fetch('/api/superman-glasses/ad-log-sheet');
+      const ds = await rs.json();
+      if (ds.ok && ds.logs && ds.logs.length > 0) {
+        logs = ds.logs;
+        total = ds.total || logs.length;
+        source = `Google Sheets（共 ${total} 筆）`;
+      }
+    } catch(e2) {}
+    // Sheets 沒資料時 fallback 到記憶體
     if (!logs.length) {
-      el.innerHTML = '<div style="text-align:center;color:#555;font-size:13px;padding:20px">尚無執行記錄（Railway 重啟後會清空）</div>';
+      const r = await fetch('/api/superman-glasses/ad-log');
+      const d = await r.json();
+      const daily = d.last_daily ? '每日任務：' + d.last_daily : '每日任務：尚未執行';
+      const hourly = d.last_hourly ? '預算任務：' + new Date(d.last_hourly*1000).toLocaleString('zh-TW') : '預算任務：尚未執行';
+      document.getElementById('log-daily-ts').textContent = daily;
+      document.getElementById('log-hourly-ts').textContent = hourly;
+      logs = (d.log || []).map(l => ({ time: l.time, type: '', msg: l.msg || l }));
+      source = '記憶體（重啟後清空）';
+    }
+
+    if (!logs.length) {
+      el.innerHTML = '<div style="text-align:center;color:#555;font-size:13px;padding:20px">尚無執行記錄</div>';
       return;
     }
+
     const colorMap = {
-      'ROAS': '#5DCAA5', '爆款': '#f4a100', '暫停': '#E24B4A',
-      '預算': '#85B7EB', '空燒': '#E24B4A', '---': '#444', '完成': '#5DCAA5'
+      'ROAS調整': '#5DCAA5', '爆款': '#f4a100', '暫停': '#E24B4A', '低毛利': '#E24B4A',
+      '預算加碼': '#85B7EB', '空燒': '#E24B4A', '排程': '#888', '完成': '#5DCAA5'
     };
-    el.innerHTML = logs.map(log => {
+    const typeColorMap = {
+      'ROAS調整': '#5DCAA5', '爆款降ROAS': '#f4a100', '廣告暫停': '#E24B4A',
+      '低毛利暫停': '#E24B4A', '預算加碼': '#85B7EB', '空燒警告': '#BA7517',
+      '排程開始': '#555', '其他': '#888'
+    };
+
+    el.innerHTML = \`<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
+      資料來源：\${source}
+    </div>\` + logs.map(log => {
       const msg = log.msg || '';
-      let color = '#888';
-      for (const [k,v] of Object.entries(colorMap)) {
-        if (msg.includes(k)) { color = v; break; }
+      const type = log.type || '';
+      const time = log.time || '';
+      let color = typeColorMap[type] || '#888';
+      if (!type) {
+        for (const [k,v] of Object.entries(colorMap)) {
+          if (msg.includes(k)) { color = v; break; }
+        }
       }
-      const isDivider = msg.startsWith('---');
-      return isDivider
-        ? \`<div style="border-top:1px solid rgba(255,255,255,.06);margin:4px 0;padding-top:4px;font-size:11px;color:#444">\${msg}</div>\`
-        : \`<div style="display:flex;gap:10px;align-items:flex-start;font-size:12px;font-family:monospace">
-            <span style="color:#444;white-space:nowrap;flex-shrink:0">\${log.time}</span>
-            <span style="color:\${color};line-height:1.5">\${msg}</span>
-          </div>\`;
+      const typeBadge = type ? \`<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:\${color};margin-right:6px;flex-shrink:0">\${type}</span>\` : '';
+      return \`<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
+        <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">\${time}</span>
+        \${typeBadge}
+        <span style="color:\${color};line-height:1.5;word-break:break-all">\${msg}</span>
+      </div>\`;
     }).join('');
   } catch(e) {
-    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入（Railway 可能尚未部署新版）</div>';
+    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
   }
 }
 
@@ -7484,9 +7517,8 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         }
 
         // 預算加碼計劃
-        // 條件：今天此廣告未加過 + 實際ROAS >= 目標ROAS + 預算使用率 >= 90%
-        if (!budgetDoneToday.has(ad.campaignId) &&
-            actualRoas > 0 &&
+        // 條件：實際ROAS >= 目標ROAS + 預算使用率 >= 90%（每次達標都加碼）
+        if (actualRoas > 0 &&
             actualRoas >= currentRoas &&
             budgetUsage >= 0.9 &&
             budget > 0) {
@@ -7571,17 +7603,15 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       // ── 執行預算加碼 ──
       if (_budgetPlan.length > 0) {
         log.innerHTML += `<span style="color:#BA7517">── 預算加碼 ──</span>\n`;
-        const budgetDoneArr = [...budgetDoneToday];
         for (let i = 0; i < _budgetPlan.length; i++) {
           const { ad, currentBudget, newBudget, actualRoas, budgetUsage, name } = _budgetPlan[i];
-          runBtn.textContent = `預算 ${i+1}/${_budgetPlan.length}...`;
+          runBtn.textContent = `加碼 ${i+1}/${_budgetPlan.length}...`;
           const success = await editAd(ad.campaignId, ad.adType, ad.shopId, 6, newBudget);
-          log.innerHTML += `${success?'&#x2705;':'&#x274C;'} ${name} | ${currentBudget}&#x2192;${newBudget} TWD | ROAS ${actualRoas} | 用量 ${budgetUsage}\n`;
+          log.innerHTML += `${success?'&#x1F4B0;':'&#x274C;'} ${name} | ${currentBudget}→${newBudget} TWD | ROAS ${actualRoas} | 使用率${budgetUsage}\n`;
           log.scrollTop = log.scrollHeight;
-          if (success) { ok++; budgetDoneArr.push(ad.campaignId); } else fail++;
+          if (success) ok++; else fail++;
           await new Promise(r => setTimeout(r, 300));
         }
-        localStorage.setItem(BUDGET_DONE_KEY, JSON.stringify(budgetDoneArr));
       }
 
       // ── 暫停空燒廣告（30天未達標）──
@@ -7645,16 +7675,67 @@ _ad_scheduler_store = {
     "low_margin_ts": 0,        # 上次更新時間
 }
 
-def _ad_log(msg):
-    """記錄廣告排程執行日誌"""
+def _ad_log(msg, write_sheet=False):
+    """記錄廣告排程執行日誌，重要操作同時寫入 Google Sheets"""
     ts = datetime.now().strftime("%m/%d %H:%M")
+    ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     entry = {"time": ts, "msg": msg}
     _ad_scheduler_store["log"].insert(0, entry)
-    if len(_ad_scheduler_store["log"]) > 200:
-        _ad_scheduler_store["log"].pop()
     if len(_ad_scheduler_store["log"]) > 100:
         _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
     print(f"[廣告排程] {entry}")
+
+    # 重要操作寫入 Google Sheets（ROAS調整/暫停/加碼/爆款）
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "加碼 ✅", "低毛利", "空燒", "==="])
+    if not important and not write_sheet:
+        return
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return
+        client = get_gspread_client()
+        # 取得或建立「🚀 廣告戰情室」分頁
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+            # 確認第一列是標題
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "時間":
+                ws.insert_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "執行結果"], 1, value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=5000, cols=7)
+            ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "執行結果"], value_input_option="RAW")
+        # 解析 msg 取得各欄位
+        import re
+        if "ROAS" in msg:     log_type = "ROAS調整"
+        elif "爆款" in msg:   log_type = "爆款降ROAS"
+        elif "暫停" in msg:   log_type = "廣告暫停"
+        elif "加碼" in msg:   log_type = "預算加碼"
+        elif "空燒" in msg:   log_type = "空燒警告"
+        elif "低毛利" in msg: log_type = "低毛利暫停"
+        elif "===" in msg:    log_type = "排程開始"
+        else:                  log_type = "其他"
+        # 嘗試從 msg 解析欄位
+        shop = ""
+        ad_name = ""
+        content = msg
+        margin_str = ""
+        result = "✅" if "✅" in msg else ("❌" if "❌" in msg else "")
+        # 解析店鋪 [xxx]
+        shop_m = re.search(r"\[([^\]]+)\]", msg)
+        if shop_m: shop = shop_m.group(1)
+        # 解析毛利 margin xx%
+        margin_m = re.search(r"margin\s*([\d.]+)%|毛利([\d.]+)%", msg)
+        if margin_m: margin_str = margin_m.group(1) or margin_m.group(2)
+        # 廣告名稱（第一個 | 前的內容，去掉 ✅❌）
+        clean_msg = msg.replace("✅","").replace("❌","").strip()
+        parts = clean_msg.split("|")
+        if len(parts) >= 2:
+            ad_name = parts[0].strip()
+            content = " | ".join(parts[1:]).strip()
+        ws.append_row([ts_full, log_type, shop, ad_name, content, margin_str, result], value_input_option="RAW")
+    except Exception as e:
+        print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
 
 def _bigseller_api(path, body=None, days=None):
     """呼叫 BigSeller API（需要在 Railway 環境中有 cookie）"""
@@ -7993,6 +8074,26 @@ def superman_glasses_save_cookie():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
+
+@app.route("/api/superman-glasses/ad-log-sheet", methods=["GET"])
+def superman_glasses_ad_log_sheet():
+    """從 Google Sheets 讀取歷史日誌（永久記錄）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client = get_gspread_client()
+        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+        rows = ws.get_all_values()
+        # 跳過標題列，取最新100筆（從後往前）
+        data_rows = rows[1:] if len(rows) > 1 else []
+        recent = list(reversed(data_rows[-200:]))[:100]
+        logs = [{"time": r[0], "type": r[1] if len(r)>1 else "", "msg": r[2] if len(r)>2 else ""} for r in recent]
+        resp = jsonify({"ok": True, "logs": logs, "total": len(data_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
 
 @app.route("/api/superman-glasses/ad-log", methods=["GET"])
 def superman_glasses_ad_log():
