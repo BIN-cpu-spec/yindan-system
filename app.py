@@ -8513,7 +8513,7 @@ def superman_glasses_product_profit_options():
 
 @app.route("/api/superman-glasses/cost", methods=["POST"])
 def superman_glasses_cost_post():
-    """掃描完成後上傳成本資料"""
+    """掃描完成後上傳成本資料，同時備份到 Google Sheets"""
     try:
         data = request.get_json(force=True)
         cost_map = data.get("map", {})
@@ -8523,6 +8523,29 @@ def superman_glasses_cost_post():
         _cost_store["ts"] = int(time.time() * 1000)
         _cost_store["count"] = len(cost_map)
         _cost_store["uploader"] = request.remote_addr or "unknown"
+
+        # 同步備份到 Google Sheets（背景執行不阻塞）
+        def _backup_cost():
+            try:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                if not sheet_id: return
+                client, err = get_sheets_client()
+                if err: return
+                try:
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                except Exception:
+                    sh = client.open_by_key(sheet_id)
+                    ws = sh.add_worksheet(title="💾 成本備份", rows=10000, cols=3)
+                ws.clear()
+                ws.append_row(["SKU", "成本", "更新時間"], value_input_option="RAW")
+                now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+                rows = [[sku, cost, now_str] for sku, cost in cost_map.items()]
+                ws.append_rows(rows, value_input_option="RAW")
+                print(f"[成本備份] 已寫入 Sheets {len(rows)} 筆")
+            except Exception as e:
+                print(f"[成本備份] 失敗: {e}")
+        threading.Thread(target=_backup_cost, daemon=True).start()
+
         return jsonify({"ok": True, "count": _cost_store["count"]})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
@@ -8704,6 +8727,32 @@ fetchLatestScript();
 
 if __name__ == "__main__":
     load_settings()
+
+    # 啟動時從 Google Sheets 讀回成本備份（Railway 重啟後恢復）
+    def _restore_cost_from_sheets():
+        try:
+            time.sleep(5)  # 等 Flask 啟動完成
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if not sheet_id: return
+            client, err = get_sheets_client()
+            if err: return
+            ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+            rows = ws.get_all_values()
+            if len(rows) <= 1: return
+            cost_map = {}
+            for row in rows[1:]:
+                if len(row) >= 2 and row[0] and row[1]:
+                    try: cost_map[row[0]] = float(row[1])
+                    except: pass
+            if cost_map:
+                _cost_store["map"] = cost_map
+                _cost_store["count"] = len(cost_map)
+                _cost_store["ts"] = int(time.time() * 1000)
+                print(f"[成本備份] 從 Sheets 恢復 {len(cost_map)} 筆成本資料")
+        except Exception as e:
+            print(f"[成本備份] 從 Sheets 恢復失敗: {e}")
+    threading.Thread(target=_restore_cost_from_sheets, daemon=True).start()
+
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=ad_scheduler_thread, daemon=True).start()  # 廣告自動排程
     # Railway 會設定 PORT 環境變數
