@@ -7232,6 +7232,14 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     return 20.0;                    // 極致防禦區
   }
 
+  function getFloorRoas(margin) {
+    // 爆款下限：考慮廣告費後，毛利不得低於40%保本線
+    // 公式：最低ROAS = 1 / (毛利率 - 0.40)
+    if (margin == null || margin <= 40) return null;
+    const floor = Math.round(10 / ((margin / 100) - 0.40)) / 10;
+    return Math.min(floor, getTargetRoas(margin));
+  }
+
   function getRoasZoneName(margin) {
     if (margin == null) return '無成本資料';
     if (margin > 70)  return '🚀 暴利/新品開發區';
@@ -7401,11 +7409,15 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         listTotal = d.data?.page?.totalPage || 1;
         (d.data?.page?.rows || []).forEach(row => {
           if (row.hasVariation && row.variations?.length) {
-            const avgPrice = row.variations.reduce((s,v)=>s+(v.price||v.originalPrice||0),0) / row.variations.length;
+            // 每個 SKU 保留自己的售價，用 skuPriceMap 對應
+            const skuPriceMap = {};
+            row.variations.forEach(v => {
+              if (v.variationSku) skuPriceMap[v.variationSku] = v.price || v.originalPrice || 0;
+            });
             const skus = row.variations.map(v => v.variationSku).filter(Boolean);
-            itemIdMap[row.itemId] = { skus, price: avgPrice };
+            itemIdMap[row.itemId] = { skus, skuPriceMap, price: 0 };
           } else {
-            itemIdMap[row.itemId] = { skus: [row.itemSku], price: row.price || row.originalPrice || 0 };
+            itemIdMap[row.itemId] = { skus: [row.itemSku], skuPriceMap: {}, price: row.price || row.originalPrice || 0 };
           }
         });
         listPage++;
@@ -7432,15 +7444,17 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const item = itemIdMap[ad.itemId];
         if (!item) { noItemId++; continue; }
 
-        let bestMargin = null;
+        let marginTotal = 0, marginCount = 0;
         for (const sku of item.skus) {
           const cost = costMap[sku];
           if (cost == null || cost <= 0) continue;
-          const price = item.price;
+          // 優先用該 SKU 自己的售價，沒有才用商品統一售價
+          const price = (item.skuPriceMap && item.skuPriceMap[sku]) || item.price || 0;
           if (price <= 0) continue;
-          const margin = ((price - cost) / price) * 100;
-          if (bestMargin === null || margin > bestMargin) bestMargin = margin;
+          marginTotal += ((price - cost) / price) * 100;
+          marginCount++;
         }
+        const bestMargin = marginCount > 0 ? marginTotal / marginCount : null;
 
         if (bestMargin === null) { noMargin++; continue; }
 
@@ -7664,11 +7678,17 @@ def _get_target_roas(margin):
     return 20.0
 
 def _get_boom_floor_roas(margin):
-    """爆款下限 ROAS：降到下一個區間的目標"""
-    if margin > 70:  return 3.5   # 已是最低，不再降
-    if margin > 55:  return 3.5   # 降到暴利區目標
-    if margin > 45:  return 5.0   # 降到高價值進攻區目標
-    return None  # < 45% 不允許爆款
+    """爆款下限 ROAS：以40%毛利保本線反推，廣告費後毛利不得低於40%
+    公式：最低ROAS = 1 / (毛利率 - 0.40)
+    例：毛利46.75% → 最低ROAS = 1/(0.4675-0.40) = 14.8
+    """
+    if margin is None or margin <= 40:
+        return None  # 毛利<=40% 不允許爆款降ROAS
+    # 以40%保本線反推最低可接受ROAS
+    floor = round(1.0 / ((margin / 100.0) - 0.40), 1)
+    # 下限不超過目標ROAS（否則爆款條件不可能觸發）
+    target = _get_target_roas(margin)
+    return min(floor, target)
 
 def _edit_ad(campaign_id, ad_type, shop_id, edit_action, value=None):
     """修改廣告（ROAS/預算/暫停）"""
@@ -7715,27 +7735,36 @@ def _fetch_listings_map():
         rows = d.get("data", {}).get("page", {}).get("rows", [])
         for row in rows:
             if row.get("hasVariation") and row.get("variations"):
-                avg_price = sum(v.get("price") or v.get("originalPrice") or 0 for v in row["variations"]) / len(row["variations"])
-                skus = [v["variationSku"] for v in row["variations"] if v.get("variationSku")]
-                item_map[row["itemId"]] = {"skus": skus, "price": avg_price}
+                # 每個 SKU 保留自己的售價
+                sku_price_map = {
+                    v["variationSku"]: v.get("price") or v.get("originalPrice") or 0
+                    for v in row["variations"] if v.get("variationSku")
+                }
+                skus = list(sku_price_map.keys())
+                item_map[row["itemId"]] = {"skus": skus, "sku_price_map": sku_price_map, "price": 0}
             else:
-                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "price": row.get("price") or row.get("originalPrice") or 0}
+                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "sku_price_map": {}, "price": row.get("price") or row.get("originalPrice") or 0}
         total_page = d.get("data", {}).get("page", {}).get("totalPage", 1)
         if page >= total_page: break
         page += 1
     return item_map
 
 def _calc_margin(item, cost_map):
-    """計算商品最高毛利率"""
-    best = None
+    """計算商品平均毛利率（每個SKU用自己的售價）"""
+    total = 0.0
+    count = 0
+    sku_price_map = item.get("sku_price_map", {})
+    default_price = item.get("price", 0)
     for sku in item.get("skus", []):
         cost = cost_map.get(sku)
         if not cost or cost <= 0: continue
-        price = item.get("price", 0)
+        # 優先用該 SKU 自己的售價
+        price = sku_price_map.get(sku) or default_price
         if price <= 0: continue
         margin = (price - cost) / price * 100
-        if best is None or margin > best: best = margin
-    return best
+        total += margin
+        count += 1
+    return total / count if count > 0 else None
 
 def run_daily_ad_tasks():
     """每日廣告任務：ROAS調整 + 爆款降ROAS + 空燒暫停"""
@@ -7778,21 +7807,26 @@ def run_daily_ad_tasks():
                 roas_fail += 1
             time.sleep(0.3)
 
-        # ── 爆款降 ROAS ──
+        # ── 爆款降 ROAS（觸發門檻：實際ROAS > 目標×200%，且花費>500TWD，考慮40%保本線）──
         floor_roas = _get_boom_floor_roas(margin)
         if floor_roas is not None:
             d7  = ads_7d.get(cid)
             d30 = ads_30d.get(cid)
-            roas_7  = float(d7.get("broadRoi")  or 0) if d7  else 0
-            roas_30 = float(d30.get("broadRoi") or 0) if d30 else 0
+            roas_7   = float(d7.get("broadRoi")  or 0) if d7  else 0
+            roas_30  = float(d30.get("broadRoi") or 0) if d30 else 0
+            exp_7    = float(d7.get("expense")   or 0) if d7  else 0
+            exp_30   = float(d30.get("expense")  or 0) if d30 else 0
             boom_roas = None
-            if roas_7 > 0 and roas_30 > 0 and roas_7 > target_roas * 1.5 and roas_30 > target_roas * 1.5:
+            # 條件加嚴：需要200%以上 + 有足夠花費（確認是真爆款）
+            cond_7  = roas_7  > 0 and exp_7  > 500 and roas_7  > target_roas * 2.0
+            cond_30 = roas_30 > 0 and exp_30 > 500 and roas_30 > target_roas * 2.0
+            if cond_7 and cond_30:
                 boom_roas = round(max(current_roas * 0.8, floor_roas), 1)  # 降20%
-            elif roas_7 > 0 and roas_7 > target_roas * 1.5:
+            elif cond_7:
                 boom_roas = round(max(current_roas * 0.9, floor_roas), 1)  # 降10%
             if boom_roas and boom_roas < current_roas:
                 if _edit_ad(cid, ad_type, shop_id, 11, boom_roas):
-                    _ad_log(f"爆款 ✅ {name} {current_roas}→{boom_roas} (margin {margin:.0f}%)")
+                    _ad_log(f"爆款 ✅ {name} {current_roas}→{boom_roas} (margin {margin:.0f}% floor {floor_roas})")
                     boom_ok += 1
                 else:
                     boom_fail += 1
