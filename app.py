@@ -7224,29 +7224,32 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   // 根據毛利率決定目標 ROAS
   function getTargetRoas(margin) {
-    if (margin == null) return null;
-    if (margin > 70)  return 3.5;   // 暴利/新品開發區
-    if (margin > 55)  return 5.0;   // 高價值進攻區
-    if (margin > 45)  return 7.0;   // 主力獲利區
-    if (margin > 40)  return 12.0;  // 高防禦保本區
-    return 20.0;                    // 極致防禦區
+    // <=45%  -> null（自動暫停）
+    // 46~55% -> 固定 10.0
+    // >55%   -> 廣告費後毛利保持45%反推，進位到0.5
+    if (margin == null || margin <= 45) return null;
+    if (margin <= 55) return 10.0;
+    const floor = 1.0 / ((margin / 100) - 0.45);
+    return Math.min(Math.ceil(floor * 2) / 2.0, 20.0);
   }
 
   function getFloorRoas(margin) {
-    // 爆款下限：考慮廣告費後，毛利不得低於40%保本線
-    // 公式：最低ROAS = 1 / (毛利率 - 0.40)
+    // 爆款下限：死守廣告費後毛利40%，進位到0.5
+    // 只有初始ROAS > 爆款下限時才有空間（51%以上）
     if (margin == null || margin <= 40) return null;
-    const floor = Math.round(10 / ((margin / 100) - 0.40)) / 10;
-    return Math.min(floor, getTargetRoas(margin));
+    const target = getTargetRoas(margin);
+    if (target == null) return null;
+    const floor = Math.ceil((1.0 / ((margin / 100) - 0.40)) * 2) / 2.0;
+    if (floor >= target) return null;  // 無爆款空間
+    return floor;
   }
 
   function getRoasZoneName(margin) {
     if (margin == null) return '無成本資料';
-    if (margin > 70)  return '🚀 暴利/新品開發區';
-    if (margin > 55)  return '💎 高價值進攻區';
-    if (margin > 45)  return '🟢 主力獲利區';
-    if (margin > 40)  return '🔴 高防禦保本區';
-    return '💀 極致防禦區';
+    const roas = getTargetRoas(margin).toFixed(1);
+    if (margin <= 40) return '💀 高風險區（毛利不足40%）';
+    const floor = (1.0 / ((margin / 100) - 0.40)).toFixed(1);
+    return `毛利${margin}% | 初始${roas} | 下限${floor}`;
   }
 
   // 呼叫 BigSeller API 修改廣告
@@ -7670,25 +7673,37 @@ def _bigseller_api(path, body=None, days=None):
         return None
 
 def _get_target_roas(margin):
-    """依毛利率取得目標 ROAS"""
-    if margin > 70:  return 3.5
-    if margin > 55:  return 5.0
-    if margin > 45:  return 7.0
-    if margin > 40:  return 12.0
-    return 20.0
+    """初始 ROAS 規則：
+    <=45%  -> None（自動暫停）
+    46~55% -> 固定 10.0
+    >55%   -> 廣告費後毛利保持45%反推，進位到0.5
+    """
+    import math
+    if margin is None or margin <= 45:
+        return None   # 自動暫停
+    if margin <= 55:
+        return 10.0   # 固定10
+    # >55%：廣告費後毛利保持45%
+    floor = 1.0 / ((margin / 100.0) - 0.45)
+    target = math.ceil(floor * 2) / 2.0
+    return min(target, 20.0)
 
 def _get_boom_floor_roas(margin):
-    """爆款下限 ROAS：以40%毛利保本線反推，廣告費後毛利不得低於40%
-    公式：最低ROAS = 1 / (毛利率 - 0.40)
-    例：毛利46.75% → 最低ROAS = 1/(0.4675-0.40) = 14.8
+    """爆款下限 ROAS：死守廣告費後毛利40%
+    公式：最低ROAS = 1 / (毛利率 - 0.40)，進位到0.5
+    只有初始ROAS > 爆款下限時才有空間觸發（51%以上）
     """
+    import math
     if margin is None or margin <= 40:
-        return None  # 毛利<=40% 不允許爆款降ROAS
-    # 以40%保本線反推最低可接受ROAS
-    floor = round(1.0 / ((margin / 100.0) - 0.40), 1)
-    # 下限不超過目標ROAS（否則爆款條件不可能觸發）
+        return None
     target = _get_target_roas(margin)
-    return min(floor, target)
+    if target is None:
+        return None
+    floor = math.ceil((1.0 / ((margin / 100.0) - 0.40)) * 2) / 2.0
+    # 下限必須低於初始才有意義
+    if floor >= target:
+        return None  # 無爆款空間
+    return floor
 
 def _edit_ad(campaign_id, ad_type, shop_id, edit_action, value=None):
     """修改廣告（ROAS/預算/暫停）"""
@@ -7797,6 +7812,16 @@ def run_daily_ad_tasks():
         shop_id  = ad.get("shopId")
         cid      = ad.get("campaignId")
         name     = (ad.get("adName") or str(cid))[:20]
+
+        # ── 毛利<=45% 自動暫停 ──
+        if target_roas is None:
+            if _edit_ad(cid, ad_type, shop_id, 2):
+                _ad_log(f"暫停 ✅ {name} 毛利{margin:.0f}%<=45% 不投廣告")
+                pause_ok += 1
+            else:
+                pause_fail += 1
+            time.sleep(0.3)
+            continue
 
         # ── ROAS 調整 ──
         if abs(target_roas - current_roas) > 0.05:
