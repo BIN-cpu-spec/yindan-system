@@ -2653,12 +2653,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
-  <a href="/warehouse" class="card card-tools">
-    <span class="card-badge badge-ready">&#x2713; 上線中</span>
-    <span class="card-icon">&#x1F4E6;</span>
-    <div class="card-title">貨架入庫</div>
-    <div class="card-desc">掃描貨號入庫到重型貨架，記錄每個儲位的商品，一秒查詢貨號在哪個儲位。</div>
-  </a>
+
 
 </div>
 
@@ -6862,6 +6857,51 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           try { localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map })); } catch(e) {}
           progress.textContent = '上傳成功！';
           status.textContent = `完成！${count} 個 SKU 已同步給全公司 ✓`;
+
+          // 寫入 📊 利潤監控室（抓在線產品售價合併計算毛利）
+          (async () => {
+            try {
+              const profitRows = [];
+              // 抓在線產品取得售價
+              let page = 1, totalPage = 1;
+              while (page <= totalPage && page <= 10) {
+                const r = await fetch(`/api/v1/product/listing/shopee/active.json?orderBy=create_time&desc=true&inquireType=0&shopeeStatus=live&status=active&pageNo=${page}&pageSize=50`);
+                const d = await r.json();
+                if (d.code !== 0) break;
+                totalPage = d.data?.page?.totalPage || 1;
+                (d.data?.page?.rows || []).forEach(row => {
+                  if (row.hasVariation && row.variations?.length) {
+                    row.variations.forEach(v => {
+                      const sku = v.variationSku;
+                      const price = v.price || v.originalPrice || 0;
+                      const cost = map[sku];
+                      if (!sku || !cost || !price) return;
+                      const margin = ((price - cost) / price * 100).toFixed(1);
+                      profitRows.push({ sku, price, cost, margin });
+                    });
+                  } else {
+                    const sku = row.itemSku;
+                    const price = row.price || row.originalPrice || 0;
+                    const cost = map[sku];
+                    if (!sku || !cost || !price) return;
+                    const margin = ((price - cost) / price * 100).toFixed(1);
+                    profitRows.push({ sku, price, cost, margin });
+                  }
+                });
+                page++;
+              }
+              if (profitRows.length > 0) {
+                await fetch(RAILWAY_URL + '/api/superman-glasses/product-profit', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ rows: profitRows })
+                });
+                console.log('[超人眼鏡] 商品利潤已寫入 📊 利潤監控室，共', profitRows.length, '筆');
+              }
+            } catch(e) {
+              console.warn('[超人眼鏡] 商品利潤寫入失敗:', e.message);
+            }
+          })();
         } else {
           progress.textContent = '上傳失敗';
           status.textContent = `掃描完成但上傳失敗：${uploadResult.msg}`;
@@ -8256,13 +8296,13 @@ def superman_glasses_profit_snapshot():
 
         client = get_gspread_client()
         try:
-            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "日期":
                 ws.insert_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], 1, value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
-            ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=14)
+            ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=14)
             ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
 
         now = datetime.now()
@@ -8337,7 +8377,7 @@ def superman_glasses_profit_snapshot_read():
         if not sheet_id:
             return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
         client = get_gspread_client()
-        ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
         rows = ws.get_all_values()
         if len(rows) <= 1:
             return jsonify({"ok": True, "rows": [], "total": 0})
@@ -8404,6 +8444,63 @@ def superman_glasses_cost_get():
         "uploader": _cost_store["uploader"]
     })
     resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+@app.route("/api/superman-glasses/product-profit", methods=["POST"])
+def superman_glasses_product_profit():
+    """掃描完成後寫入商品利潤到 📊 利潤監控室"""
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": True, "msg": "未設定SHEETS，跳過"})
+
+        client = get_gspread_client()
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "SKU":
+                ws.clear()
+                ws.append_row(["SKU", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("📊 利潤監控室")
+                ws.clear()
+            except Exception:
+                ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=5)
+            ws.append_row(["SKU", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                r.get("sku", ""),
+                r.get("price", ""),
+                r.get("cost", ""),
+                r.get("margin", ""),
+                now_str,
+            ])
+
+        # 清除舊資料（保留標題），重新寫入
+        ws.resize(rows=1)
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/product-profit", methods=["OPTIONS"])
+def superman_glasses_product_profit_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return resp
 
 @app.route("/api/superman-glasses/cost", methods=["POST"])
