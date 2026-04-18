@@ -2685,7 +2685,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 
 <div class="sg-divider">
   <div class="sg-divider-line"></div>
-  <div class="sg-divider-text">&#x26A0; 低利潤商品警示（&lt;40%）</div>
+  <div class="sg-divider-text">&#x26A0; 利潤警示（低毛利廣告）</div>
   <div class="sg-divider-line"></div>
 </div>
 
@@ -2693,7 +2693,17 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <span style="font-size:12px;color:#555">依店鋪分類顯示，資料來自超人眼鏡最近一次廣告分析</span>
-      <button onclick="loadLowMargin()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="shop-filter" onchange="_selectedShop=this.value;renderLowMargin()" style="background:#1a2a24;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
+          <option value="all">全部店鋪</option>
+        </select>
+        <select id="margin-threshold" onchange="renderLowMargin()" style="background:#1a2a24;color:#f4a100;border:1px solid rgba(244,161,0,.4);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
+          <option value="40">嚴重 &lt;40%</option>
+          <option value="45" selected>警告 &lt;45%</option>
+          <option value="55">關注 &lt;55%</option>
+        </select>
+        <button onclick="loadLowMargin()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
+      </div>
     </div>
     <div id="low-margin-list">
       <div style="text-align:center;color:#555;font-size:13px;padding:20px">載入中...</div>
@@ -2988,34 +2998,107 @@ async function loadAdLog() {
 }
 
 // ── 低利潤警示 ──
+// 店鋪篩選狀態
+let _lowMarginData = [];
+let _selectedShop = 'all';
+
 async function loadLowMargin() {
   const el = document.getElementById('low-margin-list');
+  el.innerHTML = '<div style="text-align:center;color:#555;padding:20px">載入中...</div>';
   try {
-    const r = await fetch('/api/superman-glasses/low-margin');
+    // 從 Google Sheets 讀取最新快照
+    const r = await fetch('/api/superman-glasses/ad-log-sheet');
     const d = await r.json();
-    if (!d.ok || !d.shops || !d.shops.length) {
-      el.innerHTML = '<div style="text-align:center;color:#555;font-size:13px;padding:20px">尚無資料（需先在 BigSeller 廣告頁面執行分析）</div>';
-      return;
+    // 從利潤監控室讀取
+    const r2 = await fetch('/api/superman-glasses/profit-snapshot-read');
+    const d2 = await r2.json();
+
+    if (d2.ok && d2.rows && d2.rows.length > 0) {
+      _lowMarginData = d2.rows;
+    } else {
+      // fallback 到記憶體
+      const r3 = await fetch('/api/superman-glasses/low-margin');
+      const d3 = await r3.json();
+      _lowMarginData = [];
+      (d3.shops || []).forEach(shop => {
+        shop.items.forEach(item => {
+          _lowMarginData.push({ shop: shop.shopName, name: item.name, margin: item.margin, roas: item.roas, targetRoas: item.targetRoas, status: item.status });
+        });
+      });
     }
-    el.innerHTML = d.shops.map(shop => \`
-      <div style="margin-bottom:16px">
-        <div style="font-size:13px;font-weight:500;color:#f4a100;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(244,161,0,.2)">
-          &#x1F3EA; \${shop.shopName} &nbsp;<span style="font-size:11px;color:#888">（\${shop.items.length} 筆低利潤廣告）</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          \${shop.items.map(item => \`
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(232,75,74,.06);border-radius:6px;border:1px solid rgba(232,75,74,.15)">
-              <span style="font-size:12px;color:#ccc;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${item.name}</span>
-              <span style="font-size:12px;color:#E24B4A;font-weight:500;margin-left:12px;flex-shrink:0">利潤 \${item.margin.toFixed(1)}%</span>
-              <span style="font-size:11px;color:#888;margin-left:12px;flex-shrink:0">ROAS \${item.roas}</span>
-            </div>
-          \`).join('')}
-        </div>
-      </div>
-    \`).join('');
+    renderLowMargin();
   } catch(e) {
-    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入（Railway 可能尚未部署新版）</div>';
+    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
   }
+}
+
+function renderLowMargin() {
+  const el = document.getElementById('low-margin-list');
+  const shopFilter = document.getElementById('shop-filter');
+
+  // 過濾門檻
+  const threshold = parseInt(document.getElementById('margin-threshold')?.value || '45');
+
+  // 篩選資料
+  let filtered = _lowMarginData.filter(r => {
+    const m = parseFloat(r.margin || r[10] || 0);
+    return m > 0 && m <= threshold;
+  });
+  if (_selectedShop !== 'all') {
+    filtered = filtered.filter(r => (r.shop || r[2] || '') === _selectedShop);
+  }
+
+  // 更新店鋪篩選選單
+  const shops = [...new Set(_lowMarginData.map(r => r.shop || r[2] || '').filter(Boolean))];
+  if (shopFilter) {
+    const cur = shopFilter.value;
+    shopFilter.innerHTML = '<option value="all">全部店鋪</option>' +
+      shops.map(s => `<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
+  }
+
+  if (!filtered.length) {
+    el.innerHTML = '<div style="text-align:center;color:#5DCAA5;font-size:13px;padding:20px">✅ 目前無毛利≤' + threshold + '% 的廣告</div>';
+    return;
+  }
+
+  // 依店鋪分組
+  const byShop = {};
+  filtered.forEach(r => {
+    const shop = r.shop || r[2] || '未知店鋪';
+    const margin = parseFloat(r.margin || r[10] || 0);
+    const name = r.name || r[3] || '';
+    const roas = r.roas || r[5] || '';
+    const targetRoas = r.targetRoas || r[11] || '';
+    const status = r.status || r[12] || '';
+    if (!byShop[shop]) byShop[shop] = [];
+    byShop[shop].push({ name, margin, roas, targetRoas, status });
+  });
+
+  el.innerHTML = Object.entries(byShop).map(([shop, items]) => {
+    const hasBelow40 = items.some(i => i.margin <= 40);
+    const shopColor = hasBelow40 ? '#E24B4A' : '#f4a100';
+    return \`<div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:500;color:\${shopColor};margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(244,161,0,.2);display:flex;justify-content:space-between">
+        <span>&#x1F3EA; \${shop}</span>
+        <span style="font-size:11px;color:#888">\${items.length} 筆 | 毛利≤\${threshold}%</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        \${items.map(item => {
+          const isBelow40 = item.margin <= 40;
+          const bg = isBelow40 ? 'rgba(232,75,74,.1)' : 'rgba(244,161,0,.06)';
+          const border = isBelow40 ? '1px solid rgba(232,75,74,.3)' : '1px solid rgba(244,161,0,.2)';
+          const mColor = isBelow40 ? '#E24B4A' : '#f4a100';
+          const tag = isBelow40 ? '&#x1F6D1; 嚴重' : '&#x26A0; 警告';
+          return \`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:\${bg};border-radius:6px;border:\${border}">
+            <span style="font-size:11px;color:\${mColor};flex-shrink:0">\${tag}</span>
+            <span style="font-size:12px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${item.name}</span>
+            <span style="font-size:12px;color:\${mColor};font-weight:500;flex-shrink:0">毛利 \${item.margin.toFixed(1)}%</span>
+            <span style="font-size:11px;color:#888;flex-shrink:0">ROAS \${item.roas}/\${item.targetRoas}</span>
+          </div>\`;
+        }).join('')}
+      </div>
+    </div>\`;
+  }).join('');
 }
 
 // 頁面載入時自動抓取
@@ -7735,14 +7818,19 @@ def _ad_log(msg, write_sheet=False):
     ts = datetime.now().strftime("%m/%d %H:%M")
     ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     entry = {"time": ts, "msg": msg}
-    _ad_scheduler_store["log"].insert(0, entry)
-    if len(_ad_scheduler_store["log"]) > 100:
-        _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
+    # Cookie/成本等系統訊息不顯示在日誌面板
+    skip_display = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
+    if not skip_display:
+        _ad_scheduler_store["log"].insert(0, entry)
+        if len(_ad_scheduler_store["log"]) > 100:
+            _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
     print(f"[廣告排程] {entry}")
 
     # 重要操作寫入 Google Sheets（ROAS調整/暫停/加碼/爆款）
-    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "加碼 ✅", "低毛利", "空燒", "==="])
-    if not important and not write_sheet:
+    # 只記錄真正重要的操作，Cookie/成本等系統訊息不寫進 Sheets
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "低毛利", "空燒", "=== 開始", "=== 完成"])
+    skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
+    if skip or (not important and not write_sheet):
         return
     try:
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
@@ -8044,7 +8132,7 @@ def run_daily_ad_tasks():
         _ad_log("低毛利檢查完成，無異常")
 
     _ad_scheduler_store["last_daily"] = today
-    _ad_log(f"=== 每日任務完成 ROAS:{roas_ok}✅{roas_fail}❌ 爆款:{boom_ok}✅{boom_fail}❌ 暫停:{pause_ok}✅{pause_fail}❌ ===")
+    _ad_log(f"=== 完成 每日廣告任務 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款降ROAS {boom_ok}筆✅ | 廣告暫停 {pause_ok}筆✅ ===", write_sheet=True)
 
 def run_hourly_budget_task():
     """每小時預算任務：ROAS達標且使用率≥90%→加30%"""
@@ -8093,7 +8181,10 @@ def run_hourly_budget_task():
             skip += 1
 
     _ad_scheduler_store["last_hourly"] = now_ts
-    _ad_log(f"--- 預算任務完成 {ok}✅{fail}❌ 跳過{skip} ---")
+    if ok > 0 or fail > 0:
+        _ad_log(f"=== 完成 預算加碼任務 | 成功加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
+    else:
+        _ad_log(f"--- 預算任務檢查完成，本次無符合加碼條件 ({skip}筆檢查)")
 
 def ad_scheduler_thread():
     """廣告排程背景執行緒"""
@@ -8237,6 +8328,46 @@ def superman_glasses_low_margin():
     })
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route("/api/superman-glasses/profit-snapshot-read", methods=["GET"])
+def superman_glasses_profit_snapshot_read():
+    """從 Google Sheets 📊 利潤監控室讀取最新快照"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client = get_gspread_client()
+        ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+        rows = ws.get_all_values()
+        if len(rows) <= 1:
+            return jsonify({"ok": True, "rows": [], "total": 0})
+        headers = rows[0]
+        # 取最新一次快照（最後一批相同日期+時間的記錄）
+        data_rows = rows[1:]
+        if not data_rows:
+            return jsonify({"ok": True, "rows": [], "total": 0})
+        # 找最新的日期+時間
+        last_dt = data_rows[-1][0] + data_rows[-1][1] if len(data_rows[-1]) >= 2 else ""
+        latest = [r for r in data_rows if (r[0]+r[1] if len(r)>=2 else "") == last_dt]
+        # 轉成 dict
+        result = []
+        for r in latest:
+            row_dict = {headers[i]: r[i] if i < len(r) else "" for i in range(len(headers))}
+            result.append({
+                "shop": row_dict.get("店鋪",""),
+                "name": row_dict.get("廣告名稱",""),
+                "margin": float(row_dict.get("毛利%","0") or 0),
+                "roas": row_dict.get("目前ROAS",""),
+                "targetRoas": row_dict.get("目標ROAS",""),
+                "status": row_dict.get("狀態",""),
+                "note": row_dict.get("備註",""),
+                "time": row_dict.get("日期","") + " " + row_dict.get("時間","")
+            })
+        resp = jsonify({"ok": True, "rows": result, "total": len(data_rows), "snapshot_time": last_dt})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
 
 @app.route("/api/superman-glasses/ad-run-now", methods=["POST"])
 def superman_glasses_ad_run_now():
