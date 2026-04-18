@@ -7246,10 +7246,11 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   function getRoasZoneName(margin) {
     if (margin == null) return '無成本資料';
-    const roas = getTargetRoas(margin).toFixed(1);
-    if (margin <= 40) return '💀 高風險區（毛利不足40%）';
-    const floor = (1.0 / ((margin / 100) - 0.40)).toFixed(1);
-    return `毛利${margin}% | 初始${roas} | 下限${floor}`;
+    if (margin <= 45) return `💀 毛利${margin.toFixed(1)}% ≤45% 自動暫停`;
+    const roas = getTargetRoas(margin);
+    const roasStr = roas != null ? roas.toFixed(1) : '-';
+    const floor = margin > 40 ? (1.0 / ((margin / 100) - 0.40)).toFixed(1) : '-';
+    return `毛利${margin.toFixed(1)}% | 初始${roasStr} | 下限${floor}`;
   }
 
   // 呼叫 BigSeller API 修改廣告
@@ -7468,6 +7469,12 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const expense     = parseFloat(ad.expense) || 0;
         const budgetUsage = budget > 0 ? expense / budget : 0;
         const adName      = ad.adName?.substring(0, 20) || String(ad.campaignId);
+
+        // 毛利<=45% 加入暫停計劃
+        if (targetRoas === null) {
+          _pausePlan.push({ ad, name: adName, reason: `毛利${bestMargin.toFixed(1)}%<=45%`, isLowMargin: true });
+          continue;
+        }
 
         // ROAS 計劃（今天未調過才加）
         if (!roasDoneToday && Math.abs(targetRoas - currentRoas) > 0.05) {
