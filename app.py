@@ -7918,6 +7918,14 @@ import io, zipfile
 import requests as _requests
 
 # ── 廣告自動排程存儲 ──────────────────────────────────────────
+# 廣告效果基準（根據實際數據動態更新）
+_ad_benchmark = {
+    "ctr_avg": 2.91,    # 平均點擊率 %
+    "cr_avg": 6.17,     # 平均轉化率 %
+    "cpc_avg": 6.9,     # 平均每次點擊費用 TWD
+    "updated": None     # 最後更新時間
+}
+
 _ad_scheduler_store = {
     "lock": None,              # {"ts": timestamp, "task": "roas/budget"}
     "last_daily": None,        # 上次執行每日任務的日期 "2026-04-16"
@@ -7958,16 +7966,42 @@ def _ad_log(msg, write_sheet=False):
             # 確認第一列是標題
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "時間":
-                ws.insert_row(["時間", "動作"], 1, value_input_option="RAW")
+                ws.clear()
+                ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
             try:
                 ws = sh.worksheet("🚀 廣告戰情室")
+                ws.clear()
             except:
-                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=2)
-            ws.append_row(["時間", "動作"], value_input_option="RAW")
-        # 極簡格式：只記錄時間和動作
-        ws.append_row([ts_full, msg], value_input_option="RAW")
+                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=4)
+            ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
+        # 四欄格式：時間/店鋪/動作/修改建議
+        import re
+        # 解析店鋪
+        shop_m = re.search(r"\[([^\]]+)\]", msg)
+        shop = shop_m.group(1) if shop_m else ""
+        # 產生修改建議
+        suggestion = ""
+        if "ROAS ✅" in msg:
+            suggestion = "ROAS 已自動調整至合理水位"
+        elif "暫停 ✅" in msg and "毛利" in msg:
+            suggestion = "毛利不足，建議提高售價或降低成本"
+        elif "暫停 ✅" in msg and "ROAS" in msg:
+            suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
+        elif "重啟 ✅" in msg:
+            suggestion = "廣告已重啟，請觀察7天ROAS表現"
+        elif "預算 ✅" in msg:
+            suggestion = "廣告達標，預算自動加碼30%"
+        elif "爆款" in msg:
+            suggestion = "爆款廣告，ROAS下調擴大曝光"
+        elif "空燒警告" in msg:
+            suggestion = "近期有好轉跡象，繼續觀察7天"
+        elif "庫存不足" in msg:
+            suggestion = "盡快補貨，補貨後廣告自動重啟"
+        elif "=== 完成" in msg:
+            suggestion = "排程執行完畢，詳見各筆記錄"
+        ws.append_row([ts_full, shop, msg, suggestion], value_input_option="RAW")
     except Exception as e:
         print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
 
@@ -8220,7 +8254,18 @@ def run_daily_ad_tasks():
             cond_recent = roi7 == 0 or roi7 < target_roas * 0.7
             if cond_long and cond_recent:
                 if _edit_ad(cid, ad_type, shop_id, 2):  # 暫停
-                    _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} 目標{target_roas}")
+                    # 判斷問題原因給修改建議
+                    ctr_v = float(ad.get("ctr") or 0)
+                    cr_v  = float(ad.get("cr")  or 0)
+                    ctr_avg = _ad_benchmark["ctr_avg"]
+                    cr_avg  = _ad_benchmark["cr_avg"]
+                    if ctr_v < ctr_avg * 0.5:
+                        reason = f"CTR{ctr_v:.1f}%低於均值{ctr_avg}%，建議換主圖/優化標題"
+                    elif cr_v < cr_avg * 0.5:
+                        reason = f"CR{cr_v:.1f}%低於均值{cr_avg}%，建議優化商品頁/圖片"
+                    else:
+                        reason = f"整體表現差，建議全面檢視"
+                    _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} | {reason}")
                     burned_today.add(cid)  # 記錄今天空燒暫停，不能被重啟
                     pause_ok += 1
                 else:
