@@ -7868,7 +7868,7 @@ def _ad_log(msg, write_sheet=False):
 
     # 重要操作寫入 Google Sheets（ROAS調整/暫停/加碼/爆款）
     # 只記錄真正重要的操作，Cookie/成本等系統訊息不寫進 Sheets
-    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "=== 開始", "=== 完成"])
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "重啟 ✅", "重啟 ❌", "庫存不足", "=== 開始", "=== 完成"])
     skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if skip or (not important and not write_sheet):
         return
@@ -7893,10 +7893,13 @@ def _ad_log(msg, write_sheet=False):
         import re
         if "ROAS" in msg:     log_type = "ROAS調整"
         elif "爆款" in msg:   log_type = "爆款降ROAS"
+        elif "重啟" in msg:   log_type = "廣告重啟"
         elif "暫停" in msg:   log_type = "廣告暫停"
         elif "加碼" in msg:   log_type = "預算加碼"
+        elif "預算" in msg:   log_type = "預算加碼"
         elif "空燒" in msg:   log_type = "空燒警告"
         elif "低毛利" in msg: log_type = "低毛利暫停"
+        elif "庫存不足" in msg: log_type = "庫存不足"
         elif "===" in msg:    log_type = "排程開始"
         else:                  log_type = "其他"
         # 嘗試從 msg 解析欄位
@@ -8028,9 +8031,10 @@ def _fetch_listings_map():
                     for v in row["variations"] if v.get("variationSku")
                 }
                 skus = list(sku_price_map.keys())
-                item_map[row["itemId"]] = {"skus": skus, "sku_price_map": sku_price_map, "price": 0}
+                stock = sum(v.get("stock", 0) for v in row["variations"])
+                item_map[row["itemId"]] = {"skus": skus, "sku_price_map": sku_price_map, "price": 0, "stock": stock}
             else:
-                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "sku_price_map": {}, "price": row.get("price") or row.get("originalPrice") or 0}
+                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "sku_price_map": {}, "price": row.get("price") or row.get("originalPrice") or 0, "stock": row.get("stock", 0)}
         total_page = d.get("data", {}).get("page", {}).get("totalPage", 1)
         if page >= total_page: break
         page += 1
@@ -8141,6 +8145,61 @@ def run_daily_ad_tasks():
                 else:
                     pause_fail += 1
                 time.sleep(0.3)
+
+    # ── 重啟符合條件的暫停廣告（毛利>45% 且 有庫存）──────────────────
+    restart_ok = restart_skip_margin = restart_skip_stock = 0
+    try:
+        # 抓所有暫停的 autoRoas 廣告
+        paused_page = 1
+        paused_ads = []
+        while True:
+            body_p = {"pageNo": paused_page, "pageSize": 100}
+            dp = _bigseller_api("/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json", body_p)
+            if not dp or dp.get("code") != 0: break
+            rows_p = dp.get("data", {}).get("rows", [])
+            for row in rows_p:
+                if row.get("biddingMethod") == "autoRoas" and row.get("campaignStatus") == "paused":
+                    paused_ads.append(row)
+            if paused_page >= dp.get("data", {}).get("totalPage", 1): break
+            paused_page += 1
+
+        for pad in paused_ads:
+            iid   = pad.get("itemId")
+            item  = item_map.get(iid)
+            if not item: continue
+            margin = _calc_margin(item, cost_map)
+            if margin is None: continue
+            cid     = pad.get("campaignId")
+            ad_type = pad.get("adType")
+            shop_id = pad.get("shopId")
+            name    = (pad.get("adName") or str(cid))[:20]
+            shop_name = pad.get("shopName") or str(shop_id)
+
+            # 毛利 ≤ 45% → 繼續暫停
+            if margin <= 45:
+                restart_skip_margin += 1
+                continue
+
+            # 檢查庫存（item_map 裡有 stock 欄位）
+            stock = item.get("stock", 0)
+            if stock <= 0:
+                restart_skip_stock += 1
+                _ad_log(f"庫存不足 [{shop_name}] {name} 庫存{stock}，維持暫停")
+                continue
+
+            # 毛利>45% 且 有庫存 → 重啟廣告
+            target_roas = _get_target_roas(margin)
+            if _edit_ad(cid, ad_type, shop_id, 1):  # 1 = 啟動
+                _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.0f}% 庫存{stock} ROAS→{target_roas}")
+                restart_ok += 1
+                # 同時設定正確 ROAS
+                _edit_ad(cid, ad_type, shop_id, 11, target_roas)
+            time.sleep(0.3)
+
+        if restart_ok > 0:
+            _ad_log(f"=== 重啟廣告完成 {restart_ok}筆✅ 毛利不足跳過{restart_skip_margin}筆 庫存不足跳過{restart_skip_stock}筆 ===", write_sheet=True)
+    except Exception as e:
+        _ad_log(f"重啟廣告失敗: {e}")
 
     # ── 低毛利廣告回報（依店鋪分類）──────────────────
     low_margin_by_shop = {}  # shop_name -> [{"name", "margin", "roas", "shopId"}]
