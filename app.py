@@ -7380,11 +7380,9 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   // 根據毛利率決定目標 ROAS
   function getTargetRoas(margin) {
-    // <=45%  -> null（自動暫停）
-    // 46~55% -> 固定 10.0
-    // >55%   -> 廣告費後毛利保持45%反推，進位到0.5
+    // <=45% -> null（自動暫停）
+    // >45%  -> 廣告費後毛利保持45%反推，進位到0.5，最高20
     if (margin == null || margin <= 45) return null;
-    if (margin <= 55) return 10.0;
     const floor = 1.0 / ((margin / 100) - 0.45);
     return Math.min(Math.ceil(floor * 2) / 2.0, 20.0);
   }
@@ -7960,50 +7958,47 @@ def _ad_log(msg, write_sheet=False):
             # 確認第一列是標題
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "時間":
-                ws.insert_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], 1, value_input_option="RAW")
+                ws.insert_row(["時間", "動作"], 1, value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
             try:
                 ws = sh.worksheet("🚀 廣告戰情室")
             except:
-                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=7)
-            ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], value_input_option="RAW")
-        # 解析 msg 取得各欄位
-        import re
-        if "ROAS" in msg:     log_type = "ROAS調整"
-        elif "爆款" in msg:   log_type = "爆款降ROAS"
-        elif "重啟" in msg:   log_type = "廣告重啟"
-        elif "暫停" in msg:   log_type = "廣告暫停"
-        elif "加碼" in msg:   log_type = "預算加碼"
-        elif "預算" in msg:   log_type = "預算加碼"
-        elif "空燒" in msg:   log_type = "空燒警告"
-        elif "低毛利" in msg: log_type = "低毛利暫停"
-        elif "庫存不足" in msg: log_type = "庫存不足"
-        elif "===" in msg:    log_type = "排程開始"
-        else:                  log_type = "其他"
-        # 嘗試從 msg 解析欄位
-        shop = ""
-        ad_name = ""
-        content = msg
-        margin_str = ""
-        result = "✅" if "✅" in msg else ("❌" if "❌" in msg else "")
-        # 解析店鋪 [xxx]
-        shop_m = re.search(r"\[([^\]]+)\]", msg)
-        if shop_m: shop = shop_m.group(1)
-        # 解析毛利 margin xx%
-        margin_m = re.search(r"margin\s*([\d.]+)%|毛利([\d.]+)%", msg)
-        if margin_m: margin_str = margin_m.group(1) or margin_m.group(2)
-        # 廣告名稱（第一個 | 前的內容，去掉 ✅❌）
-        clean_msg = msg.replace("✅","").replace("❌","").strip()
-        parts = clean_msg.split("|")
-        if len(parts) >= 2:
-            ad_name = parts[0].strip()
-            content = " | ".join(parts[1:]).strip()
-        ws.append_row([ts_full, log_type, shop, ad_name, content, margin_str, result], value_input_option="RAW")
+                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=2)
+            ws.append_row(["時間", "動作"], value_input_option="RAW")
+        # 極簡格式：只記錄時間和動作
+        ws.append_row([ts_full, msg], value_input_option="RAW")
     except Exception as e:
         print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
 
-def _bigseller_api(path, body=None, days=None):
+def _get_cost_map():
+    """取得成本資料：優先記憶體，沒有就從 Google Sheets 讀"""
+    cost_map = _cost_store.get("map", {})
+    if cost_map:
+        return cost_map
+    # 記憶體沒有 → 從 Sheets 讀回
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return {}
+        client, err = get_sheets_client()
+        if err: return {}
+        ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+        rows = ws.get_all_values()
+        if len(rows) <= 1: return {}
+        cost_map = {}
+        for row in rows[1:]:
+            if len(row) >= 2 and row[0] and row[1]:
+                try: cost_map[row[0]] = float(row[1])
+                except: pass
+        if cost_map:
+            _cost_store["map"] = cost_map
+            _cost_store["count"] = len(cost_map)
+            _cost_store["ts"] = int(time.time() * 1000)
+            print(f"[排程] 從 Sheets 讀回 {len(cost_map)} 筆成本")
+        return cost_map
+    except Exception as e:
+        print(f"[排程] 從 Sheets 讀成本失敗: {e}")
+        return {}
     """呼叫 BigSeller API（需要在 Railway 環境中有 cookie）"""
     # Cookie 優先從記憶體（Extension 上傳），其次從環境變數
     cookie = _ad_scheduler_store.get("bs_cookie") or os.environ.get("BIGSELLER_COOKIE", "")
@@ -8027,17 +8022,14 @@ def _bigseller_api(path, body=None, days=None):
         return None
 
 def _get_target_roas(margin):
-    """初始 ROAS 規則：
-    <=45%  -> None（自動暫停）
-    46~55% -> 固定 10.0
-    >55%   -> 廣告費後毛利保持45%反推，進位到0.5
+    """初始 ROAS：所有毛利統一按45%基本標準反推
+    初始 ROAS = 1 / (毛利率 - 0.45)，進位到0.5
+    最高上限 20.0（毛利46~50%會碰到上限）
+    <=45% -> None（自動暫停，不投廣告）
     """
     import math
     if margin is None or margin <= 45:
         return None   # 自動暫停
-    if margin <= 55:
-        return 10.0   # 固定10
-    # >55%：廣告費後毛利保持45%
     floor = 1.0 / ((margin / 100.0) - 0.45)
     target = math.ceil(floor * 2) / 2.0
     return min(target, 20.0)
@@ -8143,9 +8135,9 @@ def run_daily_ad_tasks():
         return  # 今天已跑過
 
     _ad_log("=== 開始每日廣告任務 ===")
-    cost_map = _cost_store.get("map", {})
+    cost_map = _get_cost_map()
     if not cost_map:
-        _ad_log("無成本資料，跳過每日任務")
+        _ad_log("無成本資料（記憶體+Sheets都是空的），跳過每日任務")
         return
 
     item_map   = _fetch_listings_map()
@@ -8340,7 +8332,7 @@ def run_hourly_budget_task():
         return  # 未滿1小時
 
     _ad_log("--- 開始每小時預算任務 ---")
-    cost_map = _cost_store.get("map", {})
+    cost_map = _get_cost_map()
     if not cost_map:
         return
 
