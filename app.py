@@ -7555,6 +7555,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     let _budgetPlan = [];
     let _pausePlan = [];
     let _warnList  = [];
+    let _restartPlan = [];
 
     async function analyzeAds() {
       summary.innerHTML = '&#x23F3; 載入成本資料...';
@@ -7620,7 +7621,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       _budgetPlan = [];
       _pausePlan = [];
       _warnList  = [];
-      let _restartPlan = [];
+      _restartPlan = [];
       let noMargin = 0, alreadyCorrect = 0, noItemId = 0;
 
       for (const ad of ads) {
@@ -8657,6 +8658,27 @@ _cost_store = {
     "count": 0,     # SKU 數量
     "uploader": ""  # 上傳者 IP
 }
+
+@app.route("/api/superman-glasses/restore-cost", methods=["POST"])
+def superman_glasses_restore_cost():
+    """手動觸發從 Google Sheets 讀回成本資料"""
+    try:
+        cost_map = _get_cost_map()
+        if cost_map:
+            resp = jsonify({"ok": True, "count": len(cost_map), "msg": "成本已從 Sheets 恢復"})
+        else:
+            resp = jsonify({"ok": False, "msg": "Sheets 沒有成本資料"})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/restore-cost", methods=["OPTIONS"])
+def superman_glasses_restore_cost_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
 
 @app.route("/api/superman-glasses/cost", methods=["GET"])
 def superman_glasses_cost_get():
