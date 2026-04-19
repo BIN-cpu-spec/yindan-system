@@ -7807,10 +7807,11 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     }
 
     runBtn.onclick = async () => {
-      const roasNeed   = roasDoneToday ? 0 : _adPlan.length;
-      const budgetNeed = _budgetPlan.length;
-      const pauseNeed  = _pausePlan.length;
-      if (roasNeed + budgetNeed + pauseNeed === 0) return;
+      const roasNeed    = roasDoneToday ? 0 : _adPlan.length;
+      const budgetNeed  = _budgetPlan.length;
+      const pauseNeed   = _pausePlan.length;
+      const restartNeed = (_restartPlan || []).length;
+      if (roasNeed + budgetNeed + pauseNeed + restartNeed === 0) return;
 
       runBtn.disabled = true;
       log.style.display = 'block';
