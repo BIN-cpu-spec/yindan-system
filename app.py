@@ -8030,6 +8030,7 @@ def _get_cost_map():
             _cost_store["map"] = cost_map
             _cost_store["count"] = len(cost_map)
             _cost_store["ts"] = int(time.time() * 1000)
+            _ad_scheduler_store["cost_count"] = len(cost_map)
             print(f"[排程] 從 Sheets 讀回 {len(cost_map)} 筆成本")
         return cost_map
     except Exception as e:
@@ -8764,6 +8765,7 @@ def superman_glasses_cost_post():
         _cost_store["ts"] = int(time.time() * 1000)
         _cost_store["count"] = len(cost_map)
         _cost_store["uploader"] = request.remote_addr or "unknown"
+        _ad_scheduler_store["cost_count"] = len(cost_map)
 
         # 同步備份到 Google Sheets（背景執行不阻塞）
         def _backup_cost():
