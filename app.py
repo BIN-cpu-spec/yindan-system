@@ -7596,14 +7596,17 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
               if (v.variationSku) skuPriceMap[v.variationSku] = v.price || v.originalPrice || 0;
             });
             const skus = row.variations.map(v => v.variationSku).filter(Boolean);
-            itemIdMap[row.itemId] = { skus, skuPriceMap, price: 0 };
+            const stock = row.variations.reduce((s,v) => s + (v.stock||0), 0);
+            itemIdMap[row.itemId] = { skus, skuPriceMap, price: 0, stock };
           } else {
-            itemIdMap[row.itemId] = { skus: [row.itemSku], skuPriceMap: {}, price: row.price || row.originalPrice || 0 };
+            itemIdMap[row.itemId] = { skus: [row.itemSku], skuPriceMap: {}, price: row.price || row.originalPrice || 0, stock: row.stock || 0 };
           }
         });
         listPage++;
         if (listPage % 5 === 0) summary.innerHTML = `&#x23F3; 載入在線商品 ${listPage}/${listTotal} 頁...`;
       }
+      // 存到 window 讓重啟邏輯使用
+      window._sgItemIdMap = itemIdMap;
 
       summary.innerHTML = `&#x23F3; 分析廣告...`;
 
@@ -7685,8 +7688,9 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       summary.innerHTML = `&#x23F3; 分析暫停廣告...`;
       const pausedAds = await fetchPausedAds();
       const burnedIds = new Set(_pausePlan.map(p => p.ad.campaignId));
+      const pausedItemMap = window._sgItemIdMap || itemIdMap;
       for (const pad of pausedAds) {
-        const item = itemIdMap[pad.itemId];
+        const item = pausedItemMap[pad.itemId];
         if (!item) continue;
         let mTotal = 0, mCount = 0;
         for (const sku of (item.skus||[])) {
@@ -7956,11 +7960,14 @@ def _ad_log(msg, write_sheet=False):
             # 確認第一列是標題
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "時間":
-                ws.insert_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "執行結果"], 1, value_input_option="RAW")
+                ws.insert_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], 1, value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
-            ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=5000, cols=7)
-            ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "執行結果"], value_input_option="RAW")
+            try:
+                ws = sh.worksheet("🚀 廣告戰情室")
+            except:
+                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=7)
+            ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], value_input_option="RAW")
         # 解析 msg 取得各欄位
         import re
         if "ROAS" in msg:     log_type = "ROAS調整"
@@ -8322,7 +8329,8 @@ def run_daily_ad_tasks():
         _ad_log("低毛利檢查完成，無異常")
 
     _ad_scheduler_store["last_daily"] = today
-    _ad_log(f"=== 完成 每日廣告任務 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款降ROAS {boom_ok}筆✅ | 廣告暫停 {pause_ok}筆✅ ===", write_sheet=True)
+    now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+    _ad_log(f"=== [{now_str}] 每日排程完成 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款 {boom_ok}筆✅ | 暫停 {pause_ok}筆✅ | 重啟 {restart_ok}筆✅ ===", write_sheet=True)
 
 def run_hourly_budget_task():
     """每小時預算任務：ROAS達標且使用率≥90%→加30%"""
@@ -8373,7 +8381,8 @@ def run_hourly_budget_task():
 
     _ad_scheduler_store["last_hourly"] = now_ts
     if ok > 0 or fail > 0:
-        _ad_log(f"=== 完成 預算加碼任務 | 成功加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        _ad_log(f"=== [{now_str}] 每小時排程完成 | 預算加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
     else:
         _ad_log(f"--- 預算任務檢查完成，本次無符合加碼條件 ({skip}筆檢查)")
 
@@ -8450,13 +8459,17 @@ def superman_glasses_profit_snapshot():
         if err:
             return jsonify({"ok": False, "msg": err}), 500
         try:
-            ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "日期":
-                ws.insert_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], 1, value_input_option="RAW")
+                ws.clear()
+                ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
-            ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=14)
+            try:
+                ws = sh.worksheet("📊 利潤監控室")
+            except:
+                ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=14)
             ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
 
         now = datetime.now()
@@ -8496,6 +8509,25 @@ def superman_glasses_profit_snapshot_options():
     resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return resp
 
+@app.route("/api/superman-glasses/clear-war-room", methods=["POST"])
+def superman_glasses_clear_war_room():
+    """清空 🚀 廣告戰情室，只保留標題列"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+        ws.clear()
+        ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], value_input_option="RAW")
+        resp = jsonify({"ok": True, "msg": "廣告戰情室已清空"})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
 @app.route("/api/superman-glasses/ad-log", methods=["GET"])
 def superman_glasses_ad_log():
     resp = jsonify({
@@ -8532,7 +8564,7 @@ def superman_glasses_profit_snapshot_read():
             return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
         client, err = get_sheets_client()
         if err: return jsonify({"ok": False, "msg": err}), 500
-        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+        ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
         rows = ws.get_all_values()
         if len(rows) <= 1:
             return jsonify({"ok": True, "rows": [], "total": 0})
