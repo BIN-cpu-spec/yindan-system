@@ -8036,6 +8036,8 @@ def _get_cost_map():
     except Exception as e:
         print(f"[排程] 從 Sheets 讀成本失敗: {e}")
         return {}
+
+def _bigseller_api(path, body=None):
     """呼叫 BigSeller API（需要在 Railway 環境中有 cookie）"""
     # Cookie 優先從記憶體（Extension 上傳），其次從環境變數
     cookie = _ad_scheduler_store.get("bs_cookie") or os.environ.get("BIGSELLER_COOKIE", "")
