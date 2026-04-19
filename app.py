@@ -8075,6 +8075,7 @@ def run_daily_ad_tasks():
     ads_30d    = {a["campaignId"]: a for a in _fetch_ads_range(30)}
 
     roas_ok = roas_fail = boom_ok = boom_fail = pause_ok = pause_fail = 0
+    burned_today = set()  # 今天剛被空燒暫停的廣告，不能重啟
 
     for ad in ads_now:
         item = item_map.get(ad.get("itemId"))
@@ -8133,18 +8134,30 @@ def run_daily_ad_tasks():
                     boom_fail += 1
                 time.sleep(0.3)
 
-        # ── 空燒暫停（30天花費>500且ROAS<目標50%）──
+        # ── 空燒暫停（30天差 且 7天也沒有好轉）──
+        d7  = ads_7d.get(cid)
         d30 = ads_30d.get(cid)
         if d30:
             exp30  = float(d30.get("expense") or 0)
             roi30  = float(d30.get("broadRoi") or 0)
-            if exp30 > 500 and roi30 > 0 and roi30 < target_roas * 0.5:
+            roi7   = float(d7.get("broadRoi") or 0) if d7 else 0
+            exp7   = float(d7.get("expense") or 0) if d7 else 0
+            # 條件1：30天長期表現差（花費>500 且 ROAS<目標50%）
+            cond_long = exp30 > 500 and roi30 > 0 and roi30 < target_roas * 0.5
+            # 條件2：7天近期也沒有好轉（ROAS<目標70%）
+            # 若7天ROAS≥目標70%，表示近期有改善，給機會繼續跑
+            cond_recent = roi7 == 0 or roi7 < target_roas * 0.7
+            if cond_long and cond_recent:
                 if _edit_ad(cid, ad_type, shop_id, 2):  # 暫停
-                    _ad_log(f"暫停 ✅ {name} 30天花費{exp30:.0f} ROAS{roi30:.1f}/{target_roas}")
+                    _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} 目標{target_roas}")
+                    burned_today.add(cid)  # 記錄今天空燒暫停，不能被重啟
                     pause_ok += 1
                 else:
                     pause_fail += 1
                 time.sleep(0.3)
+            elif cond_long and not cond_recent:
+                # 30天差但7天有好轉，記錄警告但不暫停
+                _ad_log(f"空燒警告 [{ad.get('shopName','')[:10]}] {name} 30天差({roi30:.1f}) 但7天好轉({roi7:.1f}) 觀察中")
 
     # ── 重啟符合條件的暫停廣告（毛利>45% 且 有庫存）──────────────────
     restart_ok = restart_skip_margin = restart_skip_stock = 0
@@ -8174,6 +8187,11 @@ def run_daily_ad_tasks():
             shop_id = pad.get("shopId")
             name    = (pad.get("adName") or str(cid))[:20]
             shop_name = pad.get("shopName") or str(shop_id)
+
+            # 今天剛被空燒暫停的廣告 → 不重啟（空燒需要持續觀察）
+            if cid in burned_today:
+                _ad_log(f"空燒保護 [{shop_name}] {name} 今天剛因空燒暫停，不重啟")
+                continue
 
             # 毛利 ≤ 45% → 繼續暫停
             if margin <= 45:
