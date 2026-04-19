@@ -7871,7 +7871,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           const { ad, name, shopName, margin, targetRoas, stock } = _restartPlan[i];
           runBtn.textContent = `重啟 ${i+1}/${_restartPlan.length}...`;
           // 先啟動
-          const s1 = await editAd(ad.campaignId, ad.adType, ad.shopId, 1, null);
+          const s1 = await editAd(ad.campaignId, ad.adType, ad.shopId, 3, null);  // 3=恢復暫停廣告
           // 再設定正確 ROAS
           const s2 = s1 ? await editAd(ad.campaignId, ad.adType, ad.shopId, 11, targetRoas) : false;
           log.innerHTML += `${s1?'&#x1F504;':'&#x274C;'} [${shopName}] ${name} | 毛利${margin}% 庫存${stock} ROAS→${targetRoas}
@@ -8328,7 +8328,7 @@ def run_daily_ad_tasks():
 
             # 毛利>45% 且 有庫存 → 重啟廣告
             target_roas = _get_target_roas(margin)
-            if _edit_ad(cid, ad_type, shop_id, 1):  # 1 = 啟動
+            if _edit_ad(cid, ad_type, shop_id, 3):  # 3 = 恢復暫停廣告
                 _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.0f}% 庫存{stock} ROAS→{target_roas}")
                 restart_ok += 1
                 # 同時設定正確 ROAS
