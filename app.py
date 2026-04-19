@@ -7427,6 +7427,27 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   }
 
   // 抓所有廣告（分頁）
+  async function fetchPausedAds() {
+    // 抓所有已暫停的 autoRoas 廣告
+    const ads = [];
+    let page = 1;
+    while (true) {
+      const r = await fetch('/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageNo: page, pageSize: 100 })
+      });
+      const d = await r.json();
+      if (d.code !== 0) break;
+      (d.data?.rows || []).forEach(ad => {
+        if (ad.biddingMethod === 'autoRoas' && ad.campaignStatus === 'paused') ads.push(ad);
+      });
+      if (page >= (d.data?.totalPage || 1)) break;
+      page++;
+    }
+    return ads;
+  }
+
   async function fetchAllAds() {
     const ads = [];
     let page = 1, totalPage = 1;
@@ -7598,6 +7619,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       _budgetPlan = [];
       _pausePlan = [];
       _warnList  = [];
+      let _restartPlan = [];
       let noMargin = 0, alreadyCorrect = 0, noItemId = 0;
 
       for (const ad of ads) {
@@ -7659,9 +7681,39 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         }
       }
 
+      // 5. 分析已暫停廣告 → 重啟計劃
+      summary.innerHTML = `&#x23F3; 分析暫停廣告...`;
+      const pausedAds = await fetchPausedAds();
+      const burnedIds = new Set(_pausePlan.map(p => p.ad.campaignId));
+      for (const pad of pausedAds) {
+        const item = itemIdMap[pad.itemId];
+        if (!item) continue;
+        let mTotal = 0, mCount = 0;
+        for (const sku of (item.skus||[])) {
+          const cost = costMap[sku];
+          const price = (item.skuPriceMap&&item.skuPriceMap[sku]) || item.price || 0;
+          if (!cost || !price) continue;
+          mTotal += ((price-cost)/price*100); mCount++;
+        }
+        const margin = mCount > 0 ? mTotal/mCount : null;
+        if (margin === null) continue;
+        const targetRoas = getTargetRoas(margin);
+        const padName = (pad.adName||'').substring(0,20);
+        const shopName = (pad.shopName||'').substring(0,20);
+        // 今天剛被空燒暫停 → 不重啟
+        if (burnedIds.has(pad.campaignId)) continue;
+        // 毛利<=45% → 繼續暫停
+        if (targetRoas === null || margin <= 45) continue;
+        // 庫存 > 0 → 加入重啟計劃
+        const stock = item.stock || 0;
+        if (stock <= 0) continue;
+        _restartPlan.push({ ad: pad, name: padName, shopName, margin: margin.toFixed(1), targetRoas, stock });
+      }
+
       const roasNeed   = _adPlan.length;
       const budgetNeed = _budgetPlan.length;
       const pauseNeed  = _pausePlan.length;
+      const restartNeed = _restartPlan.length;
       const warnNeed   = _warnList.length;
       const up   = _adPlan.filter(p => p.targetRoas > p.currentRoas).length;
       const down  = _adPlan.filter(p => p.targetRoas < p.currentRoas).length;
@@ -7681,6 +7733,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         ${roasLine}<br>
         <b>預算加碼（達標且用量&#x2265;90%）：</b>${budgetNeed} 筆<br>
         <b style="color:#E24B4A">&#x1F6D1; 30天空燒暫停：</b>${pauseNeed} 筆<br>
+        <b style="color:#5DCAA5">&#x1F504; 符合重啟條件：</b>${restartNeed} 筆<br>
         ${warnHtml}
         <b>無成本/無在線產品：</b>${noMargin + noItemId} 筆<br>
         <b>進行中廣告（autoRoas）：</b>${ads.length} 筆
@@ -7741,10 +7794,10 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         }
       })();
 
-      const totalAction = (roasDoneToday ? 0 : roasNeed) + budgetNeed + pauseNeed;
+      const totalAction = (roasDoneToday ? 0 : roasNeed) + budgetNeed + pauseNeed + restartNeed;
       if (totalAction > 0) {
         runBtn.disabled = false;
-        runBtn.textContent = `⚡ 執行（ROAS×${roasDoneToday?0:roasNeed} 預算×${budgetNeed} 暫停×${pauseNeed}）`;
+        runBtn.textContent = `⚡ 執行（ROAS×${roasDoneToday?0:roasNeed} 預算×${budgetNeed} 暫停×${pauseNeed} 重啟×${restartNeed}）`;
       } else {
         runBtn.disabled = true;
         runBtn.textContent = '✅ 今日無需調整';
@@ -7803,6 +7856,25 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           log.scrollTop = log.scrollHeight;
           if (success) ok++; else fail++;
           await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      // ── 執行重啟廣告 ──
+      if (_restartPlan.length > 0) {
+        log.innerHTML += `<span style="color:#5DCAA5">── 重啟廣告 ──</span>
+`;
+        for (let i = 0; i < _restartPlan.length; i++) {
+          const { ad, name, shopName, margin, targetRoas, stock } = _restartPlan[i];
+          runBtn.textContent = `重啟 ${i+1}/${_restartPlan.length}...`;
+          // 先啟動
+          const s1 = await editAd(ad.campaignId, ad.adType, ad.shopId, 1, null);
+          // 再設定正確 ROAS
+          const s2 = s1 ? await editAd(ad.campaignId, ad.adType, ad.shopId, 11, targetRoas) : false;
+          log.innerHTML += `${s1?'&#x1F504;':'&#x274C;'} [${shopName}] ${name} | 毛利${margin}% 庫存${stock} ROAS→${targetRoas}
+`;
+          log.scrollTop = log.scrollHeight;
+          if (s1) ok++; else fail++;
+          await new Promise(r => setTimeout(r, 400));
         }
       }
 
