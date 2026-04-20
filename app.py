@@ -8021,6 +8021,53 @@ def _flush_ad_log_to_sheets():
     except Exception as e:
         print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
 
+
+def _read_schedule_state():
+    """從 Google Sheets 讀排程狀態（last_daily / last_hourly）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return
+        client, err = get_sheets_client()
+        if err: return
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("⚙️ 排程狀態")
+        except:
+            return
+        rows = ws.get_all_values()
+        state = {row[0]: row[1] for row in rows if len(row) >= 2}
+        if state.get("last_daily"):
+            _ad_scheduler_store["last_daily"] = state["last_daily"]
+        if state.get("last_hourly"):
+            try:
+                _ad_scheduler_store["last_hourly"] = float(state["last_hourly"])
+            except:
+                pass
+        print(f"[排程狀態] 從 Sheets 讀回：last_daily={state.get('last_daily')} last_hourly={state.get('last_hourly','')[:10]}")
+    except Exception as e:
+        print(f"[排程狀態] 讀取失敗: {e}")
+
+def _write_schedule_state():
+    """把排程狀態寫入 Google Sheets（last_daily / last_hourly）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return
+        client, err = get_sheets_client()
+        if err: return
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("⚙️ 排程狀態")
+        except:
+            ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
+        ws.clear()
+        ws.append_rows([
+            ["last_daily",  _ad_scheduler_store.get("last_daily") or ""],
+            ["last_hourly", str(_ad_scheduler_store.get("last_hourly") or "")],
+            ["updated",     datetime.now().strftime("%Y/%m/%d %H:%M:%S")],
+        ], value_input_option="RAW")
+    except Exception as e:
+        print(f"[排程狀態] 寫入失敗: {e}")
+
 def _get_cost_map():
     """取得成本資料：優先記憶體，沒有就從 Google Sheets 讀"""
     cost_map = _cost_store.get("map", {})
@@ -8205,6 +8252,8 @@ def run_daily_ad_tasks():
     cost_map = _get_cost_map()
     if not cost_map:
         _ad_log("無成本資料（記憶體+Sheets都是空的），跳過每日任務")
+        # 沒有成本不標記今天已跑，明天或成本讀回後繼續嘗試
+        _ad_scheduler_store["last_daily"] = None
         return
 
     item_map   = _fetch_listings_map()
@@ -8428,6 +8477,7 @@ def run_daily_ad_tasks():
         _ad_log("低毛利檢查完成，無異常")
 
     _ad_scheduler_store["last_daily"] = today
+    threading.Thread(target=_write_schedule_state, daemon=True).start()
     now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
     _ad_log(f"=== [{now_str}] 每日排程完成 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款 {boom_ok}筆✅ | 暫停 {pause_ok}筆✅ | 重啟 {restart_ok}筆✅ ===", write_sheet=True)
     _flush_ad_log_to_sheets()  # 批次寫入 Sheets
@@ -8442,6 +8492,8 @@ def run_hourly_budget_task():
     _ad_log("--- 開始每小時預算任務 ---")
     cost_map = _get_cost_map()
     if not cost_map:
+        # 沒有成本不更新 last_hourly，下一分鐘繼續嘗試
+        _ad_scheduler_store["last_hourly"] = 0
         return
 
     item_map = _fetch_listings_map()
@@ -8499,6 +8551,7 @@ def run_hourly_budget_task():
             skip += 1
 
     _ad_scheduler_store["last_hourly"] = now_ts
+    threading.Thread(target=_write_schedule_state, daemon=True).start()
     if ok > 0 or fail > 0:
         now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
         _ad_log(f"=== [{now_str}] 每小時排程完成 | 預算加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
@@ -9079,6 +9132,12 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[成本備份] 從 Sheets 恢復失敗: {e}")
     threading.Thread(target=_restore_cost_from_sheets, daemon=True).start()
+
+    # 啟動時從 Sheets 讀排程狀態（Railway 重啟後繼承上次的執行時間）
+    def _restore_schedule_state():
+        time.sleep(8)  # 等成本讀完
+        _read_schedule_state()
+    threading.Thread(target=_restore_schedule_state, daemon=True).start()
 
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=ad_scheduler_thread, daemon=True).start()  # 廣告自動排程
