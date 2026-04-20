@@ -8795,6 +8795,63 @@ def superman_glasses_profit_snapshot_read():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
+@app.route("/api/superman-glasses/schedule-lock", methods=["POST", "OPTIONS"])
+def superman_glasses_schedule_lock():
+    """排程鎖：避免多台電腦同時執行"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        data = request.get_json(force=True)
+        task = data.get("task", "hourly")
+        action = data.get("action", "acquire")
+        lock_key = f"lock_{task}"
+        lock_ttl = 300  # 5分鐘自動解鎖（防止當機卡死）
+
+        if action == "acquire":
+            lock = _ad_scheduler_store.get(lock_key)
+            now_ts = time.time()
+            if lock and now_ts - lock < lock_ttl:
+                resp = jsonify({"ok": False, "msg": "鎖定中"})
+            else:
+                _ad_scheduler_store[lock_key] = now_ts
+                resp = jsonify({"ok": True, "msg": "取得鎖"})
+        else:  # release
+            _ad_scheduler_store.pop(lock_key, None)
+            resp = jsonify({"ok": True, "msg": "釋放鎖"})
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/ext-log", methods=["POST", "OPTIONS"])
+def superman_glasses_ext_log():
+    """接收 Extension 回傳的廣告排程執行歷程"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        data = request.get_json(force=True)
+        msg = data.get("msg", "")
+        suggestion = data.get("suggestion", "")
+        if msg:
+            _ad_log(msg, write_sheet=True)
+            # 直接加入 sheet_queue
+            import re
+            ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+            shop_m = re.search(r"\[([^\]]+)\]", msg)
+            shop = shop_m.group(1) if shop_m else ""
+            _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+        resp = jsonify({"ok": True})
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
 @app.route("/api/superman-glasses/debug-hourly", methods=["POST", "GET"])
 def superman_glasses_debug_hourly():
     """診斷：逐步測試每小時排程的每個步驟"""
