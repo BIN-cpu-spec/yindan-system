@@ -7970,11 +7970,22 @@ def _ad_log(msg, write_sheet=False):
     if "主圖建議" in msg:       suggestion = "建議更換主圖或優化標題以提升點擊率"
     elif "商品頁建議" in msg:   suggestion = "建議優化商品頁圖片/描述以提升轉化率"
     elif "爆款結束" in msg:     suggestion = "爆款結束，ROAS逐步恢復中，請觀察"
-    elif "ROAS ✅" in msg:      suggestion = "ROAS 已自動調整至合理水位"
+    elif "ROAS ✅" in msg:
+        if "→" in msg:
+            parts = msg.split("→")
+            try:
+                old_r = float(parts[0].split()[-1])
+                new_r = float(parts[1].split()[0])
+                suggestion = f"ROAS {'調降' if new_r < old_r else '調升'}至合理水位"
+            except:
+                suggestion = "ROAS 已自動調整至合理水位"
+        else:
+            suggestion = "ROAS 已自動調整至合理水位"
     elif "暫停 ✅" in msg and "毛利" in msg:  suggestion = "毛利不足，建議提高售價或降低成本"
     elif "暫停 ✅" in msg and "ROAS" in msg:  suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
     elif "重啟 ✅" in msg:      suggestion = "廣告已重啟，請觀察7天ROAS表現"
-    elif "預算 ✅" in msg:      suggestion = "廣告達標，預算自動加碼30%"
+    elif "預算 ✅" in msg and "降回85" in msg: suggestion = "廣告表現差，預算止損降回最低85 TWD"
+    elif "預算 ✅" in msg:      suggestion = "廣告達標且預算用盡，自動加碼30%"
     elif "爆款" in msg:         suggestion = "爆款廣告，ROAS下調擴大曝光"
     elif "空燒警告" in msg:     suggestion = "近期有好轉跡象，繼續觀察7天"
     elif "庫存不足" in msg:     suggestion = "盡快補貨，補貨後廣告自動重啟"
@@ -8220,7 +8231,7 @@ def run_daily_ad_tasks():
         # ── 毛利<=45% 自動暫停 ──
         if target_roas is None:
             if _edit_ad(cid, ad_type, shop_id, 2):
-                _ad_log(f"暫停 ✅ {name} 毛利{margin:.0f}%<=45% 不投廣告")
+                _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:12]}] {name} 毛利{margin:.0f}%<=45% 不投廣告")
                 pause_ok += 1
             else:
                 pause_fail += 1
@@ -8232,7 +8243,7 @@ def run_daily_ad_tasks():
         if current_roas > target_roas and abs(target_roas - current_roas) > 0.05:
             # 目前ROAS高於目標 → 直接調降到正確值
             if _edit_ad(cid, ad_type, shop_id, 11, target_roas):
-                _ad_log(f"ROAS ✅ {name} {current_roas}→{target_roas}")
+                _ad_log(f"ROAS ✅ [{ad.get('shopName','')[:12]}] {name} {current_roas}→{target_roas} (毛利{margin:.0f}%)")
                 roas_ok += 1
             else:
                 roas_fail += 1
