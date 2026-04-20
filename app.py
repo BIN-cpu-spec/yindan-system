@@ -7938,11 +7938,10 @@ _ad_scheduler_store = {
 }
 
 def _ad_log(msg, write_sheet=False):
-    """記錄廣告排程執行日誌，重要操作同時寫入 Google Sheets"""
+    """記錄廣告排程執行日誌，重要操作加入寫入佇列"""
     ts = datetime.now().strftime("%m/%d %H:%M")
     ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     entry = {"time": ts, "msg": msg}
-    # Cookie/成本等系統訊息不顯示在日誌面板
     skip_display = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if not skip_display:
         _ad_scheduler_store["log"].insert(0, entry)
@@ -7950,60 +7949,53 @@ def _ad_log(msg, write_sheet=False):
             _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
     print(f"[廣告排程] {entry}")
 
-    # 重要操作寫入 Google Sheets（ROAS調整/暫停/加碼/爆款）
-    # 只記錄真正重要的操作，Cookie/成本等系統訊息不寫進 Sheets
     important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "重啟 ✅", "重啟 ❌", "庫存不足", "=== 開始", "=== 完成"])
     skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if skip or (not important and not write_sheet):
+        return
+
+    # 加入批次佇列，不立即寫 Sheets
+    import re
+    shop_m = re.search(r"\[([^\]]+)\]", msg)
+    shop = shop_m.group(1) if shop_m else ""
+    suggestion = ""
+    if "ROAS ✅" in msg:        suggestion = "ROAS 已自動調整至合理水位"
+    elif "暫停 ✅" in msg and "毛利" in msg:  suggestion = "毛利不足，建議提高售價或降低成本"
+    elif "暫停 ✅" in msg and "ROAS" in msg:  suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
+    elif "重啟 ✅" in msg:      suggestion = "廣告已重啟，請觀察7天ROAS表現"
+    elif "預算 ✅" in msg:      suggestion = "廣告達標，預算自動加碼30%"
+    elif "爆款" in msg:         suggestion = "爆款廣告，ROAS下調擴大曝光"
+    elif "空燒警告" in msg:     suggestion = "近期有好轉跡象，繼續觀察7天"
+    elif "庫存不足" in msg:     suggestion = "盡快補貨，補貨後廣告自動重啟"
+    _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+
+def _flush_ad_log_to_sheets():
+    """把佇列中的日誌一次批次寫入 Sheets"""
+    rows = _ad_scheduler_store.pop("sheet_queue", [])
+    if not rows:
         return
     try:
         sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
         if not sheet_id:
             return
         client, err = get_sheets_client()
-        if err: return
-        # 取得或建立「🚀 廣告戰情室」分頁
+        if err:
+            print(f"[廣告排程] Sheets 連線失敗: {err}")
+            return
         try:
             ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
-            # 確認第一列是標題
             first_row = ws.row_values(1)
             if not first_row or first_row[0] != "時間":
-                ws.clear()
-                ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
+                ws.insert_row(["時間", "店鋪", "動作", "修改建議"], 1, value_input_option="RAW")
         except Exception:
             sh = client.open_by_key(sheet_id)
             try:
                 ws = sh.worksheet("🚀 廣告戰情室")
-                ws.clear()
-            except:
+            except Exception:
                 ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=4)
-            ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
-        # 四欄格式：時間/店鋪/動作/修改建議
-        import re
-        # 解析店鋪
-        shop_m = re.search(r"\[([^\]]+)\]", msg)
-        shop = shop_m.group(1) if shop_m else ""
-        # 產生修改建議
-        suggestion = ""
-        if "ROAS ✅" in msg:
-            suggestion = "ROAS 已自動調整至合理水位"
-        elif "暫停 ✅" in msg and "毛利" in msg:
-            suggestion = "毛利不足，建議提高售價或降低成本"
-        elif "暫停 ✅" in msg and "ROAS" in msg:
-            suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
-        elif "重啟 ✅" in msg:
-            suggestion = "廣告已重啟，請觀察7天ROAS表現"
-        elif "預算 ✅" in msg:
-            suggestion = "廣告達標，預算自動加碼30%"
-        elif "爆款" in msg:
-            suggestion = "爆款廣告，ROAS下調擴大曝光"
-        elif "空燒警告" in msg:
-            suggestion = "近期有好轉跡象，繼續觀察7天"
-        elif "庫存不足" in msg:
-            suggestion = "盡快補貨，補貨後廣告自動重啟"
-        elif "=== 完成" in msg:
-            suggestion = "排程執行完畢，詳見各筆記錄"
-        ws.append_row([ts_full, shop, msg, suggestion], value_input_option="RAW")
+                ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
+        ws.append_rows(rows, value_input_option="RAW")
+        print(f"[廣告排程] 寫入 Sheets {len(rows)} 筆")
     except Exception as e:
         print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
 
@@ -8169,7 +8161,9 @@ def _calc_margin(item, cost_map):
 
 def run_daily_ad_tasks():
     """每日廣告任務：ROAS調整 + 爆款降ROAS + 空燒暫停"""
-    today = datetime.now().strftime("%Y-%m-%d")
+    from datetime import timezone, timedelta
+    tw_tz = timezone(timedelta(hours=8))
+    today = datetime.now(tw_tz).strftime("%Y-%m-%d")  # 台灣時間日期
     if _ad_scheduler_store["last_daily"] == today:
         return  # 今天已跑過
 
@@ -8373,6 +8367,7 @@ def run_daily_ad_tasks():
     _ad_scheduler_store["last_daily"] = today
     now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
     _ad_log(f"=== [{now_str}] 每日排程完成 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款 {boom_ok}筆✅ | 暫停 {pause_ok}筆✅ | 重啟 {restart_ok}筆✅ ===", write_sheet=True)
+    _flush_ad_log_to_sheets()  # 批次寫入 Sheets
 
 def run_hourly_budget_task():
     """每小時預算任務：ROAS達標且使用率≥90%→加30%"""
@@ -8425,6 +8420,7 @@ def run_hourly_budget_task():
     if ok > 0 or fail > 0:
         now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
         _ad_log(f"=== [{now_str}] 每小時排程完成 | 預算加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
+        _flush_ad_log_to_sheets()  # 批次寫入 Sheets
     else:
         _ad_log(f"--- 預算任務檢查完成，本次無符合加碼條件 ({skip}筆檢查)")
 
@@ -8433,9 +8429,12 @@ def ad_scheduler_thread():
     time.sleep(30)  # 啟動後等30秒再開始
     while True:
         try:
-            now = datetime.now()
-            # 每天9點跑每日任務
-            if now.hour == 9:
+            # 用 UTC+8 台灣時間判斷
+            from datetime import timezone, timedelta
+            tw_tz = timezone(timedelta(hours=8))
+            now_tw = datetime.now(tw_tz)
+            # 每天台灣時間9點跑每日任務
+            if now_tw.hour == 9:
                 run_daily_ad_tasks()
             # 每小時跑預算任務
             run_hourly_budget_task()
@@ -8993,6 +8992,7 @@ if __name__ == "__main__":
                 _cost_store["map"] = cost_map
                 _cost_store["count"] = len(cost_map)
                 _cost_store["ts"] = int(time.time() * 1000)
+                _ad_scheduler_store["cost_count"] = len(cost_map)
                 print(f"[成本備份] 從 Sheets 恢復 {len(cost_map)} 筆成本資料")
         except Exception as e:
             print(f"[成本備份] 從 Sheets 恢復失敗: {e}")
