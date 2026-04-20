@@ -8813,11 +8813,12 @@ def superman_glasses_schedule_lock():
         if action == "acquire":
             lock = _ad_scheduler_store.get(lock_key)
             now_ts = time.time()
+            last_hourly = _ad_scheduler_store.get("last_hourly") or 0
             if lock and now_ts - lock < lock_ttl:
-                resp = jsonify({"ok": False, "msg": "鎖定中"})
+                resp = jsonify({"ok": False, "msg": "鎖定中", "last_hourly": last_hourly})
             else:
                 _ad_scheduler_store[lock_key] = now_ts
-                resp = jsonify({"ok": True, "msg": "取得鎖"})
+                resp = jsonify({"ok": True, "msg": "取得鎖", "last_hourly": last_hourly})
         else:  # release
             _ad_scheduler_store.pop(lock_key, None)
             resp = jsonify({"ok": True, "msg": "釋放鎖"})
@@ -8839,13 +8840,13 @@ def superman_glasses_ext_log():
         msg = data.get("msg", "")
         suggestion = data.get("suggestion", "")
         if msg:
-            _ad_log(msg, write_sheet=True)
-            # 直接加入 sheet_queue
             import re
             ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
             shop_m = re.search(r"\[([^\]]+)\]", msg)
             shop = shop_m.group(1) if shop_m else ""
             _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+            # 立刻 flush 寫入 Sheets
+            threading.Thread(target=_flush_ad_log_to_sheets, daemon=True).start()
         resp = jsonify({"ok": True})
     except Exception as e:
         resp = jsonify({"ok": False, "msg": str(e)})
