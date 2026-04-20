@@ -8772,6 +8772,43 @@ def superman_glasses_profit_snapshot_read():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
+@app.route("/api/superman-glasses/debug-hourly", methods=["POST", "GET"])
+def superman_glasses_debug_hourly():
+    """診斷：逐步測試每小時排程的每個步驟"""
+    steps = []
+    try:
+        # 步驟1：成本
+        cost_map = _get_cost_map()
+        steps.append(f"成本: {len(cost_map)} 筆")
+
+        # 步驟2：Cookie
+        cookie = _ad_scheduler_store.get("bs_cookie") or ""
+        steps.append(f"Cookie: {'有' if cookie else '無'} 長度{len(cookie)}")
+
+        # 步驟3：抓商品
+        item_map = _fetch_listings_map()
+        steps.append(f"在線商品: {len(item_map)} 筆")
+
+        # 步驟4：抓廣告
+        ads = _fetch_ads_range()
+        steps.append(f"廣告: {len(ads)} 筆")
+
+        # 步驟5：成本能匹配的廣告
+        matched = 0
+        for ad in ads[:10]:
+            item = item_map.get(ad.get("itemId"))
+            if item:
+                margin = _calc_margin(item, cost_map)
+                if margin: matched += 1
+        steps.append(f"前10筆廣告中有成本: {matched} 筆")
+
+        resp = jsonify({"ok": True, "steps": steps})
+    except Exception as e:
+        import traceback
+        resp = jsonify({"ok": False, "steps": steps, "error": str(e), "trace": traceback.format_exc()[-500:]})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
 @app.route("/api/superman-glasses/ad-run-now", methods=["POST"])
 def superman_glasses_ad_run_now():
     """手動觸發執行（測試用）"""
