@@ -8779,9 +8779,13 @@ def superman_glasses_ad_run_now():
     def run():
         if task in ("daily", "all"):
             _ad_scheduler_store["last_daily"] = None  # 強制重跑
+            # 確保成本有讀回
+            _get_cost_map()
             run_daily_ad_tasks()
         if task in ("budget", "all"):
             _ad_scheduler_store["last_hourly"] = 0  # 強制重跑
+            # 確保成本有讀回
+            _get_cost_map()
             run_hourly_budget_task()
     threading.Thread(target=run, daemon=True).start()
     resp = jsonify({"ok": True, "msg": f"已觸發 {task} 任務"})
