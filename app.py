@@ -8800,6 +8800,44 @@ _cost_store = {
     "uploader": ""  # 上傳者 IP
 }
 
+# ── 模組載入時自動從 Sheets 讀回成本和排程狀態（gunicorn 也會執行）──
+def _auto_restore_on_startup():
+    """Railway 啟動/重啟後，自動從 Sheets 讀回成本和排程狀態"""
+    import threading, time
+    def _do_restore():
+        time.sleep(5)
+        # 1. 讀成本
+        try:
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if sheet_id:
+                client, err = get_sheets_client()
+                if not err:
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                    rows = ws.get_all_values()
+                    if len(rows) > 1:
+                        cost_map = {}
+                        for row in rows[1:]:
+                            if len(row) >= 2 and row[0] and row[1]:
+                                try: cost_map[row[0]] = float(row[1])
+                                except: pass
+                        if cost_map:
+                            _cost_store["map"] = cost_map
+                            _cost_store["count"] = len(cost_map)
+                            _cost_store["ts"] = int(time.time() * 1000)
+                            _ad_scheduler_store["cost_count"] = len(cost_map)
+                            print(f"[啟動] 從 Sheets 讀回 {len(cost_map)} 筆成本")
+        except Exception as e:
+            print(f"[啟動] 讀成本失敗: {e}")
+        time.sleep(3)
+        # 2. 讀排程狀態
+        try:
+            _read_schedule_state()
+        except Exception as e:
+            print(f"[啟動] 讀排程狀態失敗: {e}")
+    threading.Thread(target=_do_restore, daemon=True).start()
+
+_auto_restore_on_startup()
+
 @app.route("/api/superman-glasses/restore-cost", methods=["POST"])
 def superman_glasses_restore_cost():
     """手動觸發從 Google Sheets 讀回成本資料"""
