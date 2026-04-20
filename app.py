@@ -8786,12 +8786,27 @@ def superman_glasses_debug_hourly():
         steps.append(f"Cookie: {'有' if cookie else '無'} 長度{len(cookie)}")
 
         # 步驟3：抓商品
-        item_map = _fetch_listings_map()
-        steps.append(f"在線商品: {len(item_map)} 筆")
+        try:
+            item_map = _fetch_listings_map()
+            steps.append(f"在線商品: {len(item_map)} 筆")
+        except Exception as e2:
+            steps.append(f"在線商品錯誤: {str(e2)[:200]}")
+            item_map = {}
 
         # 步驟4：抓廣告
-        ads = _fetch_ads_range()
-        steps.append(f"廣告: {len(ads)} 筆")
+        try:
+            ads = _fetch_ads_range()
+            steps.append(f"廣告: {len(ads)} 筆")
+        except Exception as e3:
+            steps.append(f"廣告錯誤: {str(e3)[:200]}")
+            ads = []
+        
+        # 步驟4.5：直接測試 BigSeller API
+        try:
+            test = _bigseller_api("/api/v1/product/listing/shopee/active.json?pageNo=1&pageSize=1&status=active&shopeeStatus=live")
+            steps.append(f"BigSeller API測試: code={test.get('code')} msg={str(test.get('msg',''))[:50]}")
+        except Exception as e4:
+            steps.append(f"BigSeller API錯誤: {str(e4)[:200]}")
 
         # 步驟5：成本能匹配的廣告
         matched = 0
