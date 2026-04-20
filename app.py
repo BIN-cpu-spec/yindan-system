@@ -8240,12 +8240,12 @@ def _calc_margin(item, cost_map):
         count += 1
     return total / count if count > 0 else None
 
-def run_daily_ad_tasks():
+def run_daily_ad_tasks(force=False):
     """每日廣告任務：ROAS調整 + 爆款降ROAS + 空燒暫停"""
     from datetime import timezone, timedelta
     tw_tz = timezone(timedelta(hours=8))
     today = datetime.now(tw_tz).strftime("%Y-%m-%d")  # 台灣時間日期
-    if _ad_scheduler_store["last_daily"] == today:
+    if not force and _ad_scheduler_store["last_daily"] == today:
         return  # 今天已跑過
 
     _ad_log("=== 開始每日廣告任務 ===")
@@ -8482,11 +8482,11 @@ def run_daily_ad_tasks():
     _ad_log(f"=== [{now_str}] 每日排程完成 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款 {boom_ok}筆✅ | 暫停 {pause_ok}筆✅ | 重啟 {restart_ok}筆✅ ===", write_sheet=True)
     _flush_ad_log_to_sheets()  # 批次寫入 Sheets
 
-def run_hourly_budget_task():
+def run_hourly_budget_task(force=False):
     """每小時預算任務：ROAS達標且使用率≥90%→加30%"""
     now_ts = time.time()
     last = _ad_scheduler_store.get("last_hourly") or 0
-    if now_ts - last < 3600:
+    if not force and now_ts - last < 3600:
         return  # 未滿1小時
 
     _ad_log("--- 開始每小時預算任務 ---")
@@ -8778,15 +8778,11 @@ def superman_glasses_ad_run_now():
     task = request.get_json(force=True).get("task", "all")
     def run():
         if task in ("daily", "all"):
-            # 確保成本有讀回
-            _get_cost_map()
-            _ad_scheduler_store["last_daily"] = None  # 強制重跑（在讀成本後設）
-            run_daily_ad_tasks()
+            _get_cost_map()  # 確保成本有讀回
+            run_daily_ad_tasks(force=True)  # 強制執行，跳過時間判斷
         if task in ("budget", "all"):
-            # 確保成本有讀回
-            _get_cost_map()
-            _ad_scheduler_store["last_hourly"] = 0  # 強制重跑（在讀成本後設）
-            run_hourly_budget_task()
+            _get_cost_map()  # 確保成本有讀回
+            run_hourly_budget_task(force=True)  # 強制執行，跳過時間判斷
     threading.Thread(target=run, daemon=True).start()
     resp = jsonify({"ok": True, "msg": f"已觸發 {task} 任務"})
     resp.headers['Access-Control-Allow-Origin'] = '*'
