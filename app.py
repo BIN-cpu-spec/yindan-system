@@ -7629,10 +7629,18 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         if (!item) { noItemId++; continue; }
 
         let marginTotal = 0, marginCount = 0;
+        // SKU格式容錯：-01 ↔ -001
+        const findCost = (sku) => {
+          if (costMap[sku] != null) return costMap[sku];
+          const padded = sku.replace(/-(\d{1,2})$/, (_, n) => '-' + n.padStart(3, '0'));
+          if (costMap[padded] != null) return costMap[padded];
+          const trimmed = sku.replace(/-0+(\d+)$/, '-$1');
+          if (costMap[trimmed] != null) return costMap[trimmed];
+          return null;
+        };
         for (const sku of item.skus) {
-          const cost = costMap[sku];
+          const cost = findCost(sku);
           if (cost == null || cost <= 0) continue;
-          // 優先用該 SKU 自己的售價，沒有才用商品統一售價
           const price = (item.skuPriceMap && item.skuPriceMap[sku]) || item.price || 0;
           if (price <= 0) continue;
           marginTotal += ((price - cost) / price) * 100;
@@ -8148,10 +8156,22 @@ def _calc_margin(item, cost_map):
     count = 0
     sku_price_map = item.get("sku_price_map", {})
     default_price = item.get("price", 0)
+
+    def _find_cost(sku):
+        """SKU 格式容錯：-01 ↔ -001 互相嘗試"""
+        if sku in cost_map: return cost_map[sku]
+        import re
+        # PDD032-01 → PDD032-001
+        padded = re.sub(r'-(\d{1,2})$', lambda m: '-' + m.group(1).zfill(3), sku)
+        if padded in cost_map: return cost_map[padded]
+        # PDD032-001 → PDD032-01
+        trimmed = re.sub(r'-0+(\d+)$', r'-\1', sku)
+        if trimmed in cost_map: return cost_map[trimmed]
+        return None
+
     for sku in item.get("skus", []):
-        cost = cost_map.get(sku)
+        cost = _find_cost(sku)
         if not cost or cost <= 0: continue
-        # 優先用該 SKU 自己的售價
         price = sku_price_map.get(sku) or default_price
         if price <= 0: continue
         margin = (price - cost) / price * 100
@@ -8204,8 +8224,10 @@ def run_daily_ad_tasks():
             time.sleep(0.3)
             continue
 
-        # ── ROAS 調整 ──
-        if abs(target_roas - current_roas) > 0.05:
+        # ── ROAS 調整（初始設定）──
+        # 注意：若目前 ROAS 低於目標（可能是爆款降低），不在此處調整，交給爆款邏輯判斷
+        if current_roas > target_roas and abs(target_roas - current_roas) > 0.05:
+            # 目前ROAS高於目標 → 直接調降到正確值
             if _edit_ad(cid, ad_type, shop_id, 11, target_roas):
                 _ad_log(f"ROAS ✅ {name} {current_roas}→{target_roas}")
                 roas_ok += 1
@@ -8213,30 +8235,46 @@ def run_daily_ad_tasks():
                 roas_fail += 1
             time.sleep(0.3)
 
-        # ── 爆款降 ROAS（觸發門檻：實際ROAS > 目標×200%，且花費>500TWD，考慮40%保本線）──
+        # ── 爆款降 ROAS / 爆款結束恢復 ROAS ──
         floor_roas = _get_boom_floor_roas(margin)
+        d7  = ads_7d.get(cid)
+        d30 = ads_30d.get(cid)
+        roas_7  = float(d7.get("broadRoi")  or 0) if d7  else 0
+        roas_30 = float(d30.get("broadRoi") or 0) if d30 else 0
+        exp_7   = float(d7.get("expense")   or 0) if d7  else 0
+        exp_30  = float(d30.get("expense")  or 0) if d30 else 0
+
         if floor_roas is not None:
-            d7  = ads_7d.get(cid)
-            d30 = ads_30d.get(cid)
-            roas_7   = float(d7.get("broadRoi")  or 0) if d7  else 0
-            roas_30  = float(d30.get("broadRoi") or 0) if d30 else 0
-            exp_7    = float(d7.get("expense")   or 0) if d7  else 0
-            exp_30   = float(d30.get("expense")  or 0) if d30 else 0
-            boom_roas = None
-            # 條件加嚴：需要200%以上 + 有足夠花費（確認是真爆款）
+            # 爆款觸發：7天ROAS>目標200% 且花費>500
             cond_7  = roas_7  > 0 and exp_7  > 500 and roas_7  > target_roas * 2.0
             cond_30 = roas_30 > 0 and exp_30 > 500 and roas_30 > target_roas * 2.0
+            boom_roas = None
             if cond_7 and cond_30:
                 boom_roas = round(max(current_roas * 0.8, floor_roas), 1)  # 降20%
             elif cond_7:
                 boom_roas = round(max(current_roas * 0.9, floor_roas), 1)  # 降10%
+
             if boom_roas and boom_roas < current_roas:
+                # 爆款：降低 ROAS
                 if _edit_ad(cid, ad_type, shop_id, 11, boom_roas):
-                    _ad_log(f"爆款 ✅ {name} {current_roas}→{boom_roas} (margin {margin:.0f}% floor {floor_roas})")
+                    shop_name = ad.get('shopName','')[:12]
+                    _ad_log(f"爆款 ✅ [{shop_name}] {name} ROAS {current_roas}→{boom_roas} (毛利{margin:.0f}% 下限{floor_roas})")
                     boom_ok += 1
                 else:
                     boom_fail += 1
                 time.sleep(0.3)
+
+            elif current_roas < target_roas:
+                # 爆款結束恢復：目前ROAS低於目標（曾是爆款），但7天表現已不達標
+                # 7天ROAS < 目標×70% → 爆款結束，往上恢復
+                if roas_7 < target_roas * 0.7 or roas_7 == 0:
+                    recover_roas = round(min(current_roas * 1.1, target_roas), 1)  # 每次+10%，上限到初始值
+                    if recover_roas > current_roas and abs(recover_roas - current_roas) > 0.05:
+                        if _edit_ad(cid, ad_type, shop_id, 11, recover_roas):
+                            shop_name = ad.get('shopName','')[:12]
+                            _ad_log(f"爆款結束 ✅ [{shop_name}] {name} ROAS {current_roas}→{recover_roas} (7天{roas_7:.1f}<目標{target_roas}×70%)")
+                            roas_ok += 1
+                        time.sleep(0.3)
 
         # ── 空燒暫停（30天差 且 7天也沒有好轉）──
         d7  = ads_7d.get(cid)
@@ -8399,20 +8437,39 @@ def run_hourly_budget_task():
         if budget <= 0: continue
         usage = expense / budget
 
-        # 條件：實際ROAS >= 目標ROAS + 預算使用率 >= 90%
+        # 條件一：ROAS達標 + 使用率≥90% → 加碼30%
         if actual_roas > 0 and actual_roas >= current_roas and usage >= 0.9:
             new_budget = round(budget * 1.3)
             cid     = ad.get("campaignId")
             ad_type = ad.get("adType")
             shop_id = ad.get("shopId")
             name    = (ad.get("adName") or str(cid))[:20]
-            shop_name = ad.get("shopName") or ad.get("storeName") or str(shop_id)
+            shop_name = (ad.get("shopName") or str(shop_id))[:12]
             if _edit_ad(cid, ad_type, shop_id, 6, new_budget):
                 _ad_log(f"預算 ✅ [{shop_name}] {name} {budget:.0f}→{new_budget} TWD (ROAS {actual_roas:.1f} 用量{usage*100:.0f}%)")
                 ok += 1
             else:
                 fail += 1
             time.sleep(0.3)
+
+        # 條件二：廣告跑差（7天ROAS<目標×70%）且預算>85 → 降回85（止損）
+        # broadRoi/expense 是 API 預設7天數據
+        elif budget > 85 and target_roas is not None:
+            cid = ad.get("campaignId")
+            roas_7h = actual_roas  # API 預設7天
+            exp_7h  = expense
+            # 有花費但表現差 → 降回85
+            if exp_7h > 100 and roas_7h > 0 and roas_7h < target_roas * 0.7:
+                ad_type = ad.get("adType")
+                shop_id = ad.get("shopId")
+                name    = (ad.get("adName") or str(cid))[:20]
+                shop_name = (ad.get("shopName") or str(shop_id))[:12]
+                if _edit_ad(cid, ad_type, shop_id, 6, 85):
+                    _ad_log(f"預算 ✅ [{shop_name}] {name} 降回85 (7天ROAS{roas_7h:.1f}<目標{target_roas}×70%)")
+                    ok += 1
+                time.sleep(0.3)
+            else:
+                skip += 1
         else:
             skip += 1
 
