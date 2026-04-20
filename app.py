@@ -8592,6 +8592,29 @@ def superman_glasses_save_cookie():
         _ad_scheduler_store["bs_cookie"] = cookie
         _ad_scheduler_store["cookie_ts"] = int(time.time())
         _ad_log(f"Cookie 已更新，長度 {len(cookie)}")
+        # 寫入 Sheets 持久化（Railway 重啟後可讀回）
+        def _persist_cookie():
+            try:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                if not sheet_id: return
+                client, err = get_sheets_client()
+                if err: return
+                sh = client.open_by_key(sheet_id)
+                try:
+                    ws = sh.worksheet("⚙️ 排程狀態")
+                except Exception:
+                    ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
+                # 讀現有資料，更新 cookie 行
+                rows = ws.get_all_values()
+                state = {r[0]: i+1 for i, r in enumerate(rows) if r}
+                cookie_row = state.get("bs_cookie")
+                if cookie_row:
+                    ws.update_cell(cookie_row, 2, cookie)
+                else:
+                    ws.append_row(["bs_cookie", cookie], value_input_option="RAW")
+            except Exception as e:
+                print(f"[Cookie] 寫入 Sheets 失敗: {e}")
+        threading.Thread(target=_persist_cookie, daemon=True).start()
         return jsonify({"ok": True, "len": len(cookie)})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
@@ -8877,7 +8900,23 @@ def _auto_restore_on_startup():
         except Exception as e:
             print(f"[啟動] 讀成本失敗: {e}")
         time.sleep(3)
-        # 2. 讀排程狀態
+        # 2. 讀 Cookie
+        try:
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if sheet_id:
+                client2, err2 = get_sheets_client()
+                if not err2:
+                    ws2 = client2.open_by_key(sheet_id).worksheet("⚙️ 排程狀態")
+                    rows2 = ws2.get_all_values()
+                    for row in rows2:
+                        if len(row) >= 2 and row[0] == "bs_cookie" and row[1]:
+                            _ad_scheduler_store["bs_cookie"] = row[1]
+                            _ad_scheduler_store["cookie_ts"] = int(time.time())
+                            print(f"[啟動] Cookie 讀回，長度 {len(row[1])}")
+                            break
+        except Exception as e:
+            print(f"[啟動] 讀 Cookie 失敗: {e}")
+        # 3. 讀排程狀態
         try:
             _read_schedule_state()
         except Exception as e:
