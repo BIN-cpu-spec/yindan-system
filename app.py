@@ -7957,7 +7957,7 @@ def _ad_log(msg, write_sheet=False):
             _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
     print(f"[廣告排程] {entry}")
 
-    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "重啟 ✅", "重啟 ❌", "庫存不足", "=== 開始", "=== 完成"])
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "重啟 ✅", "重啟 ❌", "庫存不足", "主圖建議", "商品頁建議", "爆款結束", "=== 開始", "=== 完成"])
     skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if skip or (not important and not write_sheet):
         return
@@ -7967,7 +7967,10 @@ def _ad_log(msg, write_sheet=False):
     shop_m = re.search(r"\[([^\]]+)\]", msg)
     shop = shop_m.group(1) if shop_m else ""
     suggestion = ""
-    if "ROAS ✅" in msg:        suggestion = "ROAS 已自動調整至合理水位"
+    if "主圖建議" in msg:       suggestion = "建議更換主圖或優化標題以提升點擊率"
+    elif "商品頁建議" in msg:   suggestion = "建議優化商品頁圖片/描述以提升轉化率"
+    elif "爆款結束" in msg:     suggestion = "爆款結束，ROAS逐步恢復中，請觀察"
+    elif "ROAS ✅" in msg:      suggestion = "ROAS 已自動調整至合理水位"
     elif "暫停 ✅" in msg and "毛利" in msg:  suggestion = "毛利不足，建議提高售價或降低成本"
     elif "暫停 ✅" in msg and "ROAS" in msg:  suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
     elif "重啟 ✅" in msg:      suggestion = "廣告已重啟，請觀察7天ROAS表現"
@@ -8311,6 +8314,17 @@ def run_daily_ad_tasks():
             elif cond_long and not cond_recent:
                 # 30天差但7天有好轉，記錄警告但不暫停
                 _ad_log(f"空燒警告 [{ad.get('shopName','')[:10]}] {name} 30天差({roi30:.1f}) 但7天好轉({roi7:.1f}) 觀察中")
+
+        # ── CTR/CR 異常通知（花費>50才有意義）──
+        ad_expense = float(ad.get("expense") or 0)
+        if ad_expense > 50:
+            ctr_v = float(ad.get("ctr") or 0)
+            cr_v  = float(ad.get("cr")  or 0)
+            shop_n = ad.get("shopName","")[:12]
+            if ctr_v > 0 and ctr_v < _ad_benchmark["ctr_avg"] * 0.5:
+                _ad_log(f"⚠️ 主圖建議 [{shop_n}] {name} CTR{ctr_v:.2f}%<均值{_ad_benchmark['ctr_avg']}%×50% 建議換主圖/優化標題")
+            if cr_v > 0 and cr_v < _ad_benchmark["cr_avg"] * 0.5:
+                _ad_log(f"⚠️ 商品頁建議 [{shop_n}] {name} CR{cr_v:.2f}%<均值{_ad_benchmark['cr_avg']}%×50% 建議優化商品頁/圖片")
 
     # ── 重啟符合條件的暫停廣告（毛利>45% 且 有庫存）──────────────────
     restart_ok = restart_skip_margin = restart_skip_stock = 0
