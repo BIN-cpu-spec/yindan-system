@@ -2653,6 +2653,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
+  <a href="/bs-oversize" class="card card-tools">
+    <span class="card-badge badge-ready">&#x1F4CF;</span>
+    <span class="card-icon">&#x1F4CF;</span>
+    <div class="card-title">BS超材分單</div>
+    <div class="card-desc">BigSeller訂單超材分析，自動判斷不可拆單/可拆單（開發中）</div>
+  </a>
 
 
 </div>
@@ -6702,6 +6708,58 @@ def api_warehouse_records():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
+
+# ============================================================
+# BigSeller 超材分單系統
+# ============================================================
+
+@app.route("/bs-oversize")
+@login_required
+def bs_oversize_page():
+    """BS超材分單主頁面"""
+    bs_html = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>BS超材分單 - 超人特工倉</title>
+    <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; min-height: 100vh; color: #fff; }
+    .topbar { background: rgba(255,255,255,.05); height: 56px; padding: 0 32px; 
+              display: flex; align-items: center; gap: 12px; 
+              border-bottom: 1px solid rgba(255,255,255,.08); }
+    .logo { font-size: 16px; font-weight: 700; margin-right: auto; letter-spacing: .5px; }
+    .logo span { color: #f4a100; }
+    .btn-home { color: #aaa; font-size: 12px; text-decoration: none; padding: 6px 12px; 
+                border: 1px solid #333; border-radius: 5px; }
+    .btn-home:hover { border-color: #666; color: #fff; }
+    .content { text-align: center; padding: 80px 20px; }
+    .icon { font-size: 100px; margin-bottom: 30px; opacity: 0.8; }
+    .title { font-size: 28px; margin-bottom: 15px; }
+    .title span { color: #f4a100; }
+    .desc { font-size: 16px; color: #aaa; line-height: 1.8; max-width: 600px; margin: 0 auto 40px; }
+    .status-card { background: rgba(244,161,0,.08); border: 1px solid rgba(244,161,0,.2); 
+                   border-radius: 16px; padding: 30px; max-width: 500px; margin: 0 auto; }
+    .status-card h4 { color: #f4a100; margin-bottom: 15px; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="logo">📏 BS<span>超材分單</span></div>
+        <a href="/" class="btn-home">🏠 返回首頁</a>
+    </div>
+    <div class="content">
+        <div class="icon">📊</div>
+        <div class="title">BigSeller <span>超材分單系統</span></div>
+        <div class="desc">專為 BigSeller 訂單設計的智能超材分析工具，自動判斷不可拆單/可拆單類型。</div>
+        <div class="status-card">
+            <h4>🚧 功能開發中</h4>
+            <p style="color:#ddd;">我們正在開發這個功能，敬請期待！</p>
+        </div>
+    </div>
+</body>
+</html>"""
+    return render_template_string(bs_html)
 
 # ============================================================
 # 超人眼鏡 Chrome Extension API
