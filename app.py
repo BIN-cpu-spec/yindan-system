@@ -7947,8 +7947,11 @@ _ad_scheduler_store = {
 
 def _ad_log(msg, write_sheet=False):
     """記錄廣告排程執行日誌，重要操作加入寫入佇列"""
-    ts = datetime.now().strftime("%m/%d %H:%M")
-    ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    from datetime import timezone, timedelta
+    tw_tz = timezone(timedelta(hours=8))
+    _now_tw = datetime.now(tw_tz)
+    ts = _now_tw.strftime("%m/%d %H:%M")
+    ts_full = _now_tw.strftime("%Y/%m/%d %H:%M:%S")
     entry = {"time": ts, "msg": msg}
     skip_display = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
     if not skip_display:
@@ -8841,7 +8844,9 @@ def superman_glasses_ext_log():
         suggestion = data.get("suggestion", "")
         if msg:
             import re
-            ts_full = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+            from datetime import timezone, timedelta
+            _tw = timezone(timedelta(hours=8))
+            ts_full = datetime.now(_tw).strftime("%Y/%m/%d %H:%M:%S")
             shop_m = re.search(r"\[([^\]]+)\]", msg)
             shop = shop_m.group(1) if shop_m else ""
             _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
