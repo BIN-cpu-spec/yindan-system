@@ -1,7 +1,10 @@
-Flask==2.3.3
-pandas==2.0.3
-openpyxl==3.1.2
-gspread==5.10.0
-requests==2.31.0
-Pillow==10.0.0
-python-dateutil==2.8.2
+1. 進入：https://github.com/你的帳號/yindan-system
+2. 點擊 "Add file" → "Create new file"  
+3. 檔名：requirements.txt
+4. 內容：
+   Flask==2.3.3
+   pandas==2.0.3
+   openpyxl==3.1.2
+   gspread==5.10.0
+   requests==2.31.0
+5. Commit new file
