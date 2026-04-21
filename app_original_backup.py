@@ -2653,13 +2653,57 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
-  <a href="/warehouse" class="card card-tools">
-    <span class="card-badge badge-ready">&#x2713; 上線中</span>
-    <span class="card-icon">&#x1F4E6;</span>
-    <div class="card-title">貨架入庫</div>
-    <div class="card-desc">掃描貨號入庫到重型貨架，記錄每個儲位的商品，一秒查詢貨號在哪個儲位。</div>
-  </a>
 
+
+</div>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x1F4CA; 廣告調整日誌</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div style="max-width:960px;margin:0 auto 24px;padding:0 24px">
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;gap:16px;align-items:center">
+        <span id="log-daily-ts" style="font-size:12px;color:#555"></span>
+        <span id="log-hourly-ts" style="font-size:12px;color:#555"></span>
+      </div>
+      <button onclick="loadAdLog()" style="background:rgba(29,158,117,.2);border:1px solid rgba(29,158,117,.4);color:#5DCAA5;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
+    </div>
+    <div id="ad-log-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto">
+      <div style="text-align:center;color:#555;font-size:13px;padding:20px">載入中...</div>
+    </div>
+  </div>
+</div>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x26A0; 利潤警示（低毛利廣告）</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div style="max-width:960px;margin:0 auto 24px;padding:0 24px">
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <span style="font-size:12px;color:#555">依店鋪分類顯示，資料來自超人眼鏡最近一次廣告分析</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="shop-filter" onchange="_selectedShop=this.value;renderLowMargin()" style="background:#1a2a24;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
+          <option value="all">全部店鋪</option>
+        </select>
+        <select id="margin-threshold" onchange="renderLowMargin()" style="background:#1a2a24;color:#f4a100;border:1px solid rgba(244,161,0,.4);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
+          <option value="40">嚴重 &lt;40%</option>
+          <option value="45" selected>警告 &lt;45%</option>
+          <option value="55">關注 &lt;55%</option>
+        </select>
+        <button onclick="loadLowMargin()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
+      </div>
+    </div>
+    <div id="low-margin-list">
+      <div style="text-align:center;color:#555;font-size:13px;padding:20px">載入中...</div>
+    </div>
+  </div>
 </div>
 
 <div class="sg-divider">
@@ -2692,6 +2736,116 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <a href="/api/superman-glasses/download" class="dl-btn">&#x2B07; 下載超人眼鏡</a>
   </div>
 </div>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x1F4CA; 廣告自動化儀表板</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div style="max-width:960px;margin:0 auto;padding:0 24px 80px;display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+  <!-- 廣告排程狀態 -->
+  <div class="card" style="border-color:rgba(29,158,117,.35)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#5DCAA5;">&#x23F0; 排程狀態</div>
+      <button onclick="loadAdLog()" style="background:#0F6E56;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">重新整理</button>
+    </div>
+    <div id="sched-status" style="font-size:13px;color:#888;line-height:2;">載入中...</div>
+  </div>
+
+  <!-- 利潤警示 -->
+  <div class="card" style="border-color:rgba(244,161,0,.35)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#f4a100;">&#x26A0; 利潤警示</div>
+      <span style="font-size:11px;color:#666;">毛利 &lt; 40%</span>
+    </div>
+    <div id="profit-warn" style="font-size:13px;color:#888;line-height:1.8;">載入中...</div>
+  </div>
+
+  <!-- 執行日誌（跨兩欄） -->
+  <div class="card" style="grid-column:1/-1;border-color:rgba(29,158,117,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#5DCAA5;">&#x1F4DC; 執行日誌</div>
+      <div id="log-meta" style="font-size:11px;color:#555;"></div>
+    </div>
+    <div id="ad-log-list" style="font-family:monospace;font-size:12px;color:#5DCAA5;background:#021c18;border-radius:8px;padding:12px;max-height:260px;overflow-y:auto;line-height:1.8;">載入中...</div>
+  </div>
+
+</div>
+
+<script>
+async function loadAdLog() {
+  try {
+    const r = await fetch('/api/superman-glasses/ad-log');
+    const d = await r.json();
+
+    // 排程狀態
+    const cookieOk = d.cookie_ok;
+    const costCount = d.cost_count || 0;
+    const lastDaily = d.last_daily || '尚未執行';
+    const lastHourly = d.last_hourly ? new Date(d.last_hourly * 1000).toLocaleString('zh-TW') : '尚未執行';
+    document.getElementById('sched-status').innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+        <span style="color:${cookieOk ? '#5DCAA5' : '#e57373'};">${cookieOk ? '&#x2705;' : '&#x274C;'}</span>
+        <span>BigSeller Cookie：${cookieOk ? '有效' : '未同步，請開啟 BigSeller'}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+        <span style="color:${costCount > 0 ? '#5DCAA5' : '#e57373'};">${costCount > 0 ? '&#x2705;' : '&#x26A0;'}</span>
+        <span>成本資料：${costCount > 0 ? costCount + ' 個 SKU' : '尚無資料，請開啟庫存清單'}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+        <span>&#x1F4C5;</span>
+        <span>每日 ROAS 排程：${lastDaily}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span>&#x23F1;</span>
+        <span>每小時預算排程：${lastHourly}</span>
+      </div>
+    `;
+
+    // 執行日誌（log 是 [{msg, time}] 格式）
+    const logs = d.log || [];
+    if (logs.length === 0) {
+      document.getElementById('ad-log-list').innerHTML = '<span style="color:#555;">尚無執行記錄</span>';
+    } else {
+      document.getElementById('ad-log-list').innerHTML = logs.map(l => {
+        const msg = typeof l === 'string' ? l : (l.msg || '');
+        const time = typeof l === 'object' ? l.time : '';
+        let color = '#5DCAA5';
+        if (msg.includes('失敗') || msg.includes('ERROR') || msg.includes('錯誤')) color = '#e57373';
+        else if (msg.includes('爆款') || msg.includes('加碼') || msg.includes('暫停')) color = '#f4a100';
+        else if (msg.startsWith('---')) color = '#444';
+        return `<div style="display:flex;gap:8px;color:${color};border-bottom:1px solid rgba(255,255,255,.04);padding:3px 0;font-size:12px;font-family:monospace">
+          <span style="color:#444;white-space:nowrap">${time}</span>
+          <span>${msg}</span>
+        </div>`;
+      }).join('');
+    }
+    document.getElementById('log-meta').textContent = `共 ${logs.length} 筆`;
+
+    // 利潤警示
+    const pwarn = document.getElementById('profit-warn');
+    const warnLogs = logs.filter(l => {
+      const msg = typeof l === 'string' ? l : (l.msg || '');
+      return msg.includes('低毛利') || msg.includes('暫停') || msg.includes('毛利');
+    });
+    if (warnLogs.length > 0) {
+      pwarn.innerHTML = warnLogs.slice(0, 10).map(l => {
+        const msg = typeof l === 'string' ? l : (l.msg || '');
+        return `<div style="color:#f4a100;border-bottom:1px solid rgba(255,255,255,.04);padding:2px 0;font-size:12px">${msg}</div>`;
+      }).join('');
+    } else {
+      pwarn.innerHTML = '<span style="color:#555;">目前無低毛利警示</span>';
+    }
+  } catch(e) {
+    document.getElementById('sched-status').innerHTML = '<span style="color:#e57373;">無法連線</span>';
+    document.getElementById('ad-log-list').innerHTML = '<span style="color:#e57373;">載入失敗：' + e.message + '</span>';
+  }
+}
+loadAdLog();
+setInterval(loadAdLog, 60000); // 每分鐘自動更新
+</script>
 
 <script>
 (function(){
@@ -2769,6 +2923,182 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   function loop(){draw();requestAnimationFrame(loop);}
   loop();
 })();
+
+// ── 廣告日誌 ──
+async function loadAdLog() {
+  const el = document.getElementById('ad-log-list');
+  try {
+    // 優先從 Google Sheets 讀（永久記錄），失敗才讀記憶體
+    let logs = [];
+    let source = '';
+    let total = 0;
+    try {
+      const rs = await fetch('/api/superman-glasses/ad-log-sheet');
+      const ds = await rs.json();
+      if (ds.ok && ds.logs && ds.logs.length > 0) {
+        logs = ds.logs;
+        total = ds.total || logs.length;
+        source = `Google Sheets（共 ${total} 筆）`;
+      }
+    } catch(e2) {}
+    // Sheets 沒資料時 fallback 到記憶體
+    if (!logs.length) {
+      const r = await fetch('/api/superman-glasses/ad-log');
+      const d = await r.json();
+      const daily = d.last_daily ? '每日任務：' + d.last_daily : '每日任務：尚未執行';
+      const hourly = d.last_hourly ? '預算任務：' + new Date(d.last_hourly*1000).toLocaleString('zh-TW') : '預算任務：尚未執行';
+      document.getElementById('log-daily-ts').textContent = daily;
+      document.getElementById('log-hourly-ts').textContent = hourly;
+      logs = (d.log || []).map(l => ({ time: l.time, type: '', msg: l.msg || l }));
+      source = '記憶體（重啟後清空）';
+    }
+
+    if (!logs.length) {
+      el.innerHTML = '<div style="text-align:center;color:#555;font-size:13px;padding:20px">尚無執行記錄</div>';
+      return;
+    }
+
+    const colorMap = {
+      'ROAS調整': '#5DCAA5', '爆款': '#f4a100', '暫停': '#E24B4A', '低毛利': '#E24B4A',
+      '預算加碼': '#85B7EB', '空燒': '#E24B4A', '排程': '#888', '完成': '#5DCAA5'
+    };
+    const typeColorMap = {
+      'ROAS調整': '#5DCAA5', '爆款降ROAS': '#f4a100', '廣告暫停': '#E24B4A',
+      '低毛利暫停': '#E24B4A', '預算加碼': '#85B7EB', '空燒警告': '#BA7517',
+      '排程開始': '#555', '其他': '#888'
+    };
+
+    el.innerHTML = \`<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
+      資料來源：\${source}
+    </div>\` + logs.map(log => {
+      const msg = log.msg || '';
+      const type = log.type || '';
+      const time = log.time || '';
+      let color = typeColorMap[type] || '#888';
+      if (!type) {
+        for (const [k,v] of Object.entries(colorMap)) {
+          if (msg.includes(k)) { color = v; break; }
+        }
+      }
+      const typeBadge = type ? \`<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:\${color};margin-right:6px;flex-shrink:0">\${type}</span>\` : '';
+      return \`<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
+        <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">\${time}</span>
+        \${typeBadge}
+        <span style="color:\${color};line-height:1.5;word-break:break-all">\${msg}</span>
+      </div>\`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
+  }
+}
+
+// ── 低利潤警示 ──
+// 店鋪篩選狀態
+let _lowMarginData = [];
+let _selectedShop = 'all';
+
+async function loadLowMargin() {
+  const el = document.getElementById('low-margin-list');
+  el.innerHTML = '<div style="text-align:center;color:#555;padding:20px">載入中...</div>';
+  try {
+    // 從 Google Sheets 讀取最新快照
+    const r = await fetch('/api/superman-glasses/ad-log-sheet');
+    const d = await r.json();
+    // 從利潤監控室讀取
+    const r2 = await fetch('/api/superman-glasses/profit-snapshot-read');
+    const d2 = await r2.json();
+
+    if (d2.ok && d2.rows && d2.rows.length > 0) {
+      _lowMarginData = d2.rows;
+    } else {
+      // fallback 到記憶體
+      const r3 = await fetch('/api/superman-glasses/low-margin');
+      const d3 = await r3.json();
+      _lowMarginData = [];
+      (d3.shops || []).forEach(shop => {
+        shop.items.forEach(item => {
+          _lowMarginData.push({ shop: shop.shopName, name: item.name, margin: item.margin, roas: item.roas, targetRoas: item.targetRoas, status: item.status });
+        });
+      });
+    }
+    renderLowMargin();
+  } catch(e) {
+    el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
+  }
+}
+
+function renderLowMargin() {
+  const el = document.getElementById('low-margin-list');
+  const shopFilter = document.getElementById('shop-filter');
+
+  // 過濾門檻
+  const threshold = parseInt(document.getElementById('margin-threshold')?.value || '45');
+
+  // 篩選資料
+  let filtered = _lowMarginData.filter(r => {
+    const m = parseFloat(r.margin || r[10] || 0);
+    return m > 0 && m <= threshold;
+  });
+  if (_selectedShop !== 'all') {
+    filtered = filtered.filter(r => (r.shop || r[2] || '') === _selectedShop);
+  }
+
+  // 更新店鋪篩選選單
+  const shops = [...new Set(_lowMarginData.map(r => r.shop || r[2] || '').filter(Boolean))];
+  if (shopFilter) {
+    const cur = shopFilter.value;
+    shopFilter.innerHTML = '<option value="all">全部店鋪</option>' +
+      shops.map(s => `<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
+  }
+
+  if (!filtered.length) {
+    el.innerHTML = '<div style="text-align:center;color:#5DCAA5;font-size:13px;padding:20px">✅ 目前無毛利≤' + threshold + '% 的廣告</div>';
+    return;
+  }
+
+  // 依店鋪分組
+  const byShop = {};
+  filtered.forEach(r => {
+    const shop = r.shop || r[2] || '未知店鋪';
+    const margin = parseFloat(r.margin || r[10] || 0);
+    const name = r.name || r[3] || '';
+    const roas = r.roas || r[5] || '';
+    const targetRoas = r.targetRoas || r[11] || '';
+    const status = r.status || r[12] || '';
+    if (!byShop[shop]) byShop[shop] = [];
+    byShop[shop].push({ name, margin, roas, targetRoas, status });
+  });
+
+  el.innerHTML = Object.entries(byShop).map(([shop, items]) => {
+    const hasBelow40 = items.some(i => i.margin <= 40);
+    const shopColor = hasBelow40 ? '#E24B4A' : '#f4a100';
+    return \`<div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:500;color:\${shopColor};margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(244,161,0,.2);display:flex;justify-content:space-between">
+        <span>&#x1F3EA; \${shop}</span>
+        <span style="font-size:11px;color:#888">\${items.length} 筆 | 毛利≤\${threshold}%</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        \${items.map(item => {
+          const isBelow40 = item.margin <= 40;
+          const bg = isBelow40 ? 'rgba(232,75,74,.1)' : 'rgba(244,161,0,.06)';
+          const border = isBelow40 ? '1px solid rgba(232,75,74,.3)' : '1px solid rgba(244,161,0,.2)';
+          const mColor = isBelow40 ? '#E24B4A' : '#f4a100';
+          const tag = isBelow40 ? '&#x1F6D1; 嚴重' : '&#x26A0; 警告';
+          return \`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:\${bg};border-radius:6px;border:\${border}">
+            <span style="font-size:11px;color:\${mColor};flex-shrink:0">\${tag}</span>
+            <span style="font-size:12px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${item.name}</span>
+            <span style="font-size:12px;color:\${mColor};font-weight:500;flex-shrink:0">毛利 \${item.margin.toFixed(1)}%</span>
+            <span style="font-size:11px;color:#888;flex-shrink:0">ROAS \${item.roas}/\${item.targetRoas}</span>
+          </div>\`;
+        }).join('')}
+      </div>
+    </div>\`;
+  }).join('');
+}
+
+// 頁面載入時自動抓取
+loadAdLog();
+loadLowMargin();
 </script>
 
 </body></html>"""
@@ -4480,7 +4810,11 @@ function processFile(file) {
       if(d.db_err) {
         showMsg('&#9888; 無法連接商品報關資料庫：' + d.db_err + '，所有商品將顯示為查無資料', false);
       } else {
-        showMsg('&#10003; 資料庫載入成功（共 ' + d.db_count + ' 筆商品）', true);
+        var stat = '&#10003; 資料庫載入成功（共 ' + d.db_count + ' 筆商品）';
+        if(typeof d.matched !== 'undefined') {
+          stat += '，本次對應成功 ' + d.matched + ' 筆，未對應 ' + d.unmatched + ' 筆';
+        }
+        showMsg(stat, d.unmatched === 0);
       }
       allRows = d.rows;
       customsDb = d.db;
@@ -5021,7 +5355,9 @@ def api_customs_upload():
             "高": "hei",
             "材積": "volume", "材积": "volume",
             "總重量": "total_weight", "总重量": "total_weight",
-            "SKU": "sku", "SKU編碼": "sku",
+            "SKU": "sku", "SKU編碼": "sku", "sku": "sku", "SKU碼": "sku",
+            "SKU 編碼": "sku", "料號": "sku", "商品編號": "sku", "商品SKU": "sku",
+            "貨號": "sku",
         }
 
         header_row = None
@@ -5049,8 +5385,57 @@ def api_customs_upload():
                 return cv(row_r, c)
             return ""
 
-        # SKU 欄：優先用偵測到的，否則預設第18欄
-        sku_col = col_map.get("sku", 18)
+        # ★ SKU 欄位智慧偵測：
+        # 1. 先看標題列有沒有對應到 SKU
+        # 2. 若沒有，掃描標題列之外的欄位（通常 SKU 沒有標題），
+        #    找出「最多非空值、且內容看起來像 SKU（含字母+數字）」的欄位
+        def looks_like_sku(v):
+            """判斷字串是否像 SKU：含英文字母 + 數字，且長度合理"""
+            if not v or len(v) < 3 or len(v) > 50:
+                return False
+            has_alpha = any(c.isalpha() for c in v)
+            has_digit = any(c.isdigit() for c in v)
+            # 純數字也可能是 SKU（例如條碼 8858891600715），這邊放寬
+            if has_digit and len(v) >= 8:
+                return True
+            return has_alpha and has_digit
+
+        if "sku" in col_map:
+            sku_col = col_map["sku"]
+            log(f"SKU 欄位：第 {sku_col} 欄（由標題列偵測）")
+        else:
+            # 自動偵測：掃描所有欄位，找最像 SKU 的那一欄
+            # 條件：非標題列欄位 + 至少 3 筆非空值 + 70% 以上像 SKU
+            max_col = ws_xls.ncols if use_xls else ws.max_column
+            best_col = None
+            best_score = 0
+            all_candidates = []
+            for c in range(1, max_col + 1):
+                # 跳過已經對應到其他欄位的 col
+                if c in col_map.values():
+                    continue
+                sku_like_count = 0
+                total_nonempty = 0
+                for r in range(data_start, min(data_start + 30, max_row + 1)):
+                    v = cv(r, c)
+                    if v:
+                        total_nonempty += 1
+                        if looks_like_sku(v):
+                            sku_like_count += 1
+                # 提高門檻：至少 3 筆資料且 70% 以上像 SKU
+                if total_nonempty >= 3 and sku_like_count >= total_nonempty * 0.7:
+                    all_candidates.append((c, sku_like_count, total_nonempty))
+                    if sku_like_count > best_score:
+                        best_score = sku_like_count
+                        best_col = c
+            if best_col:
+                sku_col = best_col
+                log(f"SKU 欄位：第 {sku_col} 欄（自動偵測，{best_score} 個像 SKU 的值）")
+                if len(all_candidates) > 1:
+                    log(f"⚠️ 注意：有多個候選欄位 {all_candidates}，已選分數最高者")
+            else:
+                sku_col = 19  # 最後備援：第 19 欄（歐樂範本 SKU 位置）
+                log(f"⚠️ 標題列無 SKU 欄位，自動偵測失敗，fallback 到第 {sku_col} 欄")
 
         # 載入資料庫
         db, db_err = load_customs_db()
@@ -5061,12 +5446,15 @@ def api_customs_upload():
 
         rows = []
         errors = []
+        matched = 0
+        unmatched = 0
         for r in range(data_start, max_row+1):
             sku = cv(r, sku_col)
             if not sku:
                 if not has_data_in_row(r):
                     continue
-                errors.append(f"第 {r} 列缺少 SKU（第{sku_col}欄）")
+                errors.append(f"第 {r} 列缺少 SKU（讀第{sku_col}欄）")
+                continue  # ★ 修正：空 SKU 不該建 row
 
             total_pcs = get_col(r, "total_pcs", 8)
             price_db  = str(db.get(sku, {}).get("price", "")) if sku in db else ""
@@ -5077,18 +5465,23 @@ def api_customs_upload():
 
             # C 模式：尺寸一律用資料庫的，資料庫沒有才 fallback 到 XLS
             db_size = db.get(sku, {}).get("product_size", "") if sku in db else ""
+            in_db = sku in db
+            if in_db:
+                matched += 1
+            else:
+                unmatched += 1
             row = {
                 "sku":               sku,
                 "type":              get_col(r, "type", 1),
                 "product_size_orig": db_size if db_size else get_col(r, "product_size_orig", 2),
-                "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if sku in db else get_col(r, "material", 3),
-                "customs_name":      db.get(sku, {}).get("customs_name", "") if sku in db else "",
+                "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if in_db else get_col(r, "material", 3),
+                "customs_name":      db.get(sku, {}).get("customs_name", "") if in_db else "",
                 "box_no":            get_col(r, "box_no", 5),
                 "pcs_per":           get_col(r, "pcs_per", 6),
                 "qty":               get_col(r, "qty", 7),
                 "total_pcs":         total_pcs,
-                "unit":              db.get(sku, {}).get("unit", get_col(r, "unit", 9)) if sku in db else get_col(r, "unit", 9),
-                "price":             price_db if sku in db else get_col(r, "price", 10),
+                "unit":              db.get(sku, {}).get("unit", get_col(r, "unit", 9)) if in_db else get_col(r, "unit", 9),
+                "price":             price_db if in_db else get_col(r, "price", 10),
                 "total_rmb":         str(total_rmb) if total_rmb != "" else get_col(r, "total_rmb", 11),
                 "gross_weight":      get_col(r, "gross_weight", 12),
                 "len":               get_col(r, "len", 13),
@@ -5096,15 +5489,20 @@ def api_customs_upload():
                 "hei":               get_col(r, "hei", 15),
                 "volume":            get_col(r, "volume", 16),
                 "total_weight":      get_col(r, "total_weight", 17),
-                "image":             db.get(sku, {}).get("image", "") if sku in db else "",
-                "status":            "ok" if sku in db else ("missing" if sku else "no_sku"),
+                "image":             db.get(sku, {}).get("image", "") if in_db else "",
+                "status":            "ok" if in_db else "missing",
             }
             rows.append(row)
+
+        log(f"上傳處理完成：共 {len(rows)} 列，對應成功 {matched} 筆，未對應 {unmatched} 筆")
+        if unmatched > 0 and len(db) > 0:
+            unmatched_samples = [r["sku"] for r in rows if r["status"] == "missing"][:5]
+            log(f"未對應 SKU 範例：{unmatched_samples}")
 
         if errors:
             log(f"欄位警告：{errors}")
 
-        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors, "db_count": len(db), "db_err": db_err})
+        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors, "db_count": len(db), "db_err": db_err, "matched": matched, "unmatched": unmatched})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"讀取失敗：{e}"})
 
@@ -6527,6 +6925,51 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           try { localStorage.setItem(COST_KEY, JSON.stringify({ ts: Date.now(), map })); } catch(e) {}
           progress.textContent = '上傳成功！';
           status.textContent = `完成！${count} 個 SKU 已同步給全公司 ✓`;
+
+          // 寫入 📊 利潤監控室（抓在線產品售價合併計算毛利）
+          (async () => {
+            try {
+              const profitRows = [];
+              // 抓在線產品取得售價
+              let page = 1, totalPage = 1;
+              while (page <= totalPage && page <= 10) {
+                const r = await fetch(`/api/v1/product/listing/shopee/active.json?orderBy=create_time&desc=true&inquireType=0&shopeeStatus=live&status=active&pageNo=${page}&pageSize=50`);
+                const d = await r.json();
+                if (d.code !== 0) break;
+                totalPage = d.data?.page?.totalPage || 1;
+                (d.data?.page?.rows || []).forEach(row => {
+                  if (row.hasVariation && row.variations?.length) {
+                    row.variations.forEach(v => {
+                      const sku = v.variationSku;
+                      const price = v.price || v.originalPrice || 0;
+                      const cost = map[sku];
+                      if (!sku || !cost || !price) return;
+                      const margin = ((price - cost) / price * 100).toFixed(1);
+                      profitRows.push({ sku, price, cost, margin });
+                    });
+                  } else {
+                    const sku = row.itemSku;
+                    const price = row.price || row.originalPrice || 0;
+                    const cost = map[sku];
+                    if (!sku || !cost || !price) return;
+                    const margin = ((price - cost) / price * 100).toFixed(1);
+                    profitRows.push({ sku, price, cost, margin });
+                  }
+                });
+                page++;
+              }
+              if (profitRows.length > 0) {
+                await fetch(RAILWAY_URL + '/api/superman-glasses/product-profit', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ rows: profitRows })
+                });
+                console.log('[超人眼鏡] 商品利潤已寫入 📊 利潤監控室，共', profitRows.length, '筆');
+              }
+            } catch(e) {
+              console.warn('[超人眼鏡] 商品利潤寫入失敗:', e.message);
+            }
+          })();
         } else {
           progress.textContent = '上傳失敗';
           status.textContent = `掃描完成但上傳失敗：${uploadResult.msg}`;
@@ -6548,8 +6991,12 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const saved = localStorage.getItem(COST_KEY);
         const lastTs = saved ? JSON.parse(saved).ts : 0;
         const nextReload = lastTs + AUTO_RELOAD_TTL - Date.now();
-        const delay = Math.max(nextReload, 60 * 1000); // 最少等1分鐘
+        // 至少等6小時才重整，避免掃描途中被打斷
+        const delay = Math.max(nextReload, AUTO_RELOAD_TTL);
         setTimeout(() => {
+          // 掃描進行中不重整
+          const scanBtn = document.getElementById('sg-scanner-btn');
+          if (scanBtn && scanBtn.disabled) return;
           if (location.pathname.includes('/inventory/index')) {
             location.reload();
           }
@@ -7001,21 +7448,31 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
 
   // 根據毛利率決定目標 ROAS
   function getTargetRoas(margin) {
-    if (margin == null) return null;
-    if (margin > 70)  return 3.5;   // 暴利/新品開發區
-    if (margin > 55)  return 5.0;   // 高價值進攻區
-    if (margin > 45)  return 7.0;   // 主力獲利區
-    if (margin > 40)  return 12.0;  // 高防禦保本區
-    return 20.0;                    // 極致防禦區
+    // <=45% -> null（自動暫停）
+    // >45%  -> 廣告費後毛利保持45%反推，進位到0.5，最高20
+    if (margin == null || margin <= 45) return null;
+    const floor = 1.0 / ((margin / 100) - 0.45);
+    return Math.min(Math.ceil(floor * 2) / 2.0, 20.0);
+  }
+
+  function getFloorRoas(margin) {
+    // 爆款下限：死守廣告費後毛利40%，進位到0.5
+    // 只有初始ROAS > 爆款下限時才有空間（51%以上）
+    if (margin == null || margin <= 40) return null;
+    const target = getTargetRoas(margin);
+    if (target == null) return null;
+    const floor = Math.ceil((1.0 / ((margin / 100) - 0.40)) * 2) / 2.0;
+    if (floor >= target) return null;  // 無爆款空間
+    return floor;
   }
 
   function getRoasZoneName(margin) {
     if (margin == null) return '無成本資料';
-    if (margin > 70)  return '🚀 暴利/新品開發區';
-    if (margin > 55)  return '💎 高價值進攻區';
-    if (margin > 45)  return '🟢 主力獲利區';
-    if (margin > 40)  return '🔴 高防禦保本區';
-    return '💀 極致防禦區';
+    if (margin <= 45) return `💀 毛利${margin.toFixed(1)}% ≤45% 自動暫停`;
+    const roas = getTargetRoas(margin);
+    const roasStr = roas != null ? roas.toFixed(1) : '-';
+    const floor = margin > 40 ? (1.0 / ((margin / 100) - 0.40)).toFixed(1) : '-';
+    return `毛利${margin.toFixed(1)}% | 初始${roasStr} | 下限${floor}`;
   }
 
   // 呼叫 BigSeller API 修改廣告
@@ -7036,6 +7493,27 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   }
 
   // 抓所有廣告（分頁）
+  async function fetchPausedAds() {
+    // 抓所有已暫停的 autoRoas 廣告
+    const ads = [];
+    let page = 1;
+    while (true) {
+      const r = await fetch('/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageNo: page, pageSize: 100 })
+      });
+      const d = await r.json();
+      if (d.code !== 0) break;
+      (d.data?.rows || []).forEach(ad => {
+        if (ad.biddingMethod === 'autoRoas' && ad.campaignStatus === 'paused') ads.push(ad);
+      });
+      if (page >= (d.data?.totalPage || 1)) break;
+      page++;
+    }
+    return ads;
+  }
+
   async function fetchAllAds() {
     const ads = [];
     let page = 1, totalPage = 1;
@@ -7145,6 +7623,7 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     let _budgetPlan = [];
     let _pausePlan = [];
     let _warnList  = [];
+    let _restartPlan = [];
 
     async function analyzeAds() {
       summary.innerHTML = '&#x23F3; 載入成本資料...';
@@ -7178,16 +7657,23 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         listTotal = d.data?.page?.totalPage || 1;
         (d.data?.page?.rows || []).forEach(row => {
           if (row.hasVariation && row.variations?.length) {
-            const avgPrice = row.variations.reduce((s,v)=>s+(v.price||v.originalPrice||0),0) / row.variations.length;
+            // 每個 SKU 保留自己的售價，用 skuPriceMap 對應
+            const skuPriceMap = {};
+            row.variations.forEach(v => {
+              if (v.variationSku) skuPriceMap[v.variationSku] = v.price || v.originalPrice || 0;
+            });
             const skus = row.variations.map(v => v.variationSku).filter(Boolean);
-            itemIdMap[row.itemId] = { skus, price: avgPrice };
+            const stock = row.variations.reduce((s,v) => s + (v.stock||0), 0);
+            itemIdMap[row.itemId] = { skus, skuPriceMap, price: 0, stock };
           } else {
-            itemIdMap[row.itemId] = { skus: [row.itemSku], price: row.price || row.originalPrice || 0 };
+            itemIdMap[row.itemId] = { skus: [row.itemSku], skuPriceMap: {}, price: row.price || row.originalPrice || 0, stock: row.stock || 0 };
           }
         });
         listPage++;
         if (listPage % 5 === 0) summary.innerHTML = `&#x23F3; 載入在線商品 ${listPage}/${listTotal} 頁...`;
       }
+      // 存到 window 讓重啟邏輯使用
+      window._sgItemIdMap = itemIdMap;
 
       summary.innerHTML = `&#x23F3; 分析廣告...`;
 
@@ -7203,21 +7689,32 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       _budgetPlan = [];
       _pausePlan = [];
       _warnList  = [];
+      _restartPlan = [];
       let noMargin = 0, alreadyCorrect = 0, noItemId = 0;
 
       for (const ad of ads) {
         const item = itemIdMap[ad.itemId];
         if (!item) { noItemId++; continue; }
 
-        let bestMargin = null;
+        let marginTotal = 0, marginCount = 0;
+        // SKU格式容錯：-01 ↔ -001
+        const findCost = (sku) => {
+          if (costMap[sku] != null) return costMap[sku];
+          const padded = sku.replace(/-(\d{1,2})$/, (_, n) => '-' + n.padStart(3, '0'));
+          if (costMap[padded] != null) return costMap[padded];
+          const trimmed = sku.replace(/-0+(\d+)$/, '-$1');
+          if (costMap[trimmed] != null) return costMap[trimmed];
+          return null;
+        };
         for (const sku of item.skus) {
-          const cost = costMap[sku];
+          const cost = findCost(sku);
           if (cost == null || cost <= 0) continue;
-          const price = item.price;
+          const price = (item.skuPriceMap && item.skuPriceMap[sku]) || item.price || 0;
           if (price <= 0) continue;
-          const margin = ((price - cost) / price) * 100;
-          if (bestMargin === null || margin > bestMargin) bestMargin = margin;
+          marginTotal += ((price - cost) / price) * 100;
+          marginCount++;
         }
+        const bestMargin = marginCount > 0 ? marginTotal / marginCount : null;
 
         if (bestMargin === null) { noMargin++; continue; }
 
@@ -7229,6 +7726,12 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         const budgetUsage = budget > 0 ? expense / budget : 0;
         const adName      = ad.adName?.substring(0, 20) || String(ad.campaignId);
 
+        // 毛利<=45% 加入暫停計劃
+        if (targetRoas === null) {
+          _pausePlan.push({ ad, name: adName, reason: `毛利${bestMargin.toFixed(1)}%<=45%`, isLowMargin: true });
+          continue;
+        }
+
         // ROAS 計劃（今天未調過才加）
         if (!roasDoneToday && Math.abs(targetRoas - currentRoas) > 0.05) {
           _adPlan.push({ ad, currentRoas, targetRoas, margin: bestMargin.toFixed(1), zone: getRoasZoneName(bestMargin), name: adName });
@@ -7237,9 +7740,8 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         }
 
         // 預算加碼計劃
-        // 條件：今天此廣告未加過 + 實際ROAS >= 目標ROAS + 預算使用率 >= 90%
-        if (!budgetDoneToday.has(ad.campaignId) &&
-            actualRoas > 0 &&
+        // 條件：實際ROAS >= 目標ROAS + 預算使用率 >= 90%（每次達標都加碼）
+        if (actualRoas > 0 &&
             actualRoas >= currentRoas &&
             budgetUsage >= 0.9 &&
             budget > 0) {
@@ -7257,9 +7759,40 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         }
       }
 
+      // 5. 分析已暫停廣告 → 重啟計劃
+      summary.innerHTML = `&#x23F3; 分析暫停廣告...`;
+      const pausedAds = await fetchPausedAds();
+      const burnedIds = new Set(_pausePlan.map(p => p.ad.campaignId));
+      const pausedItemMap = window._sgItemIdMap || itemIdMap;
+      for (const pad of pausedAds) {
+        const item = pausedItemMap[pad.itemId];
+        if (!item) continue;
+        let mTotal = 0, mCount = 0;
+        for (const sku of (item.skus||[])) {
+          const cost = costMap[sku];
+          const price = (item.skuPriceMap&&item.skuPriceMap[sku]) || item.price || 0;
+          if (!cost || !price) continue;
+          mTotal += ((price-cost)/price*100); mCount++;
+        }
+        const margin = mCount > 0 ? mTotal/mCount : null;
+        if (margin === null) continue;
+        const targetRoas = getTargetRoas(margin);
+        const padName = (pad.adName||'').substring(0,20);
+        const shopName = (pad.shopName||'').substring(0,20);
+        // 今天剛被空燒暫停 → 不重啟
+        if (burnedIds.has(pad.campaignId)) continue;
+        // 毛利<=45% → 繼續暫停
+        if (targetRoas === null || margin <= 45) continue;
+        // 庫存 > 0 → 加入重啟計劃
+        const stock = item.stock || 0;
+        if (stock <= 0) continue;
+        _restartPlan.push({ ad: pad, name: padName, shopName, margin: margin.toFixed(1), targetRoas, stock });
+      }
+
       const roasNeed   = _adPlan.length;
       const budgetNeed = _budgetPlan.length;
       const pauseNeed  = _pausePlan.length;
+      const restartNeed = _restartPlan.length;
       const warnNeed   = _warnList.length;
       const up   = _adPlan.filter(p => p.targetRoas > p.currentRoas).length;
       const down  = _adPlan.filter(p => p.targetRoas < p.currentRoas).length;
@@ -7279,15 +7812,71 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         ${roasLine}<br>
         <b>預算加碼（達標且用量&#x2265;90%）：</b>${budgetNeed} 筆<br>
         <b style="color:#E24B4A">&#x1F6D1; 30天空燒暫停：</b>${pauseNeed} 筆<br>
+        <b style="color:#5DCAA5">&#x1F504; 符合重啟條件：</b>${restartNeed} 筆<br>
         ${warnHtml}
         <b>無成本/無在線產品：</b>${noMargin + noItemId} 筆<br>
         <b>進行中廣告（autoRoas）：</b>${ads.length} 筆
       `;
 
-      const totalAction = (roasDoneToday ? 0 : roasNeed) + budgetNeed + pauseNeed;
+      // ── 分析完成後自動上傳利潤快照到 Google Sheets ──
+      (async () => {
+        try {
+          const costRaw = localStorage.getItem('sg_ext_cost_cache') || localStorage.getItem('sg_cost_cache');
+          const costMap = costRaw ? JSON.parse(costRaw).map || {} : {};
+          const snapRows = [];
+          for (const ad of ads) {
+            const item = itemIdMap[ad.itemId];
+            if (!item) continue;
+            // 計算毛利
+            let mTotal = 0, mCount = 0;
+            for (const sku of (item.skus||[])) {
+              const cost = costMap[sku];
+              const price = (item.skuPriceMap&&item.skuPriceMap[sku]) || item.price || 0;
+              if (!cost || !price) continue;
+              mTotal += ((price-cost)/price*100);
+              mCount++;
+            }
+            const margin = mCount > 0 ? (mTotal/mCount).toFixed(1) : '';
+            const targetRoas = margin ? getTargetRoas(parseFloat(margin)) : '';
+            const d7 = ads7d[ad.campaignId];
+            const d30 = ads30d[ad.campaignId];
+            // 判斷狀態
+            let status = ad.campaignStatus === 'ongoing' ? '進行中' : '已暫停';
+            let note = '';
+            if (margin && parseFloat(margin) <= 45) { status = '低毛利暫停'; note = `毛利${margin}%≤45%`; }
+            else if (d30 && d30.expense > 500 && d30.broadRoi > 0 && d30.broadRoi < (parseFloat(ad.roasTarget)||0) * 0.5) { note = '30天空燒'; }
+            snapRows.push({
+              shopName: ad.shopName || '',
+              adName: (ad.adName||'').substring(0,40),
+              itemId: ad.itemId,
+              currentRoas: ad.roasTarget,
+              actualRoas7: d7 ? parseFloat(d7.broadRoi||0).toFixed(1) : '',
+              expense7: d7 ? parseFloat(d7.expense||0).toFixed(0) : '',
+              expense30: d30 ? parseFloat(d30.expense||0).toFixed(0) : '',
+              budget: ad.campaignBudget,
+              margin,
+              targetRoas,
+              status,
+              note
+            });
+          }
+          if (snapRows.length > 0) {
+            await fetch('https://yindan-system-production.up.railway.app/api/superman-glasses/profit-snapshot', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ rows: snapRows })
+            });
+            console.log('[超人眼鏡] 利潤快照已寫入 Google Sheets，共', snapRows.length, '筆');
+          }
+        } catch(e) {
+          console.warn('[超人眼鏡] 快照寫入失敗:', e.message);
+        }
+      })();
+
+      const totalAction = (roasDoneToday ? 0 : roasNeed) + budgetNeed + pauseNeed + restartNeed;
       if (totalAction > 0) {
         runBtn.disabled = false;
-        runBtn.textContent = `⚡ 執行（ROAS×${roasDoneToday?0:roasNeed} 預算×${budgetNeed} 暫停×${pauseNeed}）`;
+        runBtn.textContent = `⚡ 執行（ROAS×${roasDoneToday?0:roasNeed} 預算×${budgetNeed} 暫停×${pauseNeed} 重啟×${restartNeed}）`;
       } else {
         runBtn.disabled = true;
         runBtn.textContent = '✅ 今日無需調整';
@@ -7295,10 +7884,11 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     }
 
     runBtn.onclick = async () => {
-      const roasNeed   = roasDoneToday ? 0 : _adPlan.length;
-      const budgetNeed = _budgetPlan.length;
-      const pauseNeed  = _pausePlan.length;
-      if (roasNeed + budgetNeed + pauseNeed === 0) return;
+      const roasNeed    = roasDoneToday ? 0 : _adPlan.length;
+      const budgetNeed  = _budgetPlan.length;
+      const pauseNeed   = _pausePlan.length;
+      const restartNeed = (_restartPlan || []).length;
+      if (roasNeed + budgetNeed + pauseNeed + restartNeed === 0) return;
 
       runBtn.disabled = true;
       log.style.display = 'block';
@@ -7324,17 +7914,15 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       // ── 執行預算加碼 ──
       if (_budgetPlan.length > 0) {
         log.innerHTML += `<span style="color:#BA7517">── 預算加碼 ──</span>\n`;
-        const budgetDoneArr = [...budgetDoneToday];
         for (let i = 0; i < _budgetPlan.length; i++) {
           const { ad, currentBudget, newBudget, actualRoas, budgetUsage, name } = _budgetPlan[i];
-          runBtn.textContent = `預算 ${i+1}/${_budgetPlan.length}...`;
+          runBtn.textContent = `加碼 ${i+1}/${_budgetPlan.length}...`;
           const success = await editAd(ad.campaignId, ad.adType, ad.shopId, 6, newBudget);
-          log.innerHTML += `${success?'&#x2705;':'&#x274C;'} ${name} | ${currentBudget}&#x2192;${newBudget} TWD | ROAS ${actualRoas} | 用量 ${budgetUsage}\n`;
+          log.innerHTML += `${success?'&#x1F4B0;':'&#x274C;'} ${name} | ${currentBudget}→${newBudget} TWD | ROAS ${actualRoas} | 使用率${budgetUsage}\n`;
           log.scrollTop = log.scrollHeight;
-          if (success) { ok++; budgetDoneArr.push(ad.campaignId); } else fail++;
+          if (success) ok++; else fail++;
           await new Promise(r => setTimeout(r, 300));
         }
-        localStorage.setItem(BUDGET_DONE_KEY, JSON.stringify(budgetDoneArr));
       }
 
       // ── 暫停空燒廣告（30天未達標）──
@@ -7348,6 +7936,25 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
           log.scrollTop = log.scrollHeight;
           if (success) ok++; else fail++;
           await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      // ── 執行重啟廣告 ──
+      if (_restartPlan.length > 0) {
+        log.innerHTML += `<span style="color:#5DCAA5">── 重啟廣告 ──</span>
+`;
+        for (let i = 0; i < _restartPlan.length; i++) {
+          const { ad, name, shopName, margin, targetRoas, stock } = _restartPlan[i];
+          runBtn.textContent = `重啟 ${i+1}/${_restartPlan.length}...`;
+          // 先啟動
+          const s1 = await editAd(ad.campaignId, ad.adType, ad.shopId, 3, null);  // 3=恢復暫停廣告
+          // 再設定正確 ROAS
+          const s2 = s1 ? await editAd(ad.campaignId, ad.adType, ad.shopId, 11, targetRoas) : false;
+          log.innerHTML += `${s1?'&#x1F504;':'&#x274C;'} [${shopName}] ${name} | 毛利${margin}% 庫存${stock} ROAS→${targetRoas}
+`;
+          log.scrollTop = log.scrollHeight;
+          if (s1) ok++; else fail++;
+          await new Promise(r => setTimeout(r, 400));
         }
       }
 
@@ -7389,23 +7996,180 @@ import io, zipfile
 import requests as _requests
 
 # ── 廣告自動排程存儲 ──────────────────────────────────────────
-_ad_scheduler_store = {
-    "lock": None,           # {"ts": timestamp, "task": "roas/budget"}
-    "last_daily": None,     # 上次執行每日任務的日期 "2026-04-16"
-    "last_hourly": None,    # 上次執行每小時任務的時間戳
-    "log": [],              # 執行記錄（最多100筆）
+# 廣告效果基準（根據實際數據動態更新）
+_ad_benchmark = {
+    "ctr_avg": 2.91,    # 平均點擊率 %
+    "cr_avg": 6.17,     # 平均轉化率 %
+    "cpc_avg": 6.9,     # 平均每次點擊費用 TWD
+    "updated": None     # 最後更新時間
 }
 
-def _ad_log(msg):
-    """記錄廣告排程執行日誌"""
-    ts = datetime.now().strftime("%m/%d %H:%M")
-    entry = f"[{ts}] {msg}"
-    _ad_scheduler_store["log"].insert(0, entry)
-    if len(_ad_scheduler_store["log"]) > 100:
-        _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
+_ad_scheduler_store = {
+    "lock": None,              # {"ts": timestamp, "task": "roas/budget"}
+    "last_daily": None,        # 上次執行每日任務的日期 "2026-04-16"
+    "last_hourly": None,       # 上次執行每小時任務的時間戳
+    "log": [],                 # 執行記錄（最多100筆）
+    "low_margin_shops": [],    # 低利潤廣告（依店鋪分類）
+    "low_margin_ts": 0,        # 上次更新時間
+}
+
+def _ad_log(msg, write_sheet=False):
+    """記錄廣告排程執行日誌，重要操作加入寫入佇列"""
+    from datetime import timezone, timedelta
+    tw_tz = timezone(timedelta(hours=8))
+    _now_tw = datetime.now(tw_tz)
+    ts = _now_tw.strftime("%m/%d %H:%M")
+    ts_full = _now_tw.strftime("%Y/%m/%d %H:%M:%S")
+    entry = {"time": ts, "msg": msg}
+    skip_display = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
+    if not skip_display:
+        _ad_scheduler_store["log"].insert(0, entry)
+        if len(_ad_scheduler_store["log"]) > 100:
+            _ad_scheduler_store["log"] = _ad_scheduler_store["log"][:100]
     print(f"[廣告排程] {entry}")
 
-def _bigseller_api(path, body=None, days=None):
+    important = any(k in msg for k in ["ROAS ✅", "ROAS ❌", "爆款", "暫停 ✅", "暫停 ❌", "加碼 ✅", "加碼 ❌", "預算 ✅", "預算 ❌", "低毛利", "空燒", "重啟 ✅", "重啟 ❌", "庫存不足", "主圖建議", "商品頁建議", "爆款結束", "=== 開始", "=== 完成"])
+    skip = any(k in msg for k in ["Cookie", "成本資料", "排程錯誤"])
+    if skip or (not important and not write_sheet):
+        return
+
+    # 加入批次佇列，不立即寫 Sheets
+    import re
+    shop_m = re.search(r"\[([^\]]+)\]", msg)
+    shop = shop_m.group(1) if shop_m else ""
+    suggestion = ""
+    if "主圖建議" in msg:       suggestion = "建議更換主圖或優化標題以提升點擊率"
+    elif "商品頁建議" in msg:   suggestion = "建議優化商品頁圖片/描述以提升轉化率"
+    elif "爆款結束" in msg:     suggestion = "爆款結束，ROAS逐步恢復中，請觀察"
+    elif "ROAS ✅" in msg:
+        if "→" in msg:
+            parts = msg.split("→")
+            try:
+                old_r = float(parts[0].split()[-1])
+                new_r = float(parts[1].split()[0])
+                suggestion = f"ROAS {'調降' if new_r < old_r else '調升'}至合理水位"
+            except:
+                suggestion = "ROAS 已自動調整至合理水位"
+        else:
+            suggestion = "ROAS 已自動調整至合理水位"
+    elif "暫停 ✅" in msg and "毛利" in msg:  suggestion = "毛利不足，建議提高售價或降低成本"
+    elif "暫停 ✅" in msg and "ROAS" in msg:  suggestion = "30天空燒，建議檢查主圖/標題/商品頁"
+    elif "重啟 ✅" in msg:      suggestion = "廣告已重啟，請觀察7天ROAS表現"
+    elif "預算 ✅" in msg and "降回85" in msg: suggestion = "廣告表現差，預算止損降回最低85 TWD"
+    elif "預算 ✅" in msg:      suggestion = "廣告達標且預算用盡，自動加碼30%"
+    elif "爆款" in msg:         suggestion = "爆款廣告，ROAS下調擴大曝光"
+    elif "空燒警告" in msg:     suggestion = "近期有好轉跡象，繼續觀察7天"
+    elif "庫存不足" in msg:     suggestion = "盡快補貨，補貨後廣告自動重啟"
+    _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+
+def _flush_ad_log_to_sheets():
+    """把佇列中的日誌一次批次寫入 Sheets"""
+    rows = _ad_scheduler_store.pop("sheet_queue", [])
+    if not rows:
+        return
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return
+        client, err = get_sheets_client()
+        if err:
+            print(f"[廣告排程] Sheets 連線失敗: {err}")
+            return
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "時間":
+                ws.insert_row(["時間", "店鋪", "動作", "修改建議"], 1, value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("🚀 廣告戰情室")
+            except Exception:
+                ws = sh.add_worksheet(title="🚀 廣告戰情室", rows=10000, cols=4)
+                ws.append_row(["時間", "店鋪", "動作", "修改建議"], value_input_option="RAW")
+        ws.append_rows(rows, value_input_option="RAW")
+        print(f"[廣告排程] 寫入 Sheets {len(rows)} 筆")
+    except Exception as e:
+        print(f"[廣告排程] 寫入 Sheets 失敗: {e}")
+
+
+def _read_schedule_state():
+    """從 Google Sheets 讀排程狀態（last_daily / last_hourly）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return
+        client, err = get_sheets_client()
+        if err: return
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("⚙️ 排程狀態")
+        except:
+            return
+        rows = ws.get_all_values()
+        state = {row[0]: row[1] for row in rows if len(row) >= 2}
+        if state.get("last_daily"):
+            _ad_scheduler_store["last_daily"] = state["last_daily"]
+        if state.get("last_hourly"):
+            try:
+                _ad_scheduler_store["last_hourly"] = float(state["last_hourly"])
+            except:
+                pass
+        print(f"[排程狀態] 從 Sheets 讀回：last_daily={state.get('last_daily')} last_hourly={state.get('last_hourly','')[:10]}")
+    except Exception as e:
+        print(f"[排程狀態] 讀取失敗: {e}")
+
+def _write_schedule_state():
+    """把排程狀態寫入 Google Sheets（last_daily / last_hourly）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return
+        client, err = get_sheets_client()
+        if err: return
+        sh = client.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("⚙️ 排程狀態")
+        except:
+            ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
+        ws.clear()
+        ws.append_rows([
+            ["last_daily",  _ad_scheduler_store.get("last_daily") or ""],
+            ["last_hourly", str(_ad_scheduler_store.get("last_hourly") or "")],
+            ["updated",     datetime.now().strftime("%Y/%m/%d %H:%M:%S")],
+        ], value_input_option="RAW")
+    except Exception as e:
+        print(f"[排程狀態] 寫入失敗: {e}")
+
+def _get_cost_map():
+    """取得成本資料：優先記憶體，沒有就從 Google Sheets 讀"""
+    cost_map = _cost_store.get("map", {})
+    if cost_map:
+        return cost_map
+    # 記憶體沒有 → 從 Sheets 讀回
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id: return {}
+        client, err = get_sheets_client()
+        if err: return {}
+        ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+        rows = ws.get_all_values()
+        if len(rows) <= 1: return {}
+        cost_map = {}
+        for row in rows[1:]:
+            if len(row) >= 2 and row[0] and row[1]:
+                try: cost_map[row[0]] = float(row[1])
+                except: pass
+        if cost_map:
+            _cost_store["map"] = cost_map
+            _cost_store["count"] = len(cost_map)
+            _cost_store["ts"] = int(time.time() * 1000)
+            _ad_scheduler_store["cost_count"] = len(cost_map)
+            print(f"[排程] 從 Sheets 讀回 {len(cost_map)} 筆成本")
+        return cost_map
+    except Exception as e:
+        print(f"[排程] 從 Sheets 讀成本失敗: {e}")
+        return {}
+
+def _bigseller_api(path, body=None):
     """呼叫 BigSeller API（需要在 Railway 環境中有 cookie）"""
     # Cookie 優先從記憶體（Extension 上傳），其次從環境變數
     cookie = _ad_scheduler_store.get("bs_cookie") or os.environ.get("BIGSELLER_COOKIE", "")
@@ -7429,19 +8193,34 @@ def _bigseller_api(path, body=None, days=None):
         return None
 
 def _get_target_roas(margin):
-    """依毛利率取得目標 ROAS"""
-    if margin > 70:  return 3.5
-    if margin > 55:  return 5.0
-    if margin > 45:  return 7.0
-    if margin > 40:  return 12.0
-    return 20.0
+    """初始 ROAS：所有毛利統一按45%基本標準反推
+    初始 ROAS = 1 / (毛利率 - 0.45)，進位到0.5
+    最高上限 20.0（毛利46~50%會碰到上限）
+    <=45% -> None（自動暫停，不投廣告）
+    """
+    import math
+    if margin is None or margin <= 45:
+        return None   # 自動暫停
+    floor = 1.0 / ((margin / 100.0) - 0.45)
+    target = math.ceil(floor * 2) / 2.0
+    return min(target, 20.0)
 
 def _get_boom_floor_roas(margin):
-    """爆款下限 ROAS：降到下一個區間的目標"""
-    if margin > 70:  return 3.5   # 已是最低，不再降
-    if margin > 55:  return 3.5   # 降到暴利區目標
-    if margin > 45:  return 5.0   # 降到高價值進攻區目標
-    return None  # < 45% 不允許爆款
+    """爆款下限 ROAS：死守廣告費後毛利40%
+    公式：最低ROAS = 1 / (毛利率 - 0.40)，進位到0.5
+    只有初始ROAS > 爆款下限時才有空間觸發（51%以上）
+    """
+    import math
+    if margin is None or margin <= 40:
+        return None
+    target = _get_target_roas(margin)
+    if target is None:
+        return None
+    floor = math.ceil((1.0 / ((margin / 100.0) - 0.40)) * 2) / 2.0
+    # 下限必須低於初始才有意義
+    if floor >= target:
+        return None  # 無爆款空間
+    return floor
 
 def _edit_ad(campaign_id, ad_type, shop_id, edit_action, value=None):
     """修改廣告（ROAS/預算/暫停）"""
@@ -7488,38 +8267,64 @@ def _fetch_listings_map():
         rows = d.get("data", {}).get("page", {}).get("rows", [])
         for row in rows:
             if row.get("hasVariation") and row.get("variations"):
-                avg_price = sum(v.get("price") or v.get("originalPrice") or 0 for v in row["variations"]) / len(row["variations"])
-                skus = [v["variationSku"] for v in row["variations"] if v.get("variationSku")]
-                item_map[row["itemId"]] = {"skus": skus, "price": avg_price}
+                # 每個 SKU 保留自己的售價
+                sku_price_map = {
+                    v["variationSku"]: v.get("price") or v.get("originalPrice") or 0
+                    for v in row["variations"] if v.get("variationSku")
+                }
+                skus = list(sku_price_map.keys())
+                stock = sum(v.get("stock", 0) for v in row["variations"])
+                item_map[row["itemId"]] = {"skus": skus, "sku_price_map": sku_price_map, "price": 0, "stock": stock}
             else:
-                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "price": row.get("price") or row.get("originalPrice") or 0}
+                item_map[row["itemId"]] = {"skus": [row.get("itemSku", "")], "sku_price_map": {}, "price": row.get("price") or row.get("originalPrice") or 0, "stock": row.get("stock", 0)}
         total_page = d.get("data", {}).get("page", {}).get("totalPage", 1)
         if page >= total_page: break
         page += 1
     return item_map
 
 def _calc_margin(item, cost_map):
-    """計算商品最高毛利率"""
-    best = None
+    """計算商品平均毛利率（每個SKU用自己的售價）"""
+    total = 0.0
+    count = 0
+    sku_price_map = item.get("sku_price_map", {})
+    default_price = item.get("price", 0)
+
+    def _find_cost(sku):
+        """SKU 格式容錯：-01 ↔ -001 互相嘗試"""
+        if sku in cost_map: return cost_map[sku]
+        import re
+        # PDD032-01 → PDD032-001
+        padded = re.sub(r'-(\d{1,2})$', lambda m: '-' + m.group(1).zfill(3), sku)
+        if padded in cost_map: return cost_map[padded]
+        # PDD032-001 → PDD032-01
+        trimmed = re.sub(r'-0+(\d+)$', r'-\1', sku)
+        if trimmed in cost_map: return cost_map[trimmed]
+        return None
+
     for sku in item.get("skus", []):
-        cost = cost_map.get(sku)
+        cost = _find_cost(sku)
         if not cost or cost <= 0: continue
-        price = item.get("price", 0)
+        price = sku_price_map.get(sku) or default_price
         if price <= 0: continue
         margin = (price - cost) / price * 100
-        if best is None or margin > best: best = margin
-    return best
+        total += margin
+        count += 1
+    return total / count if count > 0 else None
 
-def run_daily_ad_tasks():
+def run_daily_ad_tasks(force=False):
     """每日廣告任務：ROAS調整 + 爆款降ROAS + 空燒暫停"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    if _ad_scheduler_store["last_daily"] == today:
+    from datetime import timezone, timedelta
+    tw_tz = timezone(timedelta(hours=8))
+    today = datetime.now(tw_tz).strftime("%Y-%m-%d")  # 台灣時間日期
+    if not force and _ad_scheduler_store["last_daily"] == today:
         return  # 今天已跑過
 
     _ad_log("=== 開始每日廣告任務 ===")
-    cost_map = _cost_store.get("map", {})
+    cost_map = _get_cost_map()
     if not cost_map:
-        _ad_log("無成本資料，跳過每日任務")
+        _ad_log("無成本資料（記憶體+Sheets都是空的），跳過每日任務")
+        # 沒有成本不標記今天已跑，明天或成本讀回後繼續嘗試
+        _ad_scheduler_store["last_daily"] = None
         return
 
     item_map   = _fetch_listings_map()
@@ -7528,6 +8333,7 @@ def run_daily_ad_tasks():
     ads_30d    = {a["campaignId"]: a for a in _fetch_ads_range(30)}
 
     roas_ok = roas_fail = boom_ok = boom_fail = pause_ok = pause_fail = 0
+    burned_today = set()  # 今天剛被空燒暫停的廣告，不能重啟
 
     for ad in ads_now:
         item = item_map.get(ad.get("itemId"))
@@ -7542,61 +8348,223 @@ def run_daily_ad_tasks():
         cid      = ad.get("campaignId")
         name     = (ad.get("adName") or str(cid))[:20]
 
-        # ── ROAS 調整 ──
-        if abs(target_roas - current_roas) > 0.05:
+        # ── 毛利<=45% 自動暫停 ──
+        if target_roas is None:
+            if _edit_ad(cid, ad_type, shop_id, 2):
+                _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:12]}] {name} 毛利{margin:.0f}%<=45% 不投廣告")
+                pause_ok += 1
+            else:
+                pause_fail += 1
+            time.sleep(0.3)
+            continue
+
+        # ── ROAS 調整（初始設定）──
+        # 注意：若目前 ROAS 低於目標（可能是爆款降低），不在此處調整，交給爆款邏輯判斷
+        if current_roas > target_roas and abs(target_roas - current_roas) > 0.05:
+            # 目前ROAS高於目標 → 直接調降到正確值
             if _edit_ad(cid, ad_type, shop_id, 11, target_roas):
-                _ad_log(f"ROAS ✅ {name} {current_roas}→{target_roas}")
+                _ad_log(f"ROAS ✅ [{ad.get('shopName','')[:12]}] {name} {current_roas}→{target_roas} (毛利{margin:.0f}%)")
                 roas_ok += 1
             else:
                 roas_fail += 1
             time.sleep(0.3)
 
-        # ── 爆款降 ROAS ──
+        # ── 爆款降 ROAS / 爆款結束恢復 ROAS ──
         floor_roas = _get_boom_floor_roas(margin)
+        d7  = ads_7d.get(cid)
+        d30 = ads_30d.get(cid)
+        roas_7  = float(d7.get("broadRoi")  or 0) if d7  else 0
+        roas_30 = float(d30.get("broadRoi") or 0) if d30 else 0
+        exp_7   = float(d7.get("expense")   or 0) if d7  else 0
+        exp_30  = float(d30.get("expense")  or 0) if d30 else 0
+
         if floor_roas is not None:
-            d7  = ads_7d.get(cid)
-            d30 = ads_30d.get(cid)
-            roas_7  = float(d7.get("broadRoi")  or 0) if d7  else 0
-            roas_30 = float(d30.get("broadRoi") or 0) if d30 else 0
+            # 爆款觸發：7天ROAS>目標200% 且花費>500
+            cond_7  = roas_7  > 0 and exp_7  > 500 and roas_7  > target_roas * 2.0
+            cond_30 = roas_30 > 0 and exp_30 > 500 and roas_30 > target_roas * 2.0
             boom_roas = None
-            if roas_7 > 0 and roas_30 > 0 and roas_7 > target_roas * 1.5 and roas_30 > target_roas * 1.5:
+            if cond_7 and cond_30:
                 boom_roas = round(max(current_roas * 0.8, floor_roas), 1)  # 降20%
-            elif roas_7 > 0 and roas_7 > target_roas * 1.5:
+            elif cond_7:
                 boom_roas = round(max(current_roas * 0.9, floor_roas), 1)  # 降10%
+
             if boom_roas and boom_roas < current_roas:
+                # 爆款：降低 ROAS
                 if _edit_ad(cid, ad_type, shop_id, 11, boom_roas):
-                    _ad_log(f"爆款 ✅ {name} {current_roas}→{boom_roas} (margin {margin:.0f}%)")
+                    shop_name = ad.get('shopName','')[:12]
+                    _ad_log(f"爆款 ✅ [{shop_name}] {name} ROAS {current_roas}→{boom_roas} (毛利{margin:.0f}% 下限{floor_roas})")
                     boom_ok += 1
                 else:
                     boom_fail += 1
                 time.sleep(0.3)
 
-        # ── 空燒暫停（30天花費>500且ROAS<目標50%）──
+            elif current_roas < target_roas:
+                # 爆款結束恢復：目前ROAS低於目標（曾是爆款），但7天表現已不達標
+                # 7天ROAS < 目標×70% → 爆款結束，往上恢復
+                if roas_7 < target_roas * 0.7 or roas_7 == 0:
+                    recover_roas = round(min(current_roas * 1.1, target_roas), 1)  # 每次+10%，上限到初始值
+                    if recover_roas > current_roas and abs(recover_roas - current_roas) > 0.05:
+                        if _edit_ad(cid, ad_type, shop_id, 11, recover_roas):
+                            shop_name = ad.get('shopName','')[:12]
+                            _ad_log(f"爆款結束 ✅ [{shop_name}] {name} ROAS {current_roas}→{recover_roas} (7天{roas_7:.1f}<目標{target_roas}×70%)")
+                            roas_ok += 1
+                        time.sleep(0.3)
+
+        # ── 空燒暫停（30天差 且 7天也沒有好轉）──
+        d7  = ads_7d.get(cid)
         d30 = ads_30d.get(cid)
         if d30:
             exp30  = float(d30.get("expense") or 0)
             roi30  = float(d30.get("broadRoi") or 0)
-            if exp30 > 500 and roi30 > 0 and roi30 < target_roas * 0.5:
+            roi7   = float(d7.get("broadRoi") or 0) if d7 else 0
+            exp7   = float(d7.get("expense") or 0) if d7 else 0
+            # 條件1：30天長期表現差（花費>500 且 ROAS<目標50%）
+            cond_long = exp30 > 500 and roi30 > 0 and roi30 < target_roas * 0.5
+            # 條件2：7天近期也沒有好轉（ROAS<目標70%）
+            # 若7天ROAS≥目標70%，表示近期有改善，給機會繼續跑
+            cond_recent = roi7 == 0 or roi7 < target_roas * 0.7
+            if cond_long and cond_recent:
                 if _edit_ad(cid, ad_type, shop_id, 2):  # 暫停
-                    _ad_log(f"暫停 ✅ {name} 30天花費{exp30:.0f} ROAS{roi30:.1f}/{target_roas}")
+                    # 判斷問題原因給修改建議
+                    ctr_v = float(ad.get("ctr") or 0)
+                    cr_v  = float(ad.get("cr")  or 0)
+                    ctr_avg = _ad_benchmark["ctr_avg"]
+                    cr_avg  = _ad_benchmark["cr_avg"]
+                    if ctr_v < ctr_avg * 0.5:
+                        reason = f"CTR{ctr_v:.1f}%低於均值{ctr_avg}%，建議換主圖/優化標題"
+                    elif cr_v < cr_avg * 0.5:
+                        reason = f"CR{cr_v:.1f}%低於均值{cr_avg}%，建議優化商品頁/圖片"
+                    else:
+                        reason = f"整體表現差，建議全面檢視"
+                    _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} | {reason}")
+                    burned_today.add(cid)  # 記錄今天空燒暫停，不能被重啟
                     pause_ok += 1
                 else:
                     pause_fail += 1
                 time.sleep(0.3)
+            elif cond_long and not cond_recent:
+                # 30天差但7天有好轉，記錄警告但不暫停
+                _ad_log(f"空燒警告 [{ad.get('shopName','')[:10]}] {name} 30天差({roi30:.1f}) 但7天好轉({roi7:.1f}) 觀察中")
+
+        # ── CTR/CR 異常通知（花費>50才有意義）──
+        ad_expense = float(ad.get("expense") or 0)
+        if ad_expense > 50:
+            ctr_v = float(ad.get("ctr") or 0)
+            cr_v  = float(ad.get("cr")  or 0)
+            shop_n = ad.get("shopName","")[:12]
+            if ctr_v > 0 and ctr_v < _ad_benchmark["ctr_avg"] * 0.5:
+                _ad_log(f"⚠️ 主圖建議 [{shop_n}] {name} CTR{ctr_v:.2f}%<均值{_ad_benchmark['ctr_avg']}%×50% 建議換主圖/優化標題")
+            if cr_v > 0 and cr_v < _ad_benchmark["cr_avg"] * 0.5:
+                _ad_log(f"⚠️ 商品頁建議 [{shop_n}] {name} CR{cr_v:.2f}%<均值{_ad_benchmark['cr_avg']}%×50% 建議優化商品頁/圖片")
+
+    # ── 重啟符合條件的暫停廣告（毛利>45% 且 有庫存）──────────────────
+    restart_ok = restart_skip_margin = restart_skip_stock = 0
+    try:
+        # 抓所有暫停的 autoRoas 廣告
+        paused_page = 1
+        paused_ads = []
+        while True:
+            body_p = {"pageNo": paused_page, "pageSize": 100}
+            dp = _bigseller_api("/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json", body_p)
+            if not dp or dp.get("code") != 0: break
+            rows_p = dp.get("data", {}).get("rows", [])
+            for row in rows_p:
+                if row.get("biddingMethod") == "autoRoas" and row.get("campaignStatus") == "paused":
+                    paused_ads.append(row)
+            if paused_page >= dp.get("data", {}).get("totalPage", 1): break
+            paused_page += 1
+
+        for pad in paused_ads:
+            iid   = pad.get("itemId")
+            item  = item_map.get(iid)
+            if not item: continue
+            margin = _calc_margin(item, cost_map)
+            if margin is None: continue
+            cid     = pad.get("campaignId")
+            ad_type = pad.get("adType")
+            shop_id = pad.get("shopId")
+            name    = (pad.get("adName") or str(cid))[:20]
+            shop_name = pad.get("shopName") or str(shop_id)
+
+            # 今天剛被空燒暫停的廣告 → 不重啟（空燒需要持續觀察）
+            if cid in burned_today:
+                _ad_log(f"空燒保護 [{shop_name}] {name} 今天剛因空燒暫停，不重啟")
+                continue
+
+            # 毛利 ≤ 45% → 繼續暫停
+            if margin <= 45:
+                restart_skip_margin += 1
+                continue
+
+            # 檢查庫存（item_map 裡有 stock 欄位）
+            stock = item.get("stock", 0)
+            if stock <= 0:
+                restart_skip_stock += 1
+                _ad_log(f"庫存不足 [{shop_name}] {name} 庫存{stock}，維持暫停")
+                continue
+
+            # 毛利>45% 且 有庫存 → 重啟廣告
+            target_roas = _get_target_roas(margin)
+            if _edit_ad(cid, ad_type, shop_id, 3):  # 3 = 恢復暫停廣告
+                _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.0f}% 庫存{stock} ROAS→{target_roas}")
+                restart_ok += 1
+                # 同時設定正確 ROAS
+                _edit_ad(cid, ad_type, shop_id, 11, target_roas)
+            time.sleep(0.3)
+
+        if restart_ok > 0:
+            _ad_log(f"=== 重啟廣告完成 {restart_ok}筆✅ 毛利不足跳過{restart_skip_margin}筆 庫存不足跳過{restart_skip_stock}筆 ===", write_sheet=True)
+    except Exception as e:
+        _ad_log(f"重啟廣告失敗: {e}")
+
+    # ── 低毛利廣告回報（依店鋪分類）──────────────────
+    low_margin_by_shop = {}  # shop_name -> [{"name", "margin", "roas", "shopId"}]
+    for ad in ads_now:
+        item = item_map.get(ad.get("itemId"))
+        if not item: continue
+        margin = _calc_margin(item, cost_map)
+        if margin is None: continue
+        if margin < 40:
+            shop_name = ad.get("shopName") or ad.get("storeName") or str(ad.get("shopId",""))
+            shop_id   = str(ad.get("shopId",""))
+            name      = (ad.get("adName") or str(ad.get("campaignId","")))[:30]
+            roas      = float(ad.get("roasTarget") or 0)
+            key = f"{shop_id}_{shop_name}"
+            if key not in low_margin_by_shop:
+                low_margin_by_shop[key] = {"shopName": shop_name, "shopId": shop_id, "items": []}
+            low_margin_by_shop[key]["items"].append({
+                "name": name, "margin": round(margin, 1), "roas": round(roas, 1)
+            })
+            _ad_log(f"低毛利 [{shop_name}] {name} 毛利{margin:.0f}%")
+
+    # 存入 store 供首頁 API 使用
+    shops_list = sorted(low_margin_by_shop.values(), key=lambda x: len(x["items"]), reverse=True)
+    _ad_scheduler_store["low_margin_shops"] = shops_list
+    _ad_scheduler_store["low_margin_ts"] = time.time()
+    if shops_list:
+        total = sum(len(s["items"]) for s in shops_list)
+        _ad_log(f"低毛利彙總：{len(shops_list)} 間店鋪，共 {total} 筆廣告")
+    else:
+        _ad_log("低毛利檢查完成，無異常")
 
     _ad_scheduler_store["last_daily"] = today
-    _ad_log(f"=== 每日任務完成 ROAS:{roas_ok}✅{roas_fail}❌ 爆款:{boom_ok}✅{boom_fail}❌ 暫停:{pause_ok}✅{pause_fail}❌ ===")
+    threading.Thread(target=_write_schedule_state, daemon=True).start()
+    now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+    _ad_log(f"=== [{now_str}] 每日排程完成 | ROAS調整 {roas_ok}筆✅{roas_fail}筆❌ | 爆款 {boom_ok}筆✅ | 暫停 {pause_ok}筆✅ | 重啟 {restart_ok}筆✅ ===", write_sheet=True)
+    _flush_ad_log_to_sheets()  # 批次寫入 Sheets
 
-def run_hourly_budget_task():
+def run_hourly_budget_task(force=False):
     """每小時預算任務：ROAS達標且使用率≥90%→加30%"""
     now_ts = time.time()
     last = _ad_scheduler_store.get("last_hourly") or 0
-    if now_ts - last < 3600:
+    if not force and now_ts - last < 3600:
         return  # 未滿1小時
 
     _ad_log("--- 開始每小時預算任務 ---")
-    cost_map = _cost_store.get("map", {})
+    cost_map = _get_cost_map()
     if not cost_map:
+        # 沒有成本不更新 last_hourly，下一分鐘繼續嘗試
+        _ad_scheduler_store["last_hourly"] = 0
         return
 
     item_map = _fetch_listings_map()
@@ -7617,33 +8585,62 @@ def run_hourly_budget_task():
         if budget <= 0: continue
         usage = expense / budget
 
-        # 條件：實際ROAS >= 目標ROAS + 預算使用率 >= 90%
+        # 條件一：ROAS達標 + 使用率≥90% → 加碼30%
         if actual_roas > 0 and actual_roas >= current_roas and usage >= 0.9:
             new_budget = round(budget * 1.3)
             cid     = ad.get("campaignId")
             ad_type = ad.get("adType")
             shop_id = ad.get("shopId")
             name    = (ad.get("adName") or str(cid))[:20]
+            shop_name = (ad.get("shopName") or str(shop_id))[:12]
             if _edit_ad(cid, ad_type, shop_id, 6, new_budget):
-                _ad_log(f"預算 ✅ {name} {budget:.0f}→{new_budget} TWD (ROAS {actual_roas:.1f} 用量{usage*100:.0f}%)")
+                _ad_log(f"預算 ✅ [{shop_name}] {name} {budget:.0f}→{new_budget} TWD (ROAS {actual_roas:.1f} 用量{usage*100:.0f}%)")
                 ok += 1
             else:
                 fail += 1
             time.sleep(0.3)
+
+        # 條件二：廣告跑差（7天ROAS<目標×70%）且預算>85 → 降回85（止損）
+        # broadRoi/expense 是 API 預設7天數據
+        elif budget > 85 and target_roas is not None:
+            cid = ad.get("campaignId")
+            roas_7h = actual_roas  # API 預設7天
+            exp_7h  = expense
+            # 有花費但表現差 → 降回85
+            if exp_7h > 100 and roas_7h > 0 and roas_7h < target_roas * 0.7:
+                ad_type = ad.get("adType")
+                shop_id = ad.get("shopId")
+                name    = (ad.get("adName") or str(cid))[:20]
+                shop_name = (ad.get("shopName") or str(shop_id))[:12]
+                if _edit_ad(cid, ad_type, shop_id, 6, 85):
+                    _ad_log(f"預算 ✅ [{shop_name}] {name} 降回85 (7天ROAS{roas_7h:.1f}<目標{target_roas}×70%)")
+                    ok += 1
+                time.sleep(0.3)
+            else:
+                skip += 1
         else:
             skip += 1
 
     _ad_scheduler_store["last_hourly"] = now_ts
-    _ad_log(f"--- 預算任務完成 {ok}✅{fail}❌ 跳過{skip} ---")
+    threading.Thread(target=_write_schedule_state, daemon=True).start()
+    if ok > 0 or fail > 0:
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        _ad_log(f"=== [{now_str}] 每小時排程完成 | 預算加碼 {ok}筆✅{(' 失敗'+str(fail)+'筆❌') if fail else ''} ===", write_sheet=True)
+        _flush_ad_log_to_sheets()  # 批次寫入 Sheets
+    else:
+        _ad_log(f"--- 預算任務檢查完成，本次無符合加碼條件 ({skip}筆檢查)")
 
 def ad_scheduler_thread():
     """廣告排程背景執行緒"""
     time.sleep(30)  # 啟動後等30秒再開始
     while True:
         try:
-            now = datetime.now()
-            # 每天9點跑每日任務
-            if now.hour == 9:
+            # 用 UTC+8 台灣時間判斷
+            from datetime import timezone, timedelta
+            tw_tz = timezone(timedelta(hours=8))
+            now_tw = datetime.now(tw_tz)
+            # 每天台灣時間9點跑每日任務
+            if now_tw.hour == 9:
                 run_daily_ad_tasks()
             # 每小時跑預算任務
             run_hourly_budget_task()
@@ -7666,18 +8663,318 @@ def superman_glasses_save_cookie():
         _ad_scheduler_store["bs_cookie"] = cookie
         _ad_scheduler_store["cookie_ts"] = int(time.time())
         _ad_log(f"Cookie 已更新，長度 {len(cookie)}")
+        # 寫入 Sheets 持久化（Railway 重啟後可讀回）
+        def _persist_cookie():
+            try:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                if not sheet_id: return
+                client, err = get_sheets_client()
+                if err: return
+                sh = client.open_by_key(sheet_id)
+                try:
+                    ws = sh.worksheet("⚙️ 排程狀態")
+                except Exception:
+                    ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
+                # 讀現有資料，更新 cookie 行
+                rows = ws.get_all_values()
+                state = {r[0]: i+1 for i, r in enumerate(rows) if r}
+                cookie_row = state.get("bs_cookie")
+                if cookie_row:
+                    ws.update_cell(cookie_row, 2, cookie)
+                else:
+                    ws.append_row(["bs_cookie", cookie], value_input_option="RAW")
+            except Exception as e:
+                print(f"[Cookie] 寫入 Sheets 失敗: {e}")
+        threading.Thread(target=_persist_cookie, daemon=True).start()
         return jsonify({"ok": True, "len": len(cookie)})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
 
+@app.route("/api/superman-glasses/ad-log-sheet", methods=["GET"])
+def superman_glasses_ad_log_sheet():
+    """從 Google Sheets 讀取歷史日誌（永久記錄）"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client, err = get_sheets_client()
+        if err: return jsonify({"ok": False, "msg": err}), 500
+        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+        rows = ws.get_all_values()
+        # 跳過標題列，取最新100筆（從後往前）
+        data_rows = rows[1:] if len(rows) > 1 else []
+        recent = list(reversed(data_rows[-200:]))[:100]
+        logs = [{"time": r[0], "type": r[1] if len(r)>1 else "", "msg": r[2] if len(r)>2 else ""} for r in recent]
+        resp = jsonify({"ok": True, "logs": logs, "total": len(data_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/profit-snapshot", methods=["POST"])
+def superman_glasses_profit_snapshot():
+    """將利潤快照寫入 Google Sheets 📊 利潤監控室"""
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "日期":
+                ws.clear()
+                ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("📊 利潤監控室")
+            except:
+                ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=14)
+            ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
+
+        now = datetime.now()
+        date_str = now.strftime("%Y/%m/%d")
+        time_str = now.strftime("%H:%M")
+
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                date_str,
+                time_str,
+                r.get("shopName", ""),
+                r.get("adName", ""),
+                r.get("itemId", ""),
+                r.get("currentRoas", ""),
+                r.get("actualRoas7", ""),
+                r.get("expense7", ""),
+                r.get("expense30", ""),
+                r.get("budget", ""),
+                r.get("margin", ""),
+                r.get("targetRoas", ""),
+                r.get("status", ""),
+                r.get("note", ""),
+            ])
+
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/profit-snapshot", methods=["OPTIONS"])
+def superman_glasses_profit_snapshot_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
+
+@app.route("/api/superman-glasses/clear-war-room", methods=["POST"])
+def superman_glasses_clear_war_room():
+    """清空 🚀 廣告戰情室，只保留標題列"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+        ws = client.open_by_key(sheet_id).worksheet("🚀 廣告戰情室")
+        ws.clear()
+        ws.append_row(["時間", "類型", "店鋪", "廣告名稱", "調整內容", "毛利%", "結果"], value_input_option="RAW")
+        resp = jsonify({"ok": True, "msg": "廣告戰情室已清空"})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/ad-log", methods=["GET"])
 def superman_glasses_ad_log():
     resp = jsonify({
         "ok": True,
-        "log": _ad_scheduler_store["log"][:50],
+        "log": _ad_scheduler_store["log"][:100],
         "last_daily": _ad_scheduler_store["last_daily"],
         "last_hourly": _ad_scheduler_store["last_hourly"],
+        "cookie_ok": bool(_ad_scheduler_store.get("bs_cookie")),
+        "cost_count": _ad_scheduler_store.get("cost_count", 0),
     })
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/low-margin", methods=["GET"])
+def superman_glasses_low_margin():
+    """回傳低利潤廣告清單（依店鋪分類）"""
+    data = _ad_scheduler_store.get("low_margin_shops", [])
+    ts   = _ad_scheduler_store.get("low_margin_ts", 0)
+    resp = jsonify({
+        "ok": True,
+        "shops": data,
+        "ts": ts,
+        "updated": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else None
+    })
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/profit-snapshot-read", methods=["GET"])
+def superman_glasses_profit_snapshot_read():
+    """從 Google Sheets 📊 利潤監控室讀取最新快照"""
+    try:
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+        client, err = get_sheets_client()
+        if err: return jsonify({"ok": False, "msg": err}), 500
+        ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+        rows = ws.get_all_values()
+        if len(rows) <= 1:
+            return jsonify({"ok": True, "rows": [], "total": 0})
+        headers = rows[0]
+        # 取最新一次快照（最後一批相同日期+時間的記錄）
+        data_rows = rows[1:]
+        if not data_rows:
+            return jsonify({"ok": True, "rows": [], "total": 0})
+        # 找最新的日期+時間
+        last_dt = data_rows[-1][0] + data_rows[-1][1] if len(data_rows[-1]) >= 2 else ""
+        latest = [r for r in data_rows if (r[0]+r[1] if len(r)>=2 else "") == last_dt]
+        # 轉成 dict
+        result = []
+        for r in latest:
+            row_dict = {headers[i]: r[i] if i < len(r) else "" for i in range(len(headers))}
+            result.append({
+                "shop": row_dict.get("店鋪",""),
+                "name": row_dict.get("廣告名稱",""),
+                "margin": float(row_dict.get("毛利%","0") or 0),
+                "roas": row_dict.get("目前ROAS",""),
+                "targetRoas": row_dict.get("目標ROAS",""),
+                "status": row_dict.get("狀態",""),
+                "note": row_dict.get("備註",""),
+                "time": row_dict.get("日期","") + " " + row_dict.get("時間","")
+            })
+        resp = jsonify({"ok": True, "rows": result, "total": len(data_rows), "snapshot_time": last_dt})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/schedule-lock", methods=["POST", "OPTIONS"])
+def superman_glasses_schedule_lock():
+    """排程鎖：避免多台電腦同時執行"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        data = request.get_json(force=True)
+        task = data.get("task", "hourly")
+        action = data.get("action", "acquire")
+        lock_key = f"lock_{task}"
+        lock_ttl = 300  # 5分鐘自動解鎖（防止當機卡死）
+
+        if action == "acquire":
+            lock = _ad_scheduler_store.get(lock_key)
+            now_ts = time.time()
+            last_hourly = _ad_scheduler_store.get("last_hourly") or 0
+            if lock and now_ts - lock < lock_ttl:
+                resp = jsonify({"ok": False, "msg": "鎖定中", "last_hourly": last_hourly})
+            else:
+                _ad_scheduler_store[lock_key] = now_ts
+                resp = jsonify({"ok": True, "msg": "取得鎖", "last_hourly": last_hourly})
+        else:  # release
+            _ad_scheduler_store.pop(lock_key, None)
+            resp = jsonify({"ok": True, "msg": "釋放鎖"})
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/ext-log", methods=["POST", "OPTIONS"])
+def superman_glasses_ext_log():
+    """接收 Extension 回傳的廣告排程執行歷程"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        data = request.get_json(force=True)
+        msg = data.get("msg", "")
+        suggestion = data.get("suggestion", "")
+        if msg:
+            import re
+            from datetime import timezone, timedelta
+            _tw = timezone(timedelta(hours=8))
+            ts_full = datetime.now(_tw).strftime("%Y/%m/%d %H:%M:%S")
+            shop_m = re.search(r"\[([^\]]+)\]", msg)
+            shop = shop_m.group(1) if shop_m else ""
+            _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+            # 立刻 flush 寫入 Sheets
+            threading.Thread(target=_flush_ad_log_to_sheets, daemon=True).start()
+        resp = jsonify({"ok": True})
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/debug-hourly", methods=["POST", "GET"])
+def superman_glasses_debug_hourly():
+    """診斷：逐步測試每小時排程的每個步驟"""
+    steps = []
+    try:
+        # 步驟1：成本
+        cost_map = _get_cost_map()
+        steps.append(f"成本: {len(cost_map)} 筆")
+
+        # 步驟2：Cookie
+        cookie = _ad_scheduler_store.get("bs_cookie") or ""
+        steps.append(f"Cookie: {'有' if cookie else '無'} 長度{len(cookie)}")
+
+        # 步驟3：抓商品
+        try:
+            item_map = _fetch_listings_map()
+            steps.append(f"在線商品: {len(item_map)} 筆")
+        except Exception as e2:
+            steps.append(f"在線商品錯誤: {str(e2)[:200]}")
+            item_map = {}
+
+        # 步驟4：抓廣告
+        try:
+            ads = _fetch_ads_range()
+            steps.append(f"廣告: {len(ads)} 筆")
+        except Exception as e3:
+            steps.append(f"廣告錯誤: {str(e3)[:200]}")
+            ads = []
+        
+        # 步驟4.5：直接測試 BigSeller API
+        try:
+            test = _bigseller_api("/api/v1/product/listing/shopee/active.json?pageNo=1&pageSize=1&status=active&shopeeStatus=live")
+            steps.append(f"BigSeller API測試: code={test.get('code')} msg={str(test.get('msg',''))[:50]}")
+        except Exception as e4:
+            steps.append(f"BigSeller API錯誤: {str(e4)[:200]}")
+
+        # 步驟5：成本能匹配的廣告
+        matched = 0
+        for ad in ads[:10]:
+            item = item_map.get(ad.get("itemId"))
+            if item:
+                margin = _calc_margin(item, cost_map)
+                if margin: matched += 1
+        steps.append(f"前10筆廣告中有成本: {matched} 筆")
+
+        resp = jsonify({"ok": True, "steps": steps})
+    except Exception as e:
+        import traceback
+        resp = jsonify({"ok": False, "steps": steps, "error": str(e), "trace": traceback.format_exc()[-500:]})
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
 
@@ -7687,11 +8984,11 @@ def superman_glasses_ad_run_now():
     task = request.get_json(force=True).get("task", "all")
     def run():
         if task in ("daily", "all"):
-            _ad_scheduler_store["last_daily"] = None  # 強制重跑
-            run_daily_ad_tasks()
+            _get_cost_map()  # 確保成本有讀回
+            run_daily_ad_tasks(force=True)  # 強制執行，跳過時間判斷
         if task in ("budget", "all"):
-            _ad_scheduler_store["last_hourly"] = 0  # 強制重跑
-            run_hourly_budget_task()
+            _get_cost_map()  # 確保成本有讀回
+            run_hourly_budget_task(force=True)  # 強制執行，跳過時間判斷
     threading.Thread(target=run, daemon=True).start()
     resp = jsonify({"ok": True, "msg": f"已觸發 {task} 任務"})
     resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -7704,6 +9001,81 @@ _cost_store = {
     "count": 0,     # SKU 數量
     "uploader": ""  # 上傳者 IP
 }
+
+# ── 模組載入時自動從 Sheets 讀回成本和排程狀態（gunicorn 也會執行）──
+def _auto_restore_on_startup():
+    """Railway 啟動/重啟後，自動從 Sheets 讀回成本和排程狀態"""
+    import threading, time
+    def _do_restore():
+        time.sleep(5)
+        # 1. 讀成本
+        try:
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if sheet_id:
+                client, err = get_sheets_client()
+                if not err:
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                    rows = ws.get_all_values()
+                    if len(rows) > 1:
+                        cost_map = {}
+                        for row in rows[1:]:
+                            if len(row) >= 2 and row[0] and row[1]:
+                                try: cost_map[row[0]] = float(row[1])
+                                except: pass
+                        if cost_map:
+                            _cost_store["map"] = cost_map
+                            _cost_store["count"] = len(cost_map)
+                            _cost_store["ts"] = int(time.time() * 1000)
+                            _ad_scheduler_store["cost_count"] = len(cost_map)
+                            print(f"[啟動] 從 Sheets 讀回 {len(cost_map)} 筆成本")
+        except Exception as e:
+            print(f"[啟動] 讀成本失敗: {e}")
+        time.sleep(3)
+        # 2. 讀 Cookie
+        try:
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if sheet_id:
+                client2, err2 = get_sheets_client()
+                if not err2:
+                    ws2 = client2.open_by_key(sheet_id).worksheet("⚙️ 排程狀態")
+                    rows2 = ws2.get_all_values()
+                    for row in rows2:
+                        if len(row) >= 2 and row[0] == "bs_cookie" and row[1]:
+                            _ad_scheduler_store["bs_cookie"] = row[1]
+                            _ad_scheduler_store["cookie_ts"] = int(time.time())
+                            print(f"[啟動] Cookie 讀回，長度 {len(row[1])}")
+                            break
+        except Exception as e:
+            print(f"[啟動] 讀 Cookie 失敗: {e}")
+        # 3. 讀排程狀態
+        try:
+            _read_schedule_state()
+        except Exception as e:
+            print(f"[啟動] 讀排程狀態失敗: {e}")
+    threading.Thread(target=_do_restore, daemon=True).start()
+
+_auto_restore_on_startup()
+
+@app.route("/api/superman-glasses/restore-cost", methods=["POST"])
+def superman_glasses_restore_cost():
+    """手動觸發從 Google Sheets 讀回成本資料"""
+    try:
+        cost_map = _get_cost_map()
+        if cost_map:
+            resp = jsonify({"ok": True, "count": len(cost_map), "msg": "成本已從 Sheets 恢復"})
+        else:
+            resp = jsonify({"ok": False, "msg": "Sheets 沒有成本資料"})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/restore-cost", methods=["OPTIONS"])
+def superman_glasses_restore_cost_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
 
 @app.route("/api/superman-glasses/cost", methods=["GET"])
 def superman_glasses_cost_get():
@@ -7718,9 +9090,68 @@ def superman_glasses_cost_get():
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
+@app.route("/api/superman-glasses/product-profit", methods=["POST"])
+def superman_glasses_product_profit():
+    """掃描完成後寫入商品利潤到 📊 利潤監控室"""
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": True, "msg": "未設定SHEETS，跳過"})
+
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "SKU":
+                ws.clear()
+                ws.append_row(["SKU", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("📊 利潤監控室")
+                ws.clear()
+            except Exception:
+                ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=5)
+            ws.append_row(["SKU", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                r.get("sku", ""),
+                r.get("price", ""),
+                r.get("cost", ""),
+                r.get("margin", ""),
+                now_str,
+            ])
+
+        # 清除舊資料（保留標題），重新寫入
+        ws.resize(rows=1)
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+@app.route("/api/superman-glasses/product-profit", methods=["OPTIONS"])
+def superman_glasses_product_profit_options():
+    resp = jsonify({"ok": True})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return resp
+
 @app.route("/api/superman-glasses/cost", methods=["POST"])
 def superman_glasses_cost_post():
-    """掃描完成後上傳成本資料"""
+    """掃描完成後上傳成本資料，同時備份到 Google Sheets"""
     try:
         data = request.get_json(force=True)
         cost_map = data.get("map", {})
@@ -7730,6 +9161,30 @@ def superman_glasses_cost_post():
         _cost_store["ts"] = int(time.time() * 1000)
         _cost_store["count"] = len(cost_map)
         _cost_store["uploader"] = request.remote_addr or "unknown"
+        _ad_scheduler_store["cost_count"] = len(cost_map)
+
+        # 同步備份到 Google Sheets（背景執行不阻塞）
+        def _backup_cost():
+            try:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                if not sheet_id: return
+                client, err = get_sheets_client()
+                if err: return
+                try:
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                except Exception:
+                    sh = client.open_by_key(sheet_id)
+                    ws = sh.add_worksheet(title="💾 成本備份", rows=10000, cols=3)
+                ws.clear()
+                ws.append_row(["SKU", "成本", "更新時間"], value_input_option="RAW")
+                now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+                rows = [[sku, cost, now_str] for sku, cost in cost_map.items()]
+                ws.append_rows(rows, value_input_option="RAW")
+                print(f"[成本備份] 已寫入 Sheets {len(rows)} 筆")
+            except Exception as e:
+                print(f"[成本備份] 失敗: {e}")
+        threading.Thread(target=_backup_cost, daemon=True).start()
+
         return jsonify({"ok": True, "count": _cost_store["count"]})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
@@ -7911,6 +9366,39 @@ fetchLatestScript();
 
 if __name__ == "__main__":
     load_settings()
+
+    # 啟動時從 Google Sheets 讀回成本備份（Railway 重啟後恢復）
+    def _restore_cost_from_sheets():
+        try:
+            time.sleep(5)  # 等 Flask 啟動完成
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if not sheet_id: return
+            client, err = get_sheets_client()
+            if err: return
+            ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+            rows = ws.get_all_values()
+            if len(rows) <= 1: return
+            cost_map = {}
+            for row in rows[1:]:
+                if len(row) >= 2 and row[0] and row[1]:
+                    try: cost_map[row[0]] = float(row[1])
+                    except: pass
+            if cost_map:
+                _cost_store["map"] = cost_map
+                _cost_store["count"] = len(cost_map)
+                _cost_store["ts"] = int(time.time() * 1000)
+                _ad_scheduler_store["cost_count"] = len(cost_map)
+                print(f"[成本備份] 從 Sheets 恢復 {len(cost_map)} 筆成本資料")
+        except Exception as e:
+            print(f"[成本備份] 從 Sheets 恢復失敗: {e}")
+    threading.Thread(target=_restore_cost_from_sheets, daemon=True).start()
+
+    # 啟動時從 Sheets 讀排程狀態（Railway 重啟後繼承上次的執行時間）
+    def _restore_schedule_state():
+        time.sleep(8)  # 等成本讀完
+        _read_schedule_state()
+    threading.Thread(target=_restore_schedule_state, daemon=True).start()
+
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=ad_scheduler_thread, daemon=True).start()  # 廣告自動排程
     # Railway 會設定 PORT 環境變數
