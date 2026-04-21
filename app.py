@@ -2653,6 +2653,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
+  <a href="/bs-oversize" class="card card-tools">
+    <span class="card-badge badge-ready">&#x2713; 上線中</span>
+    <span class="card-icon">&#x1F4CF;</span>
+    <div class="card-title">BS超材分單</div>
+    <div class="card-desc">BigSeller訂單超材分析，自動判斷不可拆單/可拆單，網頁操作複製標記清單。</div>
+  </a>
 
 
 </div>
@@ -6701,6 +6707,543 @@ def api_warehouse_records():
         return jsonify({"ok": True, "records": records[:100]})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
+
+
+# ============================================================
+# BigSeller 超材分單系統  
+# ============================================================
+
+@app.route("/bs-oversize")
+@login_required
+def bs_oversize_page():
+    """BS超材分單主頁面"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BS超材分單 - 超人特工倉</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; min-height: 100vh; color: #fff; }
+        .topbar { background: rgba(255,255,255,.05); backdrop-filter: blur(10px); height: 56px; 
+                  padding: 0 32px; display: flex; align-items: center; gap: 12px; 
+                  border-bottom: 1px solid rgba(255,255,255,.08); }
+        .logo { font-size: 16px; font-weight: 700; margin-right: auto; letter-spacing: .5px; }
+        .logo span { color: #f4a100; }
+        .btn-home { color: #aaa; font-size: 12px; text-decoration: none; padding: 6px 12px; 
+                    border: 1px solid #333; border-radius: 5px; }
+        .btn-home:hover { border-color: #666; color: #fff; }
+        
+        .upload-section { text-align: center; padding: 40px 20px; }
+        .upload-zone { background: rgba(255,255,255,.05); border: 2px dashed rgba(255,255,255,.2); 
+                       border-radius: 16px; padding: 40px; margin: 0 auto; max-width: 500px; 
+                       transition: all .3s ease; cursor: pointer; }
+        .upload-zone:hover, .upload-zone.dragover { border-color: #f4a100; background: rgba(244,161,0,.05); }
+        .upload-zone h3 { font-size: 20px; margin: 16px 0 8px; }
+        .upload-zone p { color: #888; margin-bottom: 24px; line-height: 1.6; }
+        .btn-upload { background: #f4a100; color: #000; border: none; padding: 12px 24px; 
+                      border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn-upload:hover { background: #ffb84d; }
+        
+        .progress { width: 100%; height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; 
+                    margin: 20px 0; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #f4a100, #ff8c42); 
+                        width: 0%; transition: width .3s ease; }
+        
+        .results { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .stats-bar { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); 
+                     border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); 
+                      gap: 20px; text-align: center; }
+        .stat-item h3 { font-size: 24px; color: #f4a100; margin-bottom: 4px; }
+        .stat-item p { color: #888; font-size: 12px; }
+        
+        .action-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        .btn-action { padding: 10px 20px; border-radius: 8px; border: none; font-size: 14px; 
+                      cursor: pointer; font-weight: 500; transition: all .2s; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-warning { background: #f39c12; color: #fff; }
+        .btn-warning:hover { background: #e67e22; }
+        .btn-info { background: #3498db; color: #fff; }
+        .btn-info:hover { background: #2980b9; }
+        
+        .orders-grid { display: grid; gap: 16px; }
+        .order-card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); 
+                      border-radius: 12px; padding: 20px; transition: all .2s; }
+        .order-card:hover { background: rgba(255,255,255,.08); }
+        .order-card.cannot-split { border-left: 4px solid #e74c3c; }
+        .order-card.can-split { border-left: 4px solid #f39c12; }
+        .order-card.normal { border-left: 4px solid #27ae60; }
+        
+        .order-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .order-header h4 { font-size: 16px; }
+        .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .badge-cannot-split { background: rgba(231,76,60,.2); color: #e74c3c; }
+        .badge-can-split { background: rgba(243,156,18,.2); color: #f39c12; }
+        .badge-normal { background: rgba(39,174,96,.2); color: #27ae60; }
+        
+        .logistics-info { color: #888; font-size: 13px; margin-bottom: 8px; }
+        .oversize-reason { background: rgba(231,76,60,.1); color: #e74c3c; padding: 8px 12px; 
+                           border-radius: 6px; font-size: 12px; margin-bottom: 12px; }
+        
+        .products-list { background: rgba(255,255,255,.02); border-radius: 8px; padding: 12px; }
+        .product-item { display: flex; justify-content: space-between; padding: 8px 0; 
+                        border-bottom: 1px solid rgba(255,255,255,.05); }
+        .product-item:last-child { border-bottom: none; }
+        .product-name { flex: 1; font-size: 13px; }
+        .product-details { color: #888; font-size: 12px; }
+        
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="logo">📏 BS<span>超材分單</span></div>
+        <a href="/" class="btn-home">🏠 返回首頁</a>
+    </div>
+    
+    <div id="upload-section" class="upload-section">
+        <div id="upload-zone" class="upload-zone">
+            <div style="font-size: 48px;">📊</div>
+            <h3>上傳 BigSeller 訂單檔案</h3>
+            <p>支援 .xlsx 格式的訂單匯出檔案<br>包含: 订单号/商品SKU/商品名称/数量/商品重量/长/宽/高/买家指定物流</p>
+            <input type="file" id="file-input" accept=".xlsx" style="display: none;">
+            <button class="btn-upload" onclick="document.getElementById('file-input').click()">
+                📁 選擇檔案
+            </button>
+        </div>
+        <div id="upload-progress" class="hidden">
+            <div class="progress">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <p style="margin-top: 16px; color: #888;">正在分析中...</p>
+        </div>
+    </div>
+    
+    <div id="results-section" class="results hidden">
+        <div class="stats-bar">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <h3 id="total-orders">-</h3>
+                    <p>總訂單數</p>
+                </div>
+                <div class="stat-item">
+                    <h3 id="total-items">-</h3>
+                    <p>總商品數</p>
+                </div>
+                <div class="stat-item">
+                    <h3 id="oversize-count">-</h3>
+                    <p>超材訂單</p>
+                </div>
+                <div class="stat-item">
+                    <h3 id="cannot-split-count">-</h3>
+                    <p>不可拆單</p>
+                </div>
+                <div class="stat-item">
+                    <h3 id="can-split-count">-</h3>
+                    <p>可拆單</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="action-bar">
+            <button class="btn-action btn-danger" onclick="copyCannotSplit()">
+                🚫 複製不可拆單清單
+            </button>
+            <button class="btn-action btn-warning" onclick="copyCanSplit()">
+                ✂️ 複製可拆單清單
+            </button>
+            <button class="btn-action btn-info" onclick="copyAllOversize()">
+                📋 複製所有超材清單
+            </button>
+        </div>
+        
+        <div id="orders-container" class="orders-grid">
+            <!-- 訂單卡片將在這裡動態生成 -->
+        </div>
+    </div>
+    
+    <script>
+        let analysisData = null;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            setupFileHandlers();
+        });
+        
+        function setupFileHandlers() {
+            const uploadZone = document.getElementById('upload-zone');
+            const fileInput = document.getElementById('file-input');
+            
+            // 拖拽處理
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+            
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+            
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleFileUpload(files[0]);
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) handleFileUpload(e.target.files[0]);
+            });
+        }
+        
+        function handleFileUpload(file) {
+            if (!file.name.endsWith('.xlsx')) {
+                alert('請上傳 .xlsx 格式的檔案');
+                return;
+            }
+            
+            showProgress();
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch('/api/bs-oversize/analyze', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideProgress();
+                if (data.success) {
+                    analysisData = data;
+                    showResults(data);
+                } else {
+                    alert('❌ 分析失敗: ' + data.message);
+                }
+            })
+            .catch(error => {
+                hideProgress();
+                alert('❌ 上傳失敗: ' + error.message);
+            });
+        }
+        
+        function showProgress() {
+            document.getElementById('upload-section').style.display = 'none';
+            document.getElementById('upload-progress').classList.remove('hidden');
+            
+            let width = 0;
+            const progressBar = document.getElementById('progress-bar');
+            const interval = setInterval(() => {
+                width += 5;
+                progressBar.style.width = Math.min(width, 90) + '%';
+                if (width >= 90) clearInterval(interval);
+            }, 100);
+        }
+        
+        function hideProgress() {
+            document.getElementById('upload-progress').classList.add('hidden');
+        }
+        
+        function showResults(data) {
+            // 更新統計數據
+            document.getElementById('total-orders').textContent = data.summary.total_orders;
+            document.getElementById('total-items').textContent = data.summary.total_items;
+            document.getElementById('oversize-count').textContent = data.summary.oversize_orders;
+            document.getElementById('cannot-split-count').textContent = data.order_lists.cannot_split.length;
+            document.getElementById('can-split-count').textContent = data.order_lists.can_split.length;
+            
+            // 渲染訂單卡片
+            renderOrders(data.orders);
+            
+            // 顯示結果區域
+            document.getElementById('results-section').classList.remove('hidden');
+        }
+        
+        function renderOrders(orders) {
+            const container = document.getElementById('orders-container');
+            
+            container.innerHTML = orders.map(order => `
+                <div class="order-card ${order.category}" data-category="${order.category}">
+                    <div class="order-header">
+                        <div>
+                            <h4>📦 ${order.order_no}</h4>
+                            <div class="logistics-info">${order.logistics} | ${order.products.length} 個商品</div>
+                        </div>
+                        <span class="status-badge badge-${order.category}">
+                            ${getCategoryName(order.category)}
+                        </span>
+                    </div>
+                    
+                    ${order.oversize_reason ? `<div class="oversize-reason">⚠️ ${order.oversize_reason}</div>` : ''}
+                    
+                    <div class="products-list">
+                        ${order.products.map(product => `
+                            <div class="product-item">
+                                <div class="product-name">${product.sku} - ${product.name.substring(0, 40)}...</div>
+                                <div class="product-details">
+                                    數量: ${product.quantity} | 
+                                    尺寸: ${product.dimensions} | 
+                                    重量: ${product.weight_kg}kg
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function getCategoryName(category) {
+            switch(category) {
+                case 'cannot-split': return '不可拆單';
+                case 'can-split': return '可拆單';
+                case 'normal': return '正常';
+                default: return category;
+            }
+        }
+        
+        function copyToClipboard(text, successMessage) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert(successMessage);
+            }).catch(() => {
+                // 備用方案
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                alert(successMessage);
+            });
+        }
+        
+        function copyCannotSplit() {
+            if (!analysisData) return;
+            const orders = analysisData.order_lists.cannot_split;
+            if (orders.length === 0) {
+                alert('無不可拆單訂單');
+                return;
+            }
+            copyToClipboard(orders.join('\\n'), 
+                `✅ 已複製 ${orders.length} 筆不可拆單訂單號\\n請到 BS 系統批量搜尋並標記為「1.超材/不可拆單」`);
+        }
+        
+        function copyCanSplit() {
+            if (!analysisData) return;
+            const orders = analysisData.order_lists.can_split;
+            if (orders.length === 0) {
+                alert('無可拆單訂單');
+                return;
+            }
+            copyToClipboard(orders.join('\\n'), 
+                `✅ 已複製 ${orders.length} 筆可拆單訂單號\\n請到 BS 系統批量搜尋並標記為「2.超材/系統或人工拆單」`);
+        }
+        
+        function copyAllOversize() {
+            if (!analysisData) return;
+            const allOrders = [...analysisData.order_lists.cannot_split, ...analysisData.order_lists.can_split];
+            if (allOrders.length === 0) {
+                alert('無超材訂單');
+                return;
+            }
+            copyToClipboard(allOrders.join('\\n'), 
+                `✅ 已複製 ${allOrders.length} 筆超材訂單號\\n可用於 BS 系統批量搜尋`);
+        }
+    </script>
+</body>
+</html>
+    ''')
+
+@app.route("/api/bs-oversize/analyze", methods=["POST"])
+@login_required
+def bs_oversize_analyze():
+    """分析上傳的BS訂單檔案"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '未收到檔案'})
+    
+    file = request.files['file']
+    if not file.filename.endswith('.xlsx'):
+        return jsonify({'success': False, 'message': '僅支援 .xlsx 格式'})
+    
+    try:
+        import pandas as pd
+        
+        # 讀取 Excel
+        file_data = file.read()
+        df = pd.read_excel(io.BytesIO(file_data))
+        
+        # 驗證必要欄位
+        required_columns = ['订单号', '买家指定物流', '长', '宽', '高', '商品重量']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return jsonify({'success': False, 'message': f'缺少必要欄位: {", ".join(missing_columns)}'})
+        
+        # 重量異常修正表
+        weight_fixes = {
+            'ADV002-003': 250,  # 乾濕兩用一次性免洗抹布
+            'AUW001-001': 50,   # 網紗洗漱包
+        }
+        
+        # 按訂單分組處理
+        orders = []
+        oversize_orders = {'cannot_split': set(), 'can_split': set()}
+        
+        for order_no, group in df.groupby('订单号'):
+            order_products = []
+            order_category = 'normal'
+            oversize_reasons = []
+            
+            for _, row in group.iterrows():
+                # 重量修正
+                sku = row.get('商品SKU', '')
+                weight_g = row.get('商品重量', 0)
+                if sku in weight_fixes:
+                    weight_kg = weight_fixes[sku] / 1000
+                else:
+                    weight_kg = weight_g / 1000 if weight_g > 0 else 0
+                
+                # 尺寸計算
+                length = max(0, row.get('长', 0) or 0)
+                width = max(0, row.get('宽', 0) or 0)
+                height = max(0, row.get('高', 0) or 0)
+                total_size = length + width + height
+                max_side = max(length, width, height)
+                
+                # 物流判斷
+                logistics = row['买家指定物流']
+                is_oversize = False
+                can_split = False
+                reasons = []
+                
+                if '店到家宅配' in logistics:
+                    can_split = True
+                    if total_size > 150:
+                        is_oversize = True
+                        reasons.append(f"三邊總和超限({total_size:.1f}>150cm)")
+                    if max_side > 100:
+                        is_oversize = True
+                        reasons.append(f"最長邊超限({max_side:.1f}>100cm)")
+                    if weight_kg > 15:
+                        is_oversize = True
+                        reasons.append(f"重量超限({weight_kg:.1f}>15kg)")
+                        
+                elif '蝦皮店到店' in logistics:
+                    can_split = True
+                    if total_size > 105:
+                        is_oversize = True
+                        reasons.append(f"三邊總和超限({total_size:.1f}>105cm)")
+                    if max_side > 45:
+                        is_oversize = True
+                        reasons.append(f"最長邊超限({max_side:.1f}>45cm)")
+                    if weight_kg > 10:
+                        is_oversize = True
+                        reasons.append(f"重量超限({weight_kg:.1f}>10kg)")
+                        
+                elif any(store in logistics for store in ['7-ELEVEN', '全家', '萊爾富']):
+                    can_split = False
+                    if total_size > 105:
+                        is_oversize = True
+                        reasons.append(f"三邊總和超限({total_size:.1f}>105cm)")
+                    if max_side > 45:
+                        is_oversize = True
+                        reasons.append(f"最長邊超限({max_side:.1f}>45cm)")
+                    if weight_kg > 5:
+                        is_oversize = True
+                        reasons.append(f"重量超限({weight_kg:.1f}>5kg)")
+                        
+                elif '嘉里快遞' in logistics:
+                    can_split = False
+                    if total_size > 200:
+                        is_oversize = True
+                        reasons.append(f"三邊總和超限({total_size:.1f}>200cm)")
+                    if max_side > 120:
+                        is_oversize = True
+                        reasons.append(f"最長邊超限({max_side:.1f}>120cm)")
+                    if weight_kg > 20:
+                        is_oversize = True
+                        reasons.append(f"重量超限({weight_kg:.1f}>20kg)")
+                        
+                elif '新竹物流' in logistics:
+                    can_split = False
+                    platform_discount = row.get('平台运费折扣', 0)
+                    
+                    if total_size > 210:
+                        is_oversize = True
+                        reasons.append(f"尺寸超過絕對限制({total_size:.1f}>210cm)")
+                    if max_side > 150:
+                        is_oversize = True
+                        reasons.append(f"單邊超過限制({max_side:.1f}>150cm)")
+                    if weight_kg > 20:
+                        is_oversize = True
+                        reasons.append(f"重量超限({weight_kg:.1f}>20kg)")
+                    
+                    # 材積費用檢查
+                    hsinchu_rates = [(60, 65), (90, 70), (120, 90), (150, 105), (160, 135), 
+                                    (170, 165), (180, 195), (190, 225), (200, 285), (210, 335)]
+                    for size_limit, rate in hsinchu_rates:
+                        if total_size <= size_limit:
+                            if rate > platform_discount and platform_discount > 0:
+                                is_oversize = True
+                                reasons.append(f"運費不足(需{rate}元>付{platform_discount}元)")
+                            break
+                
+                # 記錄商品資訊
+                order_products.append({
+                    'sku': sku,
+                    'name': row.get('商品名称', ''),
+                    'quantity': row.get('数量', 0),
+                    'weight_kg': weight_kg,
+                    'dimensions': f"{length}×{width}×{height}",
+                    'rack_location': row.get('货架位', ''),
+                    'is_oversize': is_oversize,
+                    'reasons': reasons
+                })
+                
+                # 更新訂單級別分類
+                if is_oversize:
+                    if can_split:
+                        if order_category != 'cannot-split':  # 不可拆單優先級更高
+                            order_category = 'can-split'
+                            oversize_orders['can_split'].add(order_no)
+                    else:
+                        order_category = 'cannot-split'
+                        oversize_orders['cannot_split'].add(order_no)
+                        oversize_orders['can_split'].discard(order_no)  # 從可拆單中移除
+                    
+                    oversize_reasons.extend(reasons)
+            
+            # 構建訂單資訊
+            first_row = group.iloc[0]
+            orders.append({
+                'order_no': order_no,
+                'category': order_category,
+                'logistics': first_row['买家指定物流'],
+                'order_amount': first_row.get('订单金额', ''),
+                'oversize_reason': ' | '.join(set(oversize_reasons)) if oversize_reasons else '',
+                'products': order_products
+            })
+        
+        # 生成結果
+        result = {
+            'success': True,
+            'summary': {
+                'total_orders': len(orders),
+                'total_items': len(df),
+                'oversize_orders': len(oversize_orders['cannot_split']) + len(oversize_orders['can_split'])
+            },
+            'order_lists': {
+                'cannot_split': list(oversize_orders['cannot_split']),
+                'can_split': list(oversize_orders['can_split'])
+            },
+            'orders': orders
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'處理錯誤: {str(e)}'})
 
 
 # ============================================================
