@@ -9,6 +9,12 @@ import sys, csv, io, os, re, json, threading, time, hashlib, secrets
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
 
+# ── 超材分析依賴 ──
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 # ── 圖片URL解析：將 =IMAGE("url") 公式轉成純 URL ──
 def parse_image_url(cell_value):
     if not cell_value:
@@ -6710,13 +6716,157 @@ def api_warehouse_records():
 
 
 # ============================================================
+# 超材分析核心邏輯
+# ============================================================
+
+# 重量異常修正表
+WEIGHT_CORRECTIONS = {
+    "ADV002-003": {"original": 215000, "corrected": 250},
+    "AUW001-001": {"original": 12000, "corrected": 50},
+    "BTE001-002": {"original": 5500, "corrected": 55},
+    "CDK003-001": {"original": 3200, "corrected": 32}
+}
+
+# 各通路超材標準 (長cm, 寬cm, 高cm, 重量g)
+CHANNEL_LIMITS = {
+    "蝦皮店到店": {"max_length": 105, "max_width": 45, "max_height": 45, "max_weight": 10000, "splittable": True},
+    "蝦皮店到家": {"max_length": 150, "max_width": 100, "max_height": 100, "max_weight": 15000, "splittable": True},
+    "超商取貨": {"max_length": 105, "max_width": 45, "max_height": 45, "max_weight": 5000, "splittable": False},
+    "嘉里快遞": {"max_length": 200, "max_width": 120, "max_height": 120, "max_weight": 20000, "splittable": False},
+    "新竹物流": {"max_length": 210, "max_width": 150, "max_height": 150, "max_weight": 20000, "splittable": False}
+}
+
+def correct_weight_anomalies(df):
+    """修正已知的重量異常"""
+    corrected_count = 0
+    for sku, correction in WEIGHT_CORRECTIONS.items():
+        if "商品編號" in df.columns:
+            mask = df["商品編號"] == sku
+            if mask.any() and "子交易總重量" in df.columns:
+                original_weight = correction["original"]
+                corrected_weight = correction["corrected"]
+                weight_mask = mask & (df["子交易總重量"] == original_weight)
+                if weight_mask.any():
+                    df.loc[weight_mask, "子交易總重量"] = corrected_weight
+                    corrected_count += weight_mask.sum()
+    return df, corrected_count
+
+def detect_channel_from_shipping(shipping_type):
+    """從出貨類型判斷通路"""
+    shipping = str(shipping_type).lower()
+    if "店到店" in shipping:
+        return "蝦皮店到店"
+    elif "宅配" in shipping or "店到家" in shipping:
+        return "蝦皮店到家"
+    elif "超商" in shipping:
+        return "超商取貨"
+    elif "嘉里" in shipping:
+        return "嘉里快遞"
+    elif "新竹" in shipping:
+        return "新竹物流"
+    return "未知通路"
+
+def check_oversize_item(row, channel_limits):
+    """檢查單個商品是否超材"""
+    try:
+        length = float(row.get("商品長", 0))
+        width = float(row.get("商品寬", 0))
+        height = float(row.get("商品高", 0))
+        weight = float(row.get("子交易總重量", 0))
+        
+        limits = channel_limits
+        
+        # 檢查各維度是否超標
+        oversize_reasons = []
+        if length > limits["max_length"]:
+            oversize_reasons.append(f"長度{length}cm > {limits['max_length']}cm")
+        if width > limits["max_width"]:
+            oversize_reasons.append(f"寬度{width}cm > {limits['max_width']}cm")
+        if height > limits["max_height"]:
+            oversize_reasons.append(f"高度{height}cm > {limits['max_height']}cm")
+        if weight > limits["max_weight"]:
+            oversize_reasons.append(f"重量{weight}g > {limits['max_weight']}g")
+            
+        return len(oversize_reasons) > 0, oversize_reasons
+        
+    except (ValueError, TypeError):
+        return False, ["數據格式錯誤"]
+
+def analyze_bs_oversize(df):
+    """分析BigSeller訂單超材情況"""
+    results = {
+        "total_orders": 0,
+        "total_items": 0,
+        "oversize_items": [],
+        "splittable_count": 0,
+        "non_splittable_count": 0,
+        "corrected_weights": 0,
+        "analysis_summary": {}
+    }
+    
+    if df is None or df.empty:
+        return results
+        
+    # 修正重量異常
+    df, corrected_count = correct_weight_anomalies(df)
+    results["corrected_weights"] = corrected_count
+    
+    # 基本統計
+    results["total_items"] = len(df)
+    if "訂單編號" in df.columns:
+        results["total_orders"] = df["訂單編號"].nunique()
+    
+    # 分析每個商品
+    for idx, row in df.iterrows():
+        # 判斷通路
+        channel = detect_channel_from_shipping(row.get("出貨類型", ""))
+        if channel == "未知通路":
+            continue
+            
+        channel_limits = CHANNEL_LIMITS.get(channel, CHANNEL_LIMITS["蝦皮店到家"])
+        
+        # 檢查是否超材
+        is_oversize, reasons = check_oversize_item(row, channel_limits)
+        
+        if is_oversize:
+            oversize_info = {
+                "order_id": row.get("訂單編號", ""),
+                "sku": row.get("商品編號", ""),
+                "channel": channel,
+                "splittable": channel_limits["splittable"],
+                "reasons": reasons
+            }
+            results["oversize_items"].append(oversize_info)
+            
+            if channel_limits["splittable"]:
+                results["splittable_count"] += 1
+            else:
+                results["non_splittable_count"] += 1
+    
+    # 統計分析
+    channel_stats = {}
+    for item in results["oversize_items"]:
+        channel = item["channel"]
+        if channel not in channel_stats:
+            channel_stats[channel] = {"total": 0, "splittable": 0, "non_splittable": 0}
+        channel_stats[channel]["total"] += 1
+        if item["splittable"]:
+            channel_stats[channel]["splittable"] += 1
+        else:
+            channel_stats[channel]["non_splittable"] += 1
+    
+    results["analysis_summary"] = channel_stats
+    
+    return results
+
+# ============================================================
 # BigSeller 超材分單系統
 # ============================================================
 
 @app.route("/bs-oversize")
 @login_required
 def bs_oversize_page():
-    """BS超材分單主頁面"""
+    """BS超材分單主頁面 - 功能版本"""
     bs_html = """<!DOCTYPE html>
 <html>
 <head>
@@ -6733,14 +6883,38 @@ def bs_oversize_page():
     .btn-home { color: #aaa; font-size: 12px; text-decoration: none; padding: 6px 12px; 
                 border: 1px solid #333; border-radius: 5px; }
     .btn-home:hover { border-color: #666; color: #fff; }
-    .content { text-align: center; padding: 80px 20px; }
-    .icon { font-size: 100px; margin-bottom: 30px; opacity: 0.8; }
-    .title { font-size: 28px; margin-bottom: 15px; }
-    .title span { color: #f4a100; }
-    .desc { font-size: 16px; color: #aaa; line-height: 1.8; max-width: 600px; margin: 0 auto 40px; }
-    .status-card { background: rgba(244,161,0,.08); border: 1px solid rgba(244,161,0,.2); 
-                   border-radius: 16px; padding: 30px; max-width: 500px; margin: 0 auto; }
-    .status-card h4 { color: #f4a100; margin-bottom: 15px; font-size: 18px; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; }
+    .upload-section { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); 
+                      border-radius: 16px; padding: 40px; margin-bottom: 30px; text-align: center; }
+    .upload-zone { background: rgba(255,255,255,.02); border: 2px dashed rgba(255,255,255,.2); 
+                   border-radius: 12px; padding: 40px; margin: 20px 0; transition: all .3s ease; }
+    .upload-zone:hover { border-color: #f4a100; background: rgba(244,161,0,.05); }
+    .upload-input { display: none; }
+    .upload-btn { background: #f4a100; color: #000; border: none; padding: 12px 24px; 
+                  border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .upload-btn:hover { background: #ffb84d; }
+    .file-info { margin-top: 15px; color: #aaa; font-size: 12px; }
+    .results-section { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); 
+                       border-radius: 16px; padding: 30px; display: none; }
+    .loading { text-align: center; padding: 40px; color: #f4a100; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+                    gap: 20px; margin: 20px 0; }
+    .summary-card { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.1); 
+                    border-radius: 10px; padding: 20px; text-align: center; }
+    .summary-number { font-size: 24px; font-weight: 700; color: #f4a100; }
+    .summary-label { font-size: 12px; color: #aaa; margin-top: 5px; }
+    .oversize-list { margin-top: 20px; }
+    .oversize-item { background: rgba(255,255,255,.02); border-left: 3px solid #f4a100; 
+                     padding: 15px; margin: 10px 0; border-radius: 0 8px 8px 0; }
+    .item-header { font-weight: 600; margin-bottom: 8px; }
+    .item-details { font-size: 12px; color: #aaa; line-height: 1.6; }
+    .splittable { border-left-color: #4CAF50; }
+    .non-splittable { border-left-color: #f44336; }
+    .copy-btn { background: #333; color: #fff; border: none; padding: 8px 12px; 
+                border-radius: 5px; font-size: 12px; cursor: pointer; margin: 10px 5px 0 0; }
+    .copy-btn:hover { background: #555; }
+    .error { background: rgba(244,67,54,.1); border: 1px solid rgba(244,67,54,.3); 
+             border-radius: 8px; padding: 15px; margin: 15px 0; color: #f44336; }
     </style>
 </head>
 <body>
@@ -6748,18 +6922,187 @@ def bs_oversize_page():
         <div class="logo">📏 BS<span>超材分單</span></div>
         <a href="/" class="btn-home">🏠 返回首頁</a>
     </div>
-    <div class="content">
-        <div class="icon">📊</div>
-        <div class="title">BigSeller <span>超材分單系統</span></div>
-        <div class="desc">專為 BigSeller 訂單設計的智能超材分析工具，自動判斷不可拆單/可拆單類型。</div>
-        <div class="status-card">
-            <h4>🚧 功能開發中</h4>
-            <p style="color:#ddd;">我們正在開發這個功能，敬請期待！</p>
+    <div class="container">
+        <div class="upload-section">
+            <h2 style="color:#f4a100;margin-bottom:10px;">📤 上傳 BigSeller 訂單檔案</h2>
+            <p style="color:#aaa;margin-bottom:20px;">支援 Excel 格式檔案 (.xlsx, .xls)</p>
+            <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+                <div style="font-size:48px;margin-bottom:15px;">📊</div>
+                <button class="upload-btn">選擇檔案</button>
+                <input type="file" id="file-input" class="upload-input" accept=".xlsx,.xls" onchange="handleFileUpload(this)">
+                <div class="file-info">請選擇包含訂單資料的 Excel 檔案</div>
+            </div>
         </div>
+        
+        <div id="results-section" class="results-section">
+            <div id="loading" class="loading">
+                <div>🔄 分析中...</div>
+                <div style="font-size:12px;margin-top:10px;">正在處理您的訂單資料</div>
+            </div>
+            <div id="analysis-results" style="display:none;">
+                <h3 style="color:#f4a100;margin-bottom:20px;">📊 超材分析結果</h3>
+                <div id="summary-grid" class="summary-grid"></div>
+                <div id="oversize-list" class="oversize-list"></div>
+            </div>
+        </div>
+        
+        <div id="error-section" style="display:none;"></div>
     </div>
+    
+    <script>
+    function handleFileUpload(input) {
+        const file = input.files[0];
+        if (!file) return;
+        
+        document.querySelector('.file-info').textContent = `已選擇: ${file.name}`;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        document.getElementById('results-section').style.display = 'block';
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('analysis-results').style.display = 'none';
+        document.getElementById('error-section').style.display = 'none';
+        
+        fetch('/api/bs-oversize/analyze', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('loading').style.display = 'none';
+            if (data.ok) {
+                displayResults(data.results);
+                document.getElementById('analysis-results').style.display = 'block';
+            } else {
+                showError(data.msg);
+            }
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            showError('上傳失敗: ' + error.message);
+        });
+    }
+    
+    function displayResults(results) {
+        // 顯示統計摘要
+        const summaryGrid = document.getElementById('summary-grid');
+        summaryGrid.innerHTML = `
+            <div class="summary-card">
+                <div class="summary-number">${results.total_orders}</div>
+                <div class="summary-label">總訂單數</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-number">${results.total_items}</div>
+                <div class="summary-label">總商品數</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-number">${results.oversize_items.length}</div>
+                <div class="summary-label">超材商品</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-number">${results.splittable_count}</div>
+                <div class="summary-label">可拆單</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-number">${results.non_splittable_count}</div>
+                <div class="summary-label">不可拆單</div>
+            </div>
+        `;
+        
+        // 顯示超材商品列表
+        const oversizeList = document.getElementById('oversize-list');
+        if (results.oversize_items.length > 0) {
+            let listHtml = '<h4 style="color:#f4a100;margin:20px 0 15px 0;">🚨 超材商品明細</h4>';
+            
+            results.oversize_items.forEach(item => {
+                const className = item.splittable ? 'splittable' : 'non-splittable';
+                const statusText = item.splittable ? '✅ 可拆單' : '❌ 不可拆單';
+                
+                listHtml += `
+                    <div class="oversize-item ${className}">
+                        <div class="item-header">${item.order_id} - ${item.sku}</div>
+                        <div class="item-details">
+                            通路: ${item.channel} | ${statusText}<br>
+                            超材原因: ${item.reasons.join(', ')}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            // 添加複製按鈕
+            const splittableOrders = results.oversize_items.filter(item => item.splittable).map(item => item.order_id);
+            const nonSplittableOrders = results.oversize_items.filter(item => !item.splittable).map(item => item.order_id);
+            
+            listHtml += '<div style="margin-top:20px;">';
+            if (splittableOrders.length > 0) {
+                listHtml += `<button class="copy-btn" onclick="copyToClipboard('${splittableOrders.join('\\n')}')">📋 複製可拆單訂單號</button>`;
+            }
+            if (nonSplittableOrders.length > 0) {
+                listHtml += `<button class="copy-btn" onclick="copyToClipboard('${nonSplittableOrders.join('\\n')}')">📋 複製不可拆單訂單號</button>`;
+            }
+            listHtml += '</div>';
+            
+            oversizeList.innerHTML = listHtml;
+        } else {
+            oversizeList.innerHTML = '<div style="text-align:center;color:#4CAF50;padding:20px;">🎉 沒有發現超材商品！</div>';
+        }
+    }
+    
+    function showError(message) {
+        const errorSection = document.getElementById('error-section');
+        errorSection.innerHTML = `<div class="error">❌ ${message}</div>`;
+        errorSection.style.display = 'block';
+        document.getElementById('results-section').style.display = 'none';
+    }
+    
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('訂單號已複製到剪貼簿！');
+        }).catch(() => {
+            alert('複製失敗，請手動複製');
+        });
+    }
+    </script>
 </body>
 </html>"""
     return render_template_string(bs_html)
+
+@app.route("/api/bs-oversize/analyze", methods=["POST"])
+@login_required
+def bs_oversize_analyze():
+    """BS超材分析API"""
+    if pd is None:
+        return jsonify({"ok": False, "msg": "pandas 模組未安裝，請聯繫管理員"})
+    
+    try:
+        # 檢查檔案
+        if 'file' not in request.files:
+            return jsonify({"ok": False, "msg": "未選擇檔案"})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"ok": False, "msg": "檔案名稱為空"})
+        
+        # 讀取Excel檔案
+        if file.filename.endswith('.xlsx') or file.filename.endswith('.xls'):
+            df = pd.read_excel(file)
+        else:
+            return jsonify({"ok": False, "msg": "不支援的檔案格式，請使用 Excel 檔案"})
+        
+        # 檢查必要欄位
+        required_columns = ["訂單編號", "商品編號", "出貨類型"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return jsonify({"ok": False, "msg": f"缺少必要欄位: {', '.join(missing_columns)}"})
+        
+        # 執行超材分析
+        results = analyze_bs_oversize(df)
+        
+        return jsonify({"ok": True, "results": results})
+        
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"分析失敗: {str(e)}"})
 
 # ============================================================
 # 超人眼鏡 Chrome Extension API
