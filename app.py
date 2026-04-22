@@ -1201,12 +1201,6 @@ def api_bs_oversize_analyze():
     except Exception as e:
         return jsonify({"ok": False, "msg": f"分析失敗：{str(e)}"})
 
-# 保持舊路由重定向到新系統
-@app.route("/split")
-@login_required 
-def split_redirect():
-    return redirect("/bs-oversize")
-
 # 報關助手HTML模板
 CUSTOMS_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
@@ -2061,6 +2055,235 @@ def superman_glasses_cost_get():
     })
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route("/api/superman-glasses/save-cookie", methods=["POST", "OPTIONS"])
+def superman_glasses_save_cookie():
+    """Extension 上傳 BigSeller Cookie 供排程使用"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    
+    try:
+        data = request.get_json(force=True)
+        cookie = data.get("cookie", "").strip()
+        if not cookie:
+            return jsonify({"ok": False, "msg": "empty cookie"}), 400
+            
+        _ad_scheduler_store["bs_cookie"] = cookie
+        _ad_scheduler_store["cookie_ts"] = int(time.time())
+        _ad_log(f"Cookie 已更新，長度 {len(cookie)}")
+        
+        # 寫入 Sheets 持久化（Railway 重啟後可讀回）
+        def _persist_cookie():
+            try:
+                sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                if not sheet_id: 
+                    return
+                    
+                client, err = get_sheets_client()
+                if err: 
+                    return
+                    
+                sh = client.open_by_key(sheet_id)
+                try:
+                    ws = sh.worksheet("⚙️ 排程狀態")
+                except Exception:
+                    ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
+                    ws.append_row(["設定項目", "值"])
+                
+                # 讀現有資料，更新 cookie 行
+                rows = ws.get_all_values()
+                state = {r[0]: i+1 for i, r in enumerate(rows) if len(r) > 0}
+                cookie_row = state.get("bs_cookie")
+                
+                if cookie_row:
+                    ws.update_cell(cookie_row, 2, cookie)
+                else:
+                    ws.append_row(["bs_cookie", cookie])
+                    
+            except Exception as e:
+                print(f"[Cookie] 寫入 Sheets 失敗: {e}")
+        
+        threading.Thread(target=_persist_cookie, daemon=True).start()
+        
+        resp = jsonify({"ok": True, "len": len(cookie)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
+
+@app.route("/api/superman-glasses/profit-snapshot", methods=["POST", "OPTIONS"])
+def superman_glasses_profit_snapshot():
+    """將利潤快照寫入 Google Sheets 📊 利潤監控室"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID"}), 400
+
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+            
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 利潤監控室")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "日期":
+                ws.clear()
+                ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("📊 利潤監控室")
+            except:
+                ws = sh.add_worksheet(title="📊 利潤監控室", rows=10000, cols=14)
+            ws.append_row(["日期","時間","店鋪","廣告名稱","itemId","目前ROAS","實際ROAS(7天)","花費7天(TWD)","花費30天(TWD)","預算(TWD)","毛利%","目標ROAS","狀態","備註"], value_input_option="RAW")
+
+        now = datetime.now()
+        date_str = now.strftime("%Y/%m/%d")
+        time_str = now.strftime("%H:%M")
+
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                date_str,
+                time_str,
+                r.get("shopName", ""),
+                r.get("adName", ""),
+                r.get("itemId", ""),
+                r.get("currentRoas", ""),
+                r.get("actualRoas7", ""),
+                r.get("expense7", ""),
+                r.get("expense30", ""),
+                r.get("budget", ""),
+                r.get("margin", ""),
+                r.get("targetRoas", ""),
+                r.get("status", ""),
+                r.get("note", ""),
+            ])
+
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+        _ad_log(f"✅ 利潤快照已寫入Sheets: {len(sheet_rows)} 筆")
+        
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        _ad_log(f"❌ 利潤快照寫入失敗: {str(e)}")
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
+
+@app.route("/api/superman-glasses/product-profit", methods=["POST", "OPTIONS"])
+def superman_glasses_product_profit():
+    """掃描完成後寫入商品利潤到 Google Sheets 📊 商品利潤表"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    
+    try:
+        data = request.get_json(force=True)
+        rows = data.get("rows", [])
+        if not rows:
+            return jsonify({"ok": False, "msg": "無資料"}), 400
+
+        sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not sheet_id:
+            return jsonify({"ok": True, "msg": "未設定SHEETS，跳過"})
+
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": err}), 500
+            
+        try:
+            ws = client.open_by_key(sheet_id).worksheet("📊 商品利潤表")
+            first_row = ws.row_values(1)
+            if not first_row or first_row[0] != "SKU":
+                ws.clear()
+                ws.append_row(["SKU", "商品名稱", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+        except Exception:
+            sh = client.open_by_key(sheet_id)
+            try:
+                ws = sh.worksheet("📊 商品利潤表")
+                ws.clear()
+            except Exception:
+                ws = sh.add_worksheet(title="📊 商品利潤表", rows=10000, cols=6)
+            ws.append_row(["SKU", "商品名稱", "售價", "成本", "毛利%", "更新時間"], value_input_option="RAW")
+
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        sheet_rows = []
+        for r in rows:
+            sheet_rows.append([
+                r.get("sku", ""),
+                r.get("name", ""),
+                r.get("price", ""),
+                r.get("cost", ""),
+                r.get("margin", ""),
+                now_str,
+            ])
+
+        # 清除舊資料（保留標題），重新寫入
+        ws.resize(rows=1)
+        ws.append_rows(sheet_rows, value_input_option="RAW")
+        
+        _ad_log(f"✅ 商品利潤已寫入Sheets: {len(sheet_rows)} 筆")
+
+        resp = jsonify({"ok": True, "written": len(sheet_rows)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        _ad_log(f"❌ 商品利潤寫入失敗: {str(e)}")
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
+
+@app.route("/api/superman-glasses/ext-log", methods=["POST", "OPTIONS"])
+def superman_glasses_ext_log():
+    """Extension錯誤日誌API"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    
+    try:
+        data = request.get_json(force=True)
+        msg = data.get("msg", "")
+        level = data.get("level", "info")
+        
+        _ad_log(f"[Extension {level.upper()}] {msg}")
+        
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
 
 # CORS 處理
 @app.after_request
