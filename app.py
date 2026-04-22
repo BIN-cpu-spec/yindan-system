@@ -2708,37 +2708,6 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 
 <div class="sg-divider">
   <div class="sg-divider-line"></div>
-  <div class="sg-divider-text">&#x1F9E0; CHROME 擴充工具</div>
-  <div class="sg-divider-line"></div>
-</div>
-
-<div class="cards" style="padding-bottom:80px">
-  <div class="card card-glasses">
-    <span class="card-badge badge-ready">&#x2713; 上線中</span>
-    <div class="sg-logo-wrap">
-      <canvas id="sg-logo-home" width="96" height="54" style="border-radius:8px;"></canvas>
-      <div>
-        <div class="sg-logo-text">超人眼鏡</div>
-        <div class="sg-logo-sub">DATA VISION · BIGSELLER</div>
-      </div>
-    </div>
-    <div class="card-desc">在 BigSeller 在線產品頁面，即時顯示每個 SKU 的成本、售價與利潤率。讓運營判斷數據更直覺，未來持續新增更多功能。</div>
-    <div class="install-steps">
-      <ol>
-        <li>點擊下方按鈕下載 <strong>superman_glasses.zip</strong></li>
-        <li>解壓縮到任意資料夾（之後不要刪）</li>
-        <li>Chrome 網址列輸入 <strong>chrome://extensions</strong></li>
-        <li>開啟右上角 <strong>開發人員模式</strong></li>
-        <li>點 <strong>載入未封裝項目</strong>，選擇解壓縮的資料夾</li>
-        <li>完成！打開 BigSeller 在線產品即可使用</li>
-      </ol>
-    </div>
-    <a href="/api/superman-glasses/download" class="dl-btn">&#x2B07; 下載超人眼鏡</a>
-  </div>
-</div>
-
-<div class="sg-divider">
-  <div class="sg-divider-line"></div>
   <div class="sg-divider-text">🔍 超材分析工具</div>
   <div class="sg-divider-line"></div>
 </div>
@@ -3195,6 +3164,37 @@ function renderLowMargin() {
 loadAdLog();
 loadLowMargin();
 </script>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x1F9E0; CHROME 擴充工具</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div class="cards" style="padding-bottom:80px">
+  <div class="card card-glasses">
+    <span class="card-badge badge-ready">&#x2713; 員工版 v3.7</span>
+    <div class="sg-logo-wrap">
+      <canvas id="sg-logo-home" width="96" height="54" style="border-radius:8px;"></canvas>
+      <div>
+        <div class="sg-logo-text">超人眼鏡</div>
+        <div class="sg-logo-sub">DATA VISION · BIGSELLER</div>
+      </div>
+    </div>
+    <div class="card-desc">在 BigSeller 在線產品頁面，即時顯示每個 SKU 的成本、售價與利潤率，並提供 762 廣告管理、ROAS 調整、預算加碼等功能。</div>
+    <div class="install-steps">
+      <ol>
+        <li>點擊下方按鈕下載 <strong>superman_glasses.zip</strong></li>
+        <li>解壓縮到任意資料夾（之後不要刪）</li>
+        <li>Chrome 網址列輸入 <strong>chrome://extensions</strong></li>
+        <li>開啟右上角 <strong>開發人員模式</strong></li>
+        <li>點 <strong>載入未封裝項目</strong>，選擇解壓縮的資料夾</li>
+        <li>完成！打開 BigSeller 在線產品即可使用</li>
+      </ol>
+    </div>
+    <a href="/api/superman-glasses/download" class="dl-btn">&#x2B07; 下載超人眼鏡 v3.7</a>
+  </div>
+</div>
 
 </body></html>"""
 
@@ -9525,122 +9525,58 @@ def superman_glasses_script():
 
 @app.route("/api/superman-glasses/version")
 def superman_glasses_version():
-    """回傳版本號，Extension 可用來判斷是否需要更新"""
-    return jsonify({"version": "1.0", "name": "超人眼鏡", "updated": "2026-04-14"})
+    """回傳員工版 (v3.7) 的版本號，從實際的 manifest.json 讀取。"""
+    try:
+        manifest_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "extension", "v3.7", "manifest.json"
+        )
+        if os.path.isfile(manifest_path):
+            import json as _json
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                m = _json.load(f)
+            return jsonify({
+                "version": m.get("version", "unknown"),
+                "name": m.get("name", "超人眼鏡"),
+                "available": True
+            })
+        else:
+            return jsonify({
+                "version": "unknown",
+                "name": "超人眼鏡",
+                "available": False,
+                "msg": "v3.7 尚未部署"
+            })
+    except Exception as e:
+        return jsonify({"version": "unknown", "error": str(e), "available": False})
 
 @app.route("/api/superman-glasses/download")
 def superman_glasses_download():
-    """動態打包 Chrome Extension zip 並提供下載"""
-
-    manifest = """{
-  "manifest_version": 3,
-  "name": "超人眼鏡 - BigSeller Data Vision",
-  "version": "1.5",
-  "description": "在 BigSeller 直接看利潤數據，讓運營判斷更直覺",
-  "permissions": ["storage"],
-  "host_permissions": [
-    "https://www.bigseller.com/*",
-    "https://yindan-system-production.up.railway.app/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://www.bigseller.com/web/listing/shopee/active/*",
-        "https://www.bigseller.com/web/inventory/index.htm*",
-        "https://www.bigseller.com/web/advertise/shopee/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ]
-}"""
-
-    # content.js：純殼，發訊息給 background 要腳本
-    content_js = """/* 超人眼鏡 content.js v1.3 - 純殼，不含邏輯，裝一次永久有效 */
-(function() {
-  if (window.__sgShellLoaded) return;
-  window.__sgShellLoaded = true;
-
-  // 向 background 要最新腳本
-  chrome.runtime.sendMessage({ type: 'GET_SCRIPT' }, function(resp) {
-    if (chrome.runtime.lastError || !resp?.code) {
-      console.warn('[超人眼鏡] 無法取得腳本:', chrome.runtime.lastError?.message);
-      return;
-    }
-    try {
-      const fn = new Function(resp.code);
-      fn();
-    } catch(e) {
-      console.error('[超人眼鏡] 腳本執行錯誤:', e);
-    }
-  });
-})();"""
-
-    # background.js：從 Railway 抓腳本並快取，回應 content.js 的請求
-    background_js = """/* 超人眼鏡 background.js v1.3 - Service Worker，從 Railway 動態載入腳本 */
-const SCRIPT_URL = 'https://yindan-system-production.up.railway.app/api/superman-glasses/script.js';
-const CACHE_KEY  = 'sg_script_cache';
-const CACHE_TTL  = 30 * 60 * 1000; // 30 分鐘
-
-let _cachedCode = null;
-let _cachedTs   = 0;
-
-async function fetchLatestScript() {
-  try {
-    const r = await fetch(SCRIPT_URL, { cache: 'no-cache' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const code = await r.text();
-    _cachedCode = code;
-    _cachedTs   = Date.now();
-    // 存入 chrome.storage 以備 SW 重啟
-    chrome.storage.local.set({ [CACHE_KEY]: { code, ts: _cachedTs } });
-    return code;
-  } catch(e) {
-    console.warn('[超人眼鏡 BG] 無法從 Railway 取得腳本:', e.message);
-    return null;
-  }
-}
-
-async function getScript() {
-  // 記憶體快取還有效
-  if (_cachedCode && Date.now() - _cachedTs < CACHE_TTL) {
-    return _cachedCode;
-  }
-  // 從 chrome.storage 取
-  const stored = await chrome.storage.local.get(CACHE_KEY);
-  const cached = stored[CACHE_KEY];
-  if (cached?.code && Date.now() - cached.ts < CACHE_TTL) {
-    _cachedCode = cached.code;
-    _cachedTs   = cached.ts;
-    // 背景靜默更新
-    fetchLatestScript();
-    return _cachedCode;
-  }
-  // 完全沒快取，等待取得
-  return await fetchLatestScript();
-}
-
-// 監聽 content.js 的訊息
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'GET_SCRIPT') {
-    getScript().then(code => {
-      sendResponse({ code });
-    });
-    return true; // 保持 channel 開啟等待非同步
-  }
-});
-
-// 啟動時先抓一次
-fetchLatestScript();
-"""
-
-    readme = """超人眼鏡 Chrome Extension 安裝說明 v1.3
+    """讀 extension/v3.7/ 打包成 zip 供員工下載。
+    
+    v3.7 為員工正式版 (standalone content.js，不含廣告自動化)。
+    v3.8 為 BIN 管理版 (額外含 Cookie 同步與廣告管理)，另外發放，不從此路由下載。
+    """
+    ext_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extension", "v3.7")
+    required_files = ["manifest.json", "content.js", "background.js"]
+    
+    # 檢查所有必要檔案存在
+    missing = [f for f in required_files if not os.path.isfile(os.path.join(ext_dir, f))]
+    if missing:
+        return jsonify({
+            "ok": False,
+            "msg": f"v3.7 檔案尚未部署到伺服器，缺少：{', '.join(missing)}",
+            "hint": "請 BIN 先將 extension/v3.7/ 目錄推到 GitHub 並 Redeploy"
+        }), 503
+    
+    # README 是選配，沒有就用預設
+    readme_path = os.path.join(ext_dir, "README.txt")
+    if os.path.isfile(readme_path):
+        with open(readme_path, "r", encoding="utf-8") as f:
+            readme = f.read()
+    else:
+        readme = """超人眼鏡 Chrome Extension 員工版 v3.7
 =========================================
-
-【裝一次，永久有效，不需要更新】
 
 安裝步驟：
 1. 解壓縮這個 zip 到任意資料夾（之後不要刪除此資料夾）
@@ -9650,27 +9586,25 @@ fetchLatestScript();
 5. 完成！
 
 使用方式：
-- 在線產品頁面：右側出現「超人眼鏡」按鈕，點開查看利潤
+- BigSeller 在線產品頁面：右側出現「超人眼鏡」按鈕
+- 廣告管理頁面：自動顯示 762 廣告、ROAS 調整、預算加碼等
 - 庫存清單頁面：右下角出現「掃描庫存成本」按鈕
-  掃描完成後自動上傳，全公司20台電腦共用，只需一人掃描
 
-更新說明：
-- 功能邏輯由 Railway 統一管理，自動更新
-- Extension 本身永遠不需要重新安裝
+問題回報：請聯絡 BIN
 """
-
+    
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('superman_glasses/manifest.json', manifest)
-        zf.writestr('superman_glasses/content.js', content_js)
-        zf.writestr('superman_glasses/background.js', background_js)
+        for fname in required_files:
+            with open(os.path.join(ext_dir, fname), "rb") as f:
+                zf.writestr(f'superman_glasses/{fname}', f.read())
         zf.writestr('superman_glasses/README.txt', readme)
     buf.seek(0)
     return send_file(
         buf,
         mimetype='application/zip',
         as_attachment=True,
-        download_name='superman_glasses.zip'
+        download_name='superman_glasses_v3.7.zip'
     )
 
 
