@@ -9863,7 +9863,7 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
       <div style="font-size:48px;margin-bottom:15px;">📊</div>
       <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleFile(this)">
       <div class="upload-text">
-        <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇檔案</button>
+        <button class="upload-btn" onclick="event.stopPropagation();document.getElementById('file-input').click()">選擇檔案</button>
         <div style="margin-top:15px;color:#666;font-size:12px;">支援 Excel (.xlsx, .xls) 或 CSV 格式</div>
         <div style="margin-top:8px;color:#888;font-size:11px;">或直接拖拽檔案到此區域</div>
       </div>
@@ -10000,7 +10000,6 @@ function processFile(file) {
     alert('❌ 上傳失敗\\n\\n錯誤訊息: ' + error.message + '\\n\\n請檢查:\\n1. 檔案格式是否正確\\n2. 網路連線是否正常\\n3. 檔案是否損壞');
     document.getElementById('results-section').style.display = 'none';
   });
-}
 }
 
 function displayResults(results) {
