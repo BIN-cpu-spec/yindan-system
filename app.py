@@ -9711,114 +9711,367 @@ def check_oversize_single_item(length, width, height, weight, sku, channel_spec)
     except (ValueError, TypeError):
         return False, ["數據格式錯誤"]
 
+def ffd_pack_order(items, channel_spec):
+    """First-Fit Decreasing 裝箱演算法：把訂單內的 SKU 單件展開後，
+    盡量用最少箱數裝進通路材積內。
+    
+    items: [{"sku":str, "name":str, "L":float, "W":float, "H":float,
+             "weight_g":float, "qty":int, "diagonal":bool, "effective_side":float}]
+    回傳: (packages, msg)
+      packages = [[{"sku":.., "qty":.., "name":..}, ...], ...]  每個內層list是一個包裹
+      msg = 空字串 或 拆不掉的原因
+    """
+    import math
+    max_sum    = channel_spec["max_sum"]
+    max_single = channel_spec["max_single"]
+    max_weight = channel_spec["max_weight"]
+    max_split  = channel_spec.get("max_split", 5)
+
+    # 1) 展開件數 → 每個 item 是一件實體
+    units = []
+    for it in items:
+        for _ in range(max(1, it.get("qty", 1))):
+            eff_side = it.get("effective_side", max(it["L"], it["W"], it["H"]))
+            units.append({
+                "sku": it["sku"],
+                "name": it.get("name", ""),
+                "L": it["L"], "W": it["W"], "H": it["H"],
+                "weight_g": it["weight_g"],
+                "weight_suspect": it.get("weight_suspect", False),
+                "eff_side": eff_side,
+                "diagonal": it.get("diagonal", False),
+            })
+
+    # 2) 單件是否就已超規（可疑重量跳過重量檢查 — 視為資料異常，待人工確認）
+    for u in units:
+        if u["eff_side"] > max_single:
+            msg = f"SKU {u['sku']} 單件最長邊 {u['eff_side']:.0f}cm > {max_single}cm"
+            if not u["diagonal"]:
+                msg += "（若此商品可斜放，請將 SKU 加入斜放白名單）"
+            return None, msg
+        if not u.get("weight_suspect") and u["weight_g"] > max_weight:
+            return None, f"SKU {u['sku']} 單件重量 {u['weight_g']:.0f}g > {max_weight}g"
+        # 三邊和：用有效最長邊 + 另兩短邊
+        others = sorted([u["L"], u["W"], u["H"]])[:2]
+        single_sum = u["eff_side"] + sum(others)
+        if single_sum > max_sum:
+            return None, f"SKU {u['sku']} 單件三邊和 {single_sum:.0f}cm > {max_sum}cm"
+
+    # 3) FFD：依「單件三邊和」由大到小排序，逐件放入第一個塞得下的箱
+    def unit_sum(u):
+        others = sorted([u["L"], u["W"], u["H"]])[:2]
+        return u["eff_side"] + sum(others)
+
+    units_sorted = sorted(units, key=lambda u: (-unit_sum(u), -u["weight_g"]))
+
+    # 裝箱規則：最保守的近似（鼓勵多拆、避免超材被退）
+    #   包裹最長邊 = max(各件 eff_side)
+    #   包裹「其他邊加總」= sum(各件其他兩邊)
+    #   包裹三邊和 ≈ 最長邊 + 其他邊加總
+    # 可疑重量的 item 不計入包裹重量（已警告，待人工確認）
+    def item_weight(u):
+        return 0 if u.get("weight_suspect") else u["weight_g"]
+
+    def try_fit(box, u):
+        new_weight = box["weight"] + item_weight(u)
+        if new_weight > max_weight: return False
+        new_eff_side = max(box["eff_side"], u["eff_side"])
+        if new_eff_side > max_single: return False
+        new_other = box["other_sum"] + sum(sorted([u["L"], u["W"], u["H"]])[:2])
+        if new_eff_side + new_other > max_sum: return False
+        return True
+
+    def put(box, u):
+        box["weight"] += item_weight(u)
+        box["eff_side"] = max(box["eff_side"], u["eff_side"])
+        box["other_sum"] += sum(sorted([u["L"], u["W"], u["H"]])[:2])
+        box["has_suspect"] = box.get("has_suspect", False) or u.get("weight_suspect", False)
+        box["units"].append(u)
+
+    boxes = []
+    for u in units_sorted:
+        placed = False
+        for box in boxes:
+            if try_fit(box, u):
+                put(box, u)
+                placed = True
+                break
+        if not placed:
+            new_box = {"weight": 0, "eff_side": 0, "other_sum": 0, "units": [], "has_suspect": False}
+            if not try_fit(new_box, u):
+                return None, f"SKU {u['sku']} 新開箱仍裝不下（內部錯誤）"
+            put(new_box, u)
+            boxes.append(new_box)
+
+    if len(boxes) > max_split:
+        return None, f"需拆 {len(boxes)} 包，超過通路上限 {max_split} 包"
+
+    # 4) 整理輸出：每個 box 再 group 回 SKU x qty
+    from collections import Counter
+    packages = []
+    for box in boxes:
+        counter = Counter()
+        names = {}
+        for u in box["units"]:
+            counter[u["sku"]] += 1
+            names[u["sku"]] = u["name"]
+        items_out = [{"sku": sku, "qty": qty, "name": names.get(sku, "")}
+                     for sku, qty in counter.most_common()]
+        packages.append({
+            "items": items_out,
+            "total_sum": round(box["eff_side"] + box["other_sum"], 1),
+            "max_side":  round(box["eff_side"], 1),
+            "weight_g":  round(box["weight"], 0),
+            "has_suspect_weight": box.get("has_suspect", False),
+        })
+    return packages, ""
+
+
+def _get_diagonal_map():
+    """取得斜放白名單 (SKU → 斜放後有效最長邊cm)，與 /split 共用。"""
+    try:
+        return CONFIG.get("diagonal_skus", {}) or {}
+    except Exception:
+        return {}
+
+
 @app.route("/api/superman-glasses/oversize-analyze", methods=["POST"])
 @login_required
 def oversize_analyze_api():
-    """超材分析API - 處理實際BigSeller Excel檔案"""
+    """超材分析 API - 訂單級分析 + 拆單建議。"""
     try:
-        # 檢查檔案
         if 'file' not in request.files:
             return jsonify({"ok": False, "msg": "未選擇檔案"})
-        
         file = request.files['file']
         if file.filename == '':
             return jsonify({"ok": False, "msg": "檔案名稱為空"})
-        
-        # 嘗試讀取Excel檔案
+
         try:
             import pandas as pd
             df = pd.read_excel(file)
         except ImportError:
-            # 如果沒有pandas，返回模擬結果
-            return jsonify({
-                "ok": True, 
-                "results": {
-                    "total_items": 25,
-                    "oversize_items": [
-                        {
-                            "order_id": "260421CFS714CN", 
-                            "sku": "ADV002-003", 
-                            "channel": "超商取貨", 
-                            "tag": "超材/不可拆單",
-                            "violations": ["長度超標: 120cm > 105cm"]
-                        }
-                    ],
-                    "splittable_orders": ["260421D5JCBHB4"],
-                    "non_splittable_orders": ["260421CFS714CN"], 
-                    "channel_summary": {"超商取貨": 1, "蝦皮店到家": 1}
-                }
-            })
+            return jsonify({"ok": False, "msg": "伺服器缺少 pandas 套件"})
         except Exception as e:
             return jsonify({"ok": False, "msg": f"檔案讀取失敗: {str(e)}"})
-        
-        # 檢查必要欄位（BigSeller實際欄位名稱）
+
         required_columns = ["订单号", "商品SKU", "买家指定物流"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        missing_columns = [c for c in required_columns if c not in df.columns]
         if missing_columns:
             return jsonify({"ok": False, "msg": f"缺少必要欄位: {', '.join(missing_columns)}"})
-        
-        # 執行超材分析
-        results = {
-            "total_items": len(df),
-            "oversize_items": [],
-            "splittable_orders": [],
-            "non_splittable_orders": [],
-            "weight_corrections": 0,
-            "channel_summary": {}
-        }
-        
-        for idx, row in df.iterrows():
-            # 判斷通路
+
+        diag_map = _get_diagonal_map()
+
+        # 依訂單 group
+        from collections import defaultdict
+        order_map = defaultdict(list)       # order_id → [item dict]
+        order_channel = {}                  # order_id → channel
+        order_shipping_fee = {}             # order_id → 買家運費（0=免運，>0=客人自付）
+
+        for _, row in df.iterrows():
             channel = detect_channel_from_logistics(row.get("买家指定物流", ""))
             if channel == "未知通路":
                 continue
-                
-            channel_spec = OVERSIZE_CHANNEL_SPECS.get(channel)
-            if not channel_spec:
+            spec = OVERSIZE_CHANNEL_SPECS.get(channel)
+            if not spec:
                 continue
-            
-            # 檢查超材（使用實際欄位名稱）
             try:
-                length = float(row.get("长", 0))
-                width = float(row.get("宽", 0)) 
-                height = float(row.get("高", 0))
-                weight = float(row.get("商品重量", 0)) * 1000  # 轉換為克
-                
-                is_oversize, violations = check_oversize_single_item(
-                    length, width, height, weight, row.get("商品SKU", ""), channel_spec
-                )
-                
-                if is_oversize:
-                    oversize_info = {
-                        "order_id": row.get("订单号", ""),
-                        "sku": row.get("商品SKU", ""),
-                        "channel": channel,
-                        "tag": channel_spec["tag"],
-                        "splittable": channel_spec["splittable"],
-                        "violations": violations
-                    }
-                    results["oversize_items"].append(oversize_info)
-                    
-                    # 分類到可拆單/不可拆單
-                    order_id = row.get("订单号", "")
-                    if channel_spec["splittable"]:
-                        if order_id not in results["splittable_orders"]:
-                            results["splittable_orders"].append(order_id)
-                    else:
-                        if order_id not in results["non_splittable_orders"]:
-                            results["non_splittable_orders"].append(order_id)
-                            
-                    # 統計各通路
-                    if channel not in results["channel_summary"]:
-                        results["channel_summary"][channel] = 0
-                    results["channel_summary"][channel] += 1
-                    
+                L = float(row.get("长", 0))
+                W = float(row.get("宽", 0))
+                H = float(row.get("高", 0))
+                weight_g = float(row.get("商品重量", 0)) * 1000  # kg → g
+                qty = int(row.get("数量", 1) or 1)
+                sku = str(row.get("商品SKU", "")).strip()
             except (ValueError, TypeError):
                 continue
-        
+            if not sku:
+                continue
+
+            # 重量異常修正（已知 SKU 的修正表）
+            if sku in OVERSIZE_WEIGHT_CORRECTIONS:
+                corr = OVERSIZE_WEIGHT_CORRECTIONS[sku]
+                if weight_g == corr["error_weight"]:
+                    weight_g = corr["correct_weight"]
+
+            # 可疑重量標記：單件超過 100,000g (100kg) 幾乎不可能，視為資料輸入錯誤
+            # （員工在 BigSeller 把 kg 填成 g、或數字貼錯等等。這類訂單要人工確認，
+            #  不該因為「重量超標」就被歸為不可拆單）
+            WEIGHT_SUSPECT_THRESHOLD = 100000  # 100kg
+            weight_suspect = weight_g > WEIGHT_SUSPECT_THRESHOLD
+
+            # 斜放判斷
+            original_max = max(L, W, H)
+            if sku in diag_map:
+                eff_side = float(diag_map[sku])
+                diagonal = True
+            else:
+                eff_side = original_max
+                diagonal = False
+
+            order_map[row["订单号"]].append({
+                "sku": sku,
+                "name": str(row.get("商品名称", ""))[:40],
+                "L": L, "W": W, "H": H,
+                "weight_g": weight_g,
+                "weight_suspect": weight_suspect,
+                "qty": qty,
+                "effective_side": eff_side,
+                "diagonal": diagonal,
+                "original_max": original_max,
+            })
+            order_channel[row["订单号"]] = channel
+            # 記錄訂單運費（免運才能拆單）。Excel 裡「運費」=買家支付的運費，=0 代表免運。
+            # 同一訂單多 row 取第一筆即可（同訂單運費都一樣）
+            if row["订单号"] not in order_shipping_fee:
+                try:
+                    fee = float(row.get("运费", 0) or 0)
+                except (ValueError, TypeError):
+                    fee = 0.0
+                order_shipping_fee[row["订单号"]] = fee
+
+        # 逐訂單判斷是否超材
+        splittable_orders = []      # 可拆單訂單（有建議拆法）
+        non_splittable_orders = []  # 不可拆單訂單
+
+        for order_id, items in order_map.items():
+            channel = order_channel[order_id]
+            spec = OVERSIZE_CHANNEL_SPECS[channel]
+
+            # 找出訂單內所有超材原因（用於備註）
+            reasons = []
+
+            # 收集訂單內可疑重量的 SKU（用於警告訊息）
+            suspect_skus = [it for it in items if it.get("weight_suspect")]
+            if suspect_skus:
+                sku_list = "、".join(f"{it['sku']}(標示{it['weight_g']:.0f}g)" for it in suspect_skus[:3])
+                if len(suspect_skus) > 3:
+                    sku_list += f" 等 {len(suspect_skus)} 項"
+                reasons.append(f"⚠️ 重量資料異常（>100kg 不合理）：{sku_list}，請人工確認實際重量")
+
+            # 單件層級檢查（對每個 SKU 展開後的單件）
+            for it in items:
+                # 用 effective_side 做判斷（如果有斜放白名單）
+                others = sorted([it["L"], it["W"], it["H"]])[:2]
+                single_sum = it["effective_side"] + sum(others)
+                single_notes = []
+                if single_sum > spec["max_sum"]:
+                    single_notes.append(f"三邊和 {single_sum:.0f}cm > {spec['max_sum']}cm")
+                if it["effective_side"] > spec["max_single"]:
+                    extra = "（可考慮加入斜放白名單）" if not it["diagonal"] and it["H"] <= 10 else ""
+                    single_notes.append(f"最長邊 {it['effective_side']:.0f}cm > {spec['max_single']}cm{extra}")
+                # 重量檢查：可疑重量跳過（已另外標示警告）
+                if not it.get("weight_suspect") and it["weight_g"] > spec["max_weight"]:
+                    single_notes.append(f"單件重 {it['weight_g']:.0f}g > {spec['max_weight']}g")
+                if single_notes:
+                    tag = f"{it['sku']}×{it['qty']}"
+                    reasons.append(f"{tag}：" + "、".join(single_notes))
+
+            # 訂單層級總和檢查（多 SKU 合箱情境）—— 先用「所有件堆在一起」作最壞估計
+            # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
+            total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
+            total_sum = 0
+            max_eff_side = 0
+            for it in items:
+                others = sorted([it["L"], it["W"], it["H"]])[:2]
+                for _ in range(it["qty"]):
+                    total_sum += it["effective_side"] + sum(others)
+                    max_eff_side = max(max_eff_side, it["effective_side"])
+            order_level_over = (total_weight > spec["max_weight"]
+                              or total_sum > spec["max_sum"]
+                              or max_eff_side > spec["max_single"])
+
+            # 只有在訂單整體超材時才列入
+            is_order_oversize = len(reasons) > 0 or order_level_over
+            if not is_order_oversize:
+                continue
+
+            # 若訂單整體超但無單件原因（= 合併後才超材），補一條原因
+            if order_level_over and not reasons:
+                if total_weight > spec["max_weight"]:
+                    reasons.append(f"訂單合計重量 {total_weight:.0f}g > {spec['max_weight']}g")
+                if total_sum > spec["max_sum"]:
+                    reasons.append(f"訂單合計三邊和估算 {total_sum:.0f}cm > {spec['max_sum']}cm")
+
+            order_entry = {
+                "order_id": order_id,
+                "channel": channel,
+                "spec_desc": f"三邊≤{spec['max_sum']}cm / 最長≤{spec['max_single']}cm / 重量≤{spec['max_weight']}g",
+                "reasons": reasons,
+                "items": [
+                    {"sku": it["sku"], "qty": it["qty"], "name": it["name"],
+                     "dims": f"{it['L']:.0f}×{it['W']:.0f}×{it['H']:.0f}",
+                     "weight_g": round(it["weight_g"], 0),
+                     "diagonal": it["diagonal"],
+                     "eff_side": round(it["effective_side"], 1)}
+                    for it in items
+                ],
+            }
+
+            if spec["splittable"]:
+                # 嘗試 FFD 拆單
+                packages, err = ffd_pack_order(items, spec)
+                if packages and len(packages) >= 2:
+                    # ★ 拆單前置條件：必須免運（客人沒付運費）
+                    #   拆單後會產生多筆包裹，每筆都會扣平台運費，只有免運單才不會讓客人抱怨
+                    shipping_fee = order_shipping_fee.get(order_id, 0)
+                    if shipping_fee > 0:
+                        # 非免運 → 不能拆單，歸到不可拆單並說明原因
+                        order_entry["split_ok"] = False
+                        order_entry["single_ok_multi_fail"] = True  # 顯示黃色提示
+                        order_entry["shipping_fee"] = shipping_fee
+                        order_entry["split_msg"] = (
+                            f"客人自付運費 {shipping_fee:.0f} 元（非免運），不可拆單。"
+                            f"本可拆成 {len(packages)} 包，建議中逗客人取消重下免運訂單"
+                        )
+                        non_splittable_orders.append(order_entry)
+                    else:
+                        # 免運 → 正常建議拆單
+                        order_entry["split_ok"] = True
+                        order_entry["packages"] = packages
+                        order_entry["shipping_fee"] = 0
+                        order_entry["split_msg"] = f"建議拆成 {len(packages)} 包（免運單）"
+                        splittable_orders.append(order_entry)
+                elif packages and len(packages) == 1:
+                    # 拆完只要 1 包 → 其實整單合法，不算超材
+                    continue
+                else:
+                    # 拆不掉 → 歸到不可拆單
+                    order_entry["split_ok"] = False
+                    order_entry["split_msg"] = err or "無法自動拆單"
+                    non_splittable_orders.append(order_entry)
+            else:
+                # 不可拆單通路。判斷「單件合規 vs 合箱才超」以給員工清楚建議
+                all_single_ok = True
+                for it in items:
+                    others = sorted([it["L"], it["W"], it["H"]])[:2]
+                    single_sum = it["effective_side"] + sum(others)
+                    if (single_sum > spec["max_sum"]
+                        or it["effective_side"] > spec["max_single"]
+                        or (not it.get("weight_suspect") and it["weight_g"] > spec["max_weight"])):
+                        all_single_ok = False
+                        break
+
+                order_entry["split_ok"] = False
+                if all_single_ok and order_level_over:
+                    # ★ 單件合規、多件合箱才超 → 給員工具體建議
+                    order_entry["single_ok_multi_fail"] = True
+                    order_entry["split_msg"] = (
+                        f"{channel}不支援拆單，但單件皆合規、僅多件合箱時超材。"
+                        "建議：中逗客人拆成多筆訂單，或改用可拆單通路（蝦皮店到店/店到家）"
+                    )
+                else:
+                    order_entry["single_ok_multi_fail"] = False
+                    order_entry["split_msg"] = f"{channel}不支援拆單"
+                non_splittable_orders.append(order_entry)
+
+        results = {
+            "splittable_orders": splittable_orders,
+            "non_splittable_orders": non_splittable_orders,
+        }
         return jsonify({"ok": True, "results": results})
-        
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"ok": False, "msg": f"分析失敗: {str(e)}"})
 
 @app.route("/oversize-tool")
@@ -9856,6 +10109,28 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
          gap: 15px; margin: 20px 0; }
 .stat-card { background: rgba(255,255,255,.02); padding: 20px; border-radius: 10px; text-align: center; }
 .stat-number { font-size: 24px; font-weight: 700; color: #f4a100; }
+
+/* 訂單卡片 */
+.order-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
+              border-radius: 8px; padding: 14px 16px; margin: 10px 0; }
+.order-card.split-ok { border-left: 3px solid #4CAF50; }
+.order-card.non-split { border-left: 3px solid #f44336; }
+.order-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.order-id { font-family: monospace; font-weight: 700; font-size: 14px; color: #fff; }
+.order-channel { font-size: 11px; color: #aaa; background: rgba(255,255,255,.05); 
+                 padding: 2px 8px; border-radius: 10px; }
+.order-spec { font-size: 11px; color: #666; margin-left: auto; }
+.reason-list { font-size: 12px; color: #f4a100; background: rgba(244,161,0,.06);
+               padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; line-height: 1.6; }
+.reason-list .reason-item { padding: 2px 0; }
+.item-line { font-family: monospace; font-size: 11px; color: #aaa; padding: 2px 0; }
+.item-line .dim-diag { color: #85B7EB; }
+.pkg-block { background: rgba(76,175,80,.05); border: 1px solid rgba(76,175,80,.2);
+             border-radius: 5px; padding: 8px 10px; margin: 6px 0; }
+.pkg-title { font-size: 12px; color: #4CAF50; font-weight: 600; margin-bottom: 4px; }
+.pkg-item { font-family: monospace; font-size: 11px; color: #ccc; padding: 1px 0; }
+.pkg-meta { font-size: 10px; color: #666; margin-top: 4px; }
+.no-result { text-align: center; padding: 30px; color: #666; font-size: 13px; }
 </style></head>
 <body>
 <div class="topbar">
@@ -9878,19 +10153,21 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
   </div>
   
   <div id="results-section" class="section" style="display:none;">
-    <h3 style="color:#f4a100;margin-bottom:15px;">📊 超材分析結果</h3>
-    <div id="stats" class="stats"></div>
-    
-    <div style="margin-top:30px;">
-      <h4 style="color:#4CAF50;margin-bottom:10px;">✅ 可拆單訂單 (標記: 超材/系統或人工拆單)</h4>
-      <button class="copy-btn" onclick="copyOrders('splittable')">📋 複製可拆單訂單號</button>
-      <div id="splittable-orders" class="order-list"></div>
+    <h3 style="color:#f4a100;margin-bottom:5px;">📊 超材分析結果</h3>
+    <div id="summary" style="font-size:13px;color:#aaa;margin-bottom:20px;"></div>
+
+    <div style="margin-top:20px;">
+      <h4 style="color:#4CAF50;margin-bottom:6px;">✅ 可拆單訂單 <span id="splittable-count" style="font-size:13px;color:#888;"></span></h4>
+      <div style="font-size:11px;color:#666;margin-bottom:10px;">依 First-Fit Decreasing 演算法產生拆單建議，每包皆符合通路材積</div>
+      <button class="copy-btn" onclick="copyOrders('splittable')">📋 複製訂單號</button>
+      <div id="splittable-orders"></div>
     </div>
-    
+
     <div style="margin-top:30px;">
-      <h4 style="color:#f44336;margin-bottom:10px;">❌ 不可拆單訂單 (標記: 超材/不可拆單)</h4>
-      <button class="copy-btn" onclick="copyOrders('non-splittable')">📋 複製不可拆單訂單號</button>
-      <div id="non-splittable-orders" class="order-list"></div>
+      <h4 style="color:#f44336;margin-bottom:6px;">❌ 不可拆單訂單 <span id="non-splittable-count" style="font-size:13px;color:#888;"></span></h4>
+      <div style="font-size:11px;color:#666;margin-bottom:10px;">商品規格超過通路材積，無法拆單處理</div>
+      <button class="copy-btn" onclick="copyOrders('non-splittable')">📋 複製訂單號</button>
+      <div id="non-splittable-orders"></div>
     </div>
   </div>
 </div>
@@ -10011,46 +10288,102 @@ function processFile(file) {
 
 function displayResults(results) {
   analysisResults = results;
-  
-  // 顯示統計
-  document.getElementById('stats').innerHTML = `
-    <div class="stat-card">
-      <div class="stat-number">${results.total_items}</div>
-      <div>總商品數</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-number">${results.oversize_items.length}</div>
-      <div>超材商品</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-number">${results.splittable_orders.length}</div>
-      <div>可拆單訂單</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-number">${results.non_splittable_orders.length}</div>
-      <div>不可拆單訂單</div>
-    </div>
-  `;
-  
-  // 顯示訂單列表
-  document.getElementById('splittable-orders').innerHTML = 
-    results.splittable_orders.map(order => `<div class="order-item">${order}</div>`).join('');
-    
-  document.getElementById('non-splittable-orders').innerHTML = 
-    results.non_splittable_orders.map(order => `<div class="order-item">${order}</div>`).join('');
-  
+  const splittable = results.splittable_orders || [];
+  const nonSplittable = results.non_splittable_orders || [];
+
+  document.getElementById('summary').textContent =
+    `分析完成：共 ${splittable.length + nonSplittable.length} 筆超材訂單`;
+  document.getElementById('splittable-count').textContent = `(${splittable.length} 筆)`;
+  document.getElementById('non-splittable-count').textContent = `(${nonSplittable.length} 筆)`;
+
+  document.getElementById('splittable-orders').innerHTML = splittable.length === 0
+    ? '<div class="no-result">— 無可拆單訂單 —</div>'
+    : splittable.map(renderSplittable).join('');
+
+  document.getElementById('non-splittable-orders').innerHTML = nonSplittable.length === 0
+    ? '<div class="no-result">— 無不可拆單訂單 —</div>'
+    : nonSplittable.map(renderNonSplittable).join('');
+
   document.getElementById('results-section').style.display = 'block';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderReasons(reasons) {
+  if (!reasons || reasons.length === 0) return '';
+  return `<div class="reason-list">
+    ${reasons.map(r => `<div class="reason-item">⚠️ ${esc(r)}</div>`).join('')}
+  </div>`;
+}
+
+function renderItems(items) {
+  return items.map(it => {
+    const diagBadge = it.diagonal ? '<span class="dim-diag"> [斜放 ' + it.eff_side + 'cm]</span>' : '';
+    return `<div class="item-line">• ${esc(it.sku)} ×${it.qty} | ${it.dims}cm${diagBadge} | ${it.weight_g}g | ${esc(it.name)}</div>`;
+  }).join('');
+}
+
+function renderSplittable(o) {
+  const pkgsHtml = (o.packages || []).map((pkg, i) => {
+    const itemsStr = pkg.items.map(it => `${esc(it.sku)}×${it.qty}`).join(' + ');
+    const nameStr = pkg.items.map(it => esc(it.name)).filter(Boolean).join('、');
+    let weightDisplay;
+    if (pkg.has_suspect_weight && pkg.weight_g === 0) {
+      weightDisplay = `重 <span style="color:#f4a100">— (待確認)</span>`;
+    } else if (pkg.has_suspect_weight) {
+      weightDisplay = `重 ${pkg.weight_g}g <span style="color:#f4a100">(部分待確認)</span>`;
+    } else {
+      weightDisplay = `重 ${pkg.weight_g}g`;
+    }
+    return `<div class="pkg-block">
+      <div class="pkg-title">📦 第 ${i+1} 包 · ${pkg.items.reduce((s,it)=>s+it.qty,0)} 件</div>
+      <div class="pkg-item">${itemsStr}</div>
+      ${nameStr ? `<div class="pkg-item" style="color:#888;">${nameStr}</div>` : ''}
+      <div class="pkg-meta">三邊估 ${pkg.total_sum}cm / 最長 ${pkg.max_side}cm / ${weightDisplay}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="order-card split-ok">
+    <div class="order-head">
+      <span class="order-id">${esc(o.order_id)}</span>
+      <span class="order-channel">${esc(o.channel)}</span>
+      <span class="order-spec">${esc(o.spec_desc)}</span>
+    </div>
+    ${renderReasons(o.reasons)}
+    <div style="font-size:11px;color:#666;margin:8px 0 4px;">原始商品：</div>
+    ${renderItems(o.items)}
+    <div style="font-size:12px;color:#4CAF50;margin:10px 0 6px;font-weight:600;">${esc(o.split_msg || '')}：</div>
+    ${pkgsHtml}
+  </div>`;
+}
+
+function renderNonSplittable(o) {
+  const badge = o.single_ok_multi_fail
+    ? '<span style="display:inline-block;background:rgba(244,161,0,.15);color:#f4a100;border:1px solid rgba(244,161,0,.4);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px;">💡 可建議客人處理</span>'
+    : '';
+  const msgColor = o.single_ok_multi_fail ? '#f4a100' : '#f44336';
+  return `<div class="order-card non-split">
+    <div class="order-head">
+      <span class="order-id">${esc(o.order_id)}</span>
+      <span class="order-channel">${esc(o.channel)}</span>
+      ${badge}
+      <span class="order-spec">${esc(o.spec_desc)}</span>
+    </div>
+    ${renderReasons(o.reasons)}
+    <div style="font-size:12px;color:${msgColor};margin:8px 0;line-height:1.5;">${esc(o.split_msg || '')}</div>
+    <div style="font-size:11px;color:#666;margin:4px 0;">商品：</div>
+    ${renderItems(o.items)}
+  </div>`;
 }
 
 function copyOrders(type) {
   if (!analysisResults) return;
-  
-  const orders = type === 'splittable' 
-    ? analysisResults.splittable_orders 
-    : analysisResults.non_splittable_orders;
-    
-  const text = orders.join('\\n');
-  
+  const orders = type === 'splittable'
+    ? (analysisResults.splittable_orders || [])
+    : (analysisResults.non_splittable_orders || []);
+  const text = orders.map(o => o.order_id).join('\\n');
   navigator.clipboard.writeText(text).then(() => {
     alert(`已複製 ${orders.length} 個${type === 'splittable' ? '可拆單' : '不可拆單'}訂單號！`);
   });
