@@ -2802,27 +2802,100 @@ async function loadAdLog() {
     const r = await fetch('/api/superman-glasses/ad-log');
     const d = await r.json();
 
-    // 排程狀態
+    // ── 排程健康監控 ─────────────────────────────
     const cookieOk = d.cookie_ok;
     const costCount = d.cost_count || 0;
-    const lastDaily = d.last_daily || '尚未執行';
-    const lastHourly = d.last_hourly ? new Date(d.last_hourly * 1000).toLocaleString('zh-TW') : '尚未執行';
+    const nowTs = Date.now() / 1000;
+
+    // 每小時預算：計算距離上次跑了多久
+    const lastHourlyTs = parseFloat(d.last_hourly) || 0;
+    const hourlyGapSec = lastHourlyTs > 0 ? (nowTs - lastHourlyTs) : null;
+    const hourlyGapMin = hourlyGapSec != null ? Math.floor(hourlyGapSec / 60) : null;
+
+    // 健康判斷：
+    //   綠 (正常): 0 ~ 65 分鐘內跑過
+    //   黃 (稍微延遲): 65 ~ 120 分鐘
+    //   紅 (卡住): 120 分鐘以上，或從未執行
+    let hourlyColor, hourlyIcon, hourlyStatus, hourlyDetail;
+    if (lastHourlyTs === 0) {
+      hourlyColor = '#e57373'; hourlyIcon = '&#x274C;';
+      hourlyStatus = '從未執行'; hourlyDetail = '自 Railway 啟動後尚未跑過';
+    } else if (hourlyGapMin <= 65) {
+      hourlyColor = '#5DCAA5'; hourlyIcon = '&#x2705;';
+      hourlyStatus = '正常';
+      hourlyDetail = `${hourlyGapMin} 分鐘前執行`;
+    } else if (hourlyGapMin <= 120) {
+      hourlyColor = '#f4a100'; hourlyIcon = '&#x26A0;';
+      hourlyStatus = '稍微延遲';
+      hourlyDetail = `${hourlyGapMin} 分鐘前（>1小時未跑）`;
+    } else {
+      hourlyColor = '#e57373'; hourlyIcon = '&#x274C;';
+      hourlyStatus = '疑似卡住';
+      const hr = Math.floor(hourlyGapMin / 60);
+      hourlyDetail = `${hr} 小時前，Cookie 可能過期`;
+    }
+    const lastHourlyStr = lastHourlyTs > 0 ? new Date(lastHourlyTs * 1000).toLocaleString('zh-TW') : '—';
+
+    // 每日 ROAS：台灣時間 9 點跑，判斷今天跑過沒
+    const today = new Date().toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' })
+                    .replace(/\//g, '-');
+    // toLocaleDateString 可能給 2026/4/22 → 2026-4-22，手動 pad
+    const tw = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
+    const todayStr = tw; // en-CA 會給 2026-04-22 格式
+    const twHour = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei', hour:'2-digit', hour12:false }));
+    let dailyColor, dailyIcon, dailyStatus, dailyDetail;
+    if (!d.last_daily) {
+      if (twHour < 9) {
+        dailyColor = '#888'; dailyIcon = '&#x1F4C5;';
+        dailyStatus = '等待中'; dailyDetail = `今天 09:00 才會首次執行`;
+      } else {
+        dailyColor = '#e57373'; dailyIcon = '&#x274C;';
+        dailyStatus = '從未執行'; dailyDetail = '排程可能未啟動';
+      }
+    } else if (d.last_daily === todayStr) {
+      dailyColor = '#5DCAA5'; dailyIcon = '&#x2705;';
+      dailyStatus = '今日已執行'; dailyDetail = d.last_daily;
+    } else {
+      // last_daily 非今日
+      if (twHour < 9) {
+        dailyColor = '#888'; dailyIcon = '&#x1F4C5;';
+        dailyStatus = '等待中'; dailyDetail = `上次：${d.last_daily}，今天 09:00 會跑`;
+      } else {
+        dailyColor = '#e57373'; dailyIcon = '&#x274C;';
+        dailyStatus = '今日未執行'; dailyDetail = `上次：${d.last_daily}（超過 9 點仍未跑）`;
+      }
+    }
+
     document.getElementById('sched-status').innerHTML = `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
-        <span style="color:${cookieOk ? '#5DCAA5' : '#e57373'};">${cookieOk ? '&#x2705;' : '&#x274C;'}</span>
-        <span>BigSeller Cookie：${cookieOk ? '有效' : '未同步，請開啟 BigSeller'}</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+        <div style="background:rgba(255,255,255,.03);border-left:3px solid ${hourlyColor};padding:10px 12px;border-radius:6px;">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+            <span style="color:${hourlyColor};">${hourlyIcon}</span>
+            <span style="font-weight:600;font-size:13px;">每小時預算排程</span>
+            <span style="margin-left:auto;font-size:11px;color:${hourlyColor};font-weight:600;">${hourlyStatus}</span>
+          </div>
+          <div style="font-size:12px;color:#bbb;margin-bottom:2px;">${hourlyDetail}</div>
+          <div style="font-size:11px;color:#666;">${lastHourlyStr}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-left:3px solid ${dailyColor};padding:10px 12px;border-radius:6px;">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+            <span style="color:${dailyColor};">${dailyIcon}</span>
+            <span style="font-weight:600;font-size:13px;">每日 ROAS 排程</span>
+            <span style="margin-left:auto;font-size:11px;color:${dailyColor};font-weight:600;">${dailyStatus}</span>
+          </div>
+          <div style="font-size:12px;color:#bbb;margin-bottom:2px;">${dailyDetail}</div>
+          <div style="font-size:11px;color:#666;">每日台灣時間 09:00 自動執行</div>
+        </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
-        <span style="color:${costCount > 0 ? '#5DCAA5' : '#e57373'};">${costCount > 0 ? '&#x2705;' : '&#x26A0;'}</span>
-        <span>成本資料：${costCount > 0 ? costCount + ' 個 SKU' : '尚無資料，請開啟庫存清單'}</span>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
-        <span>&#x1F4C5;</span>
-        <span>每日 ROAS 排程：${lastDaily}</span>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span>&#x23F1;</span>
-        <span>每小時預算排程：${lastHourly}</span>
+      <div style="display:flex;gap:16px;font-size:12px;padding:6px 2px;color:#888;">
+        <span style="display:flex;gap:4px;align-items:center;">
+          <span style="color:${cookieOk ? '#5DCAA5' : '#e57373'};">${cookieOk ? '&#x2705;' : '&#x274C;'}</span>
+          Cookie：${cookieOk ? '有效' : '未同步'}
+        </span>
+        <span style="display:flex;gap:4px;align-items:center;">
+          <span style="color:${costCount > 0 ? '#5DCAA5' : '#e57373'};">${costCount > 0 ? '&#x2705;' : '&#x26A0;'}</span>
+          成本：${costCount > 0 ? costCount + ' SKU' : '無'}
+        </span>
       </div>
     `;
 
@@ -2990,9 +3063,9 @@ async function loadAdLog() {
       '排程開始': '#555', '其他': '#888'
     };
 
-    el.innerHTML = \`<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
-      資料來源：\${source}
-    </div>\` + logs.map(log => {
+    el.innerHTML = `<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
+      資料來源：${source}
+    </div>` + logs.map(log => {
       const msg = log.msg || '';
       const type = log.type || '';
       const time = log.time || '';
@@ -3002,12 +3075,12 @@ async function loadAdLog() {
           if (msg.includes(k)) { color = v; break; }
         }
       }
-      const typeBadge = type ? \`<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:\${color};margin-right:6px;flex-shrink:0">\${type}</span>\` : '';
-      return \`<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
-        <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">\${time}</span>
-        \${typeBadge}
-        <span style="color:\${color};line-height:1.5;word-break:break-all">\${msg}</span>
-      </div>\`;
+      const typeBadge = type ? `<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:${color};margin-right:6px;flex-shrink:0">${type}</span>` : '';
+      return `<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
+        <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">${time}</span>
+        ${typeBadge}
+        <span style="color:${color};line-height:1.5;word-break:break-all">${msg}</span>
+      </div>`;
     }).join('');
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
@@ -3094,27 +3167,27 @@ function renderLowMargin() {
   el.innerHTML = Object.entries(byShop).map(([shop, items]) => {
     const hasBelow40 = items.some(i => i.margin <= 40);
     const shopColor = hasBelow40 ? '#E24B4A' : '#f4a100';
-    return \`<div style="margin-bottom:20px">
-      <div style="font-size:13px;font-weight:500;color:\${shopColor};margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(244,161,0,.2);display:flex;justify-content:space-between">
-        <span>&#x1F3EA; \${shop}</span>
-        <span style="font-size:11px;color:#888">\${items.length} 筆 | 毛利≤\${threshold}%</span>
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:500;color:${shopColor};margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(244,161,0,.2);display:flex;justify-content:space-between">
+        <span>&#x1F3EA; ${shop}</span>
+        <span style="font-size:11px;color:#888">${items.length} 筆 | 毛利≤${threshold}%</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px">
-        \${items.map(item => {
+        ${items.map(item => {
           const isBelow40 = item.margin <= 40;
           const bg = isBelow40 ? 'rgba(232,75,74,.1)' : 'rgba(244,161,0,.06)';
           const border = isBelow40 ? '1px solid rgba(232,75,74,.3)' : '1px solid rgba(244,161,0,.2)';
           const mColor = isBelow40 ? '#E24B4A' : '#f4a100';
           const tag = isBelow40 ? '&#x1F6D1; 嚴重' : '&#x26A0; 警告';
-          return \`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:\${bg};border-radius:6px;border:\${border}">
-            <span style="font-size:11px;color:\${mColor};flex-shrink:0">\${tag}</span>
-            <span style="font-size:12px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${item.name}</span>
-            <span style="font-size:12px;color:\${mColor};font-weight:500;flex-shrink:0">毛利 \${item.margin.toFixed(1)}%</span>
-            <span style="font-size:11px;color:#888;flex-shrink:0">ROAS \${item.roas}/\${item.targetRoas}</span>
-          </div>\`;
+          return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${bg};border-radius:6px;border:${border}">
+            <span style="font-size:11px;color:${mColor};flex-shrink:0">${tag}</span>
+            <span style="font-size:12px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</span>
+            <span style="font-size:12px;color:${mColor};font-weight:500;flex-shrink:0">毛利 ${item.margin.toFixed(1)}%</span>
+            <span style="font-size:11px;color:#888;flex-shrink:0">ROAS ${item.roas}/${item.targetRoas}</span>
+          </div>`;
         }).join('')}
       </div>
-    </div>\`;
+    </div>`;
   }).join('');
 }
 
@@ -10006,31 +10079,31 @@ function displayResults(results) {
   analysisResults = results;
   
   // 顯示統計
-  document.getElementById('stats').innerHTML = \`
+  document.getElementById('stats').innerHTML = `
     <div class="stat-card">
-      <div class="stat-number">\${results.total_items}</div>
+      <div class="stat-number">${results.total_items}</div>
       <div>總商品數</div>
     </div>
     <div class="stat-card">
-      <div class="stat-number">\${results.oversize_items.length}</div>
+      <div class="stat-number">${results.oversize_items.length}</div>
       <div>超材商品</div>
     </div>
     <div class="stat-card">
-      <div class="stat-number">\${results.splittable_orders.length}</div>
+      <div class="stat-number">${results.splittable_orders.length}</div>
       <div>可拆單訂單</div>
     </div>
     <div class="stat-card">
-      <div class="stat-number">\${results.non_splittable_orders.length}</div>
+      <div class="stat-number">${results.non_splittable_orders.length}</div>
       <div>不可拆單訂單</div>
     </div>
-  \`;
+  `;
   
   // 顯示訂單列表
   document.getElementById('splittable-orders').innerHTML = 
-    results.splittable_orders.map(order => \`<div class="order-item">\${order}</div>\`).join('');
+    results.splittable_orders.map(order => `<div class="order-item">${order}</div>`).join('');
     
   document.getElementById('non-splittable-orders').innerHTML = 
-    results.non_splittable_orders.map(order => \`<div class="order-item">\${order}</div>\`).join('');
+    results.non_splittable_orders.map(order => `<div class="order-item">${order}</div>`).join('');
   
   document.getElementById('results-section').style.display = 'block';
 }
@@ -10045,7 +10118,7 @@ function copyOrders(type) {
   const text = orders.join('\\n');
   
   navigator.clipboard.writeText(text).then(() => {
-    alert(\`已複製 \${orders.length} 個\${type === 'splittable' ? '可拆單' : '不可拆單'}訂單號！\`);
+    alert(`已複製 ${orders.length} 個${type === 'splittable' ? '可拆單' : '不可拆單'}訂單號！`);
   });
 }
 </script>
