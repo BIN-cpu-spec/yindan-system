@@ -4810,7 +4810,11 @@ function processFile(file) {
       if(d.db_err) {
         showMsg('&#9888; 無法連接商品報關資料庫：' + d.db_err + '，所有商品將顯示為查無資料', false);
       } else {
-        showMsg('&#10003; 資料庫載入成功（共 ' + d.db_count + ' 筆商品）', true);
+        var stat = '&#10003; 資料庫載入成功（共 ' + d.db_count + ' 筆商品）';
+        if(typeof d.matched !== 'undefined') {
+          stat += '，本次對應成功 ' + d.matched + ' 筆，未對應 ' + d.unmatched + ' 筆';
+        }
+        showMsg(stat, d.unmatched === 0);
       }
       allRows = d.rows;
       customsDb = d.db;
@@ -5351,7 +5355,9 @@ def api_customs_upload():
             "高": "hei",
             "材積": "volume", "材积": "volume",
             "總重量": "total_weight", "总重量": "total_weight",
-            "SKU": "sku", "SKU編碼": "sku",
+            "SKU": "sku", "SKU編碼": "sku", "sku": "sku", "SKU碼": "sku",
+            "SKU 編碼": "sku", "料號": "sku", "商品編號": "sku", "商品SKU": "sku",
+            "貨號": "sku",
         }
 
         header_row = None
@@ -5379,8 +5385,57 @@ def api_customs_upload():
                 return cv(row_r, c)
             return ""
 
-        # SKU 欄：優先用偵測到的，否則預設第18欄
-        sku_col = col_map.get("sku", 18)
+        # ★ SKU 欄位智慧偵測：
+        # 1. 先看標題列有沒有對應到 SKU
+        # 2. 若沒有，掃描標題列之外的欄位（通常 SKU 沒有標題），
+        #    找出「最多非空值、且內容看起來像 SKU（含字母+數字）」的欄位
+        def looks_like_sku(v):
+            """判斷字串是否像 SKU：含英文字母 + 數字，且長度合理"""
+            if not v or len(v) < 3 or len(v) > 50:
+                return False
+            has_alpha = any(c.isalpha() for c in v)
+            has_digit = any(c.isdigit() for c in v)
+            # 純數字也可能是 SKU（例如條碼 8858891600715），這邊放寬
+            if has_digit and len(v) >= 8:
+                return True
+            return has_alpha and has_digit
+
+        if "sku" in col_map:
+            sku_col = col_map["sku"]
+            log(f"SKU 欄位：第 {sku_col} 欄（由標題列偵測）")
+        else:
+            # 自動偵測：掃描所有欄位，找最像 SKU 的那一欄
+            # 條件：非標題列欄位 + 至少 3 筆非空值 + 70% 以上像 SKU
+            max_col = ws_xls.ncols if use_xls else ws.max_column
+            best_col = None
+            best_score = 0
+            all_candidates = []
+            for c in range(1, max_col + 1):
+                # 跳過已經對應到其他欄位的 col
+                if c in col_map.values():
+                    continue
+                sku_like_count = 0
+                total_nonempty = 0
+                for r in range(data_start, min(data_start + 30, max_row + 1)):
+                    v = cv(r, c)
+                    if v:
+                        total_nonempty += 1
+                        if looks_like_sku(v):
+                            sku_like_count += 1
+                # 提高門檻：至少 3 筆資料且 70% 以上像 SKU
+                if total_nonempty >= 3 and sku_like_count >= total_nonempty * 0.7:
+                    all_candidates.append((c, sku_like_count, total_nonempty))
+                    if sku_like_count > best_score:
+                        best_score = sku_like_count
+                        best_col = c
+            if best_col:
+                sku_col = best_col
+                log(f"SKU 欄位：第 {sku_col} 欄（自動偵測，{best_score} 個像 SKU 的值）")
+                if len(all_candidates) > 1:
+                    log(f"⚠️ 注意：有多個候選欄位 {all_candidates}，已選分數最高者")
+            else:
+                sku_col = 19  # 最後備援：第 19 欄（歐樂範本 SKU 位置）
+                log(f"⚠️ 標題列無 SKU 欄位，自動偵測失敗，fallback 到第 {sku_col} 欄")
 
         # 載入資料庫
         db, db_err = load_customs_db()
@@ -5391,12 +5446,15 @@ def api_customs_upload():
 
         rows = []
         errors = []
+        matched = 0
+        unmatched = 0
         for r in range(data_start, max_row+1):
             sku = cv(r, sku_col)
             if not sku:
                 if not has_data_in_row(r):
                     continue
-                errors.append(f"第 {r} 列缺少 SKU（第{sku_col}欄）")
+                errors.append(f"第 {r} 列缺少 SKU（讀第{sku_col}欄）")
+                continue  # ★ 修正：空 SKU 不該建 row
 
             total_pcs = get_col(r, "total_pcs", 8)
             price_db  = str(db.get(sku, {}).get("price", "")) if sku in db else ""
@@ -5407,18 +5465,23 @@ def api_customs_upload():
 
             # C 模式：尺寸一律用資料庫的，資料庫沒有才 fallback 到 XLS
             db_size = db.get(sku, {}).get("product_size", "") if sku in db else ""
+            in_db = sku in db
+            if in_db:
+                matched += 1
+            else:
+                unmatched += 1
             row = {
                 "sku":               sku,
                 "type":              get_col(r, "type", 1),
                 "product_size_orig": db_size if db_size else get_col(r, "product_size_orig", 2),
-                "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if sku in db else get_col(r, "material", 3),
-                "customs_name":      db.get(sku, {}).get("customs_name", "") if sku in db else "",
+                "material":          db.get(sku, {}).get("material", get_col(r, "material", 3)) if in_db else get_col(r, "material", 3),
+                "customs_name":      db.get(sku, {}).get("customs_name", "") if in_db else "",
                 "box_no":            get_col(r, "box_no", 5),
                 "pcs_per":           get_col(r, "pcs_per", 6),
                 "qty":               get_col(r, "qty", 7),
                 "total_pcs":         total_pcs,
-                "unit":              db.get(sku, {}).get("unit", get_col(r, "unit", 9)) if sku in db else get_col(r, "unit", 9),
-                "price":             price_db if sku in db else get_col(r, "price", 10),
+                "unit":              db.get(sku, {}).get("unit", get_col(r, "unit", 9)) if in_db else get_col(r, "unit", 9),
+                "price":             price_db if in_db else get_col(r, "price", 10),
                 "total_rmb":         str(total_rmb) if total_rmb != "" else get_col(r, "total_rmb", 11),
                 "gross_weight":      get_col(r, "gross_weight", 12),
                 "len":               get_col(r, "len", 13),
@@ -5426,15 +5489,20 @@ def api_customs_upload():
                 "hei":               get_col(r, "hei", 15),
                 "volume":            get_col(r, "volume", 16),
                 "total_weight":      get_col(r, "total_weight", 17),
-                "image":             db.get(sku, {}).get("image", "") if sku in db else "",
-                "status":            "ok" if sku in db else ("missing" if sku else "no_sku"),
+                "image":             db.get(sku, {}).get("image", "") if in_db else "",
+                "status":            "ok" if in_db else "missing",
             }
             rows.append(row)
+
+        log(f"上傳處理完成：共 {len(rows)} 列，對應成功 {matched} 筆，未對應 {unmatched} 筆")
+        if unmatched > 0 and len(db) > 0:
+            unmatched_samples = [r["sku"] for r in rows if r["status"] == "missing"][:5]
+            log(f"未對應 SKU 範例：{unmatched_samples}")
 
         if errors:
             log(f"欄位警告：{errors}")
 
-        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors, "db_count": len(db), "db_err": db_err})
+        return jsonify({"ok": True, "rows": rows, "db": db, "warnings": errors, "db_count": len(db), "db_err": db_err, "matched": matched, "unmatched": unmatched})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"讀取失敗：{e}"})
 
