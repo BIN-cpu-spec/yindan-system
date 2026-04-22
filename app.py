@@ -1038,7 +1038,7 @@ function copyGroupTxns(groupKey) {
 
 @app.route("/split_app")
 @login_required
-def index():
+def split_app_page():
     return render_template_string(SPLIT_HTML)
 
 @app.route("/api/upload", methods=["POST"])
@@ -1340,92 +1340,100 @@ def get_sheets_client():
     except Exception as e:
         return None, f"Google Sheets 連線失敗: {str(e)}"
 
-# ============================================================
-# 報關助手（完整功能）
-# ============================================================
-@app.route("/customs")
-@login_required 
-def customs_page():
-    return render_template_string("""<!DOCTYPE html>
+# 報關助手HTML模板
+CUSTOMS_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
-<meta charset="UTF-8"><title>報關助手 - 超人特工倉</title>
+<meta charset="UTF-8">
+<title>報關清單系統</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:"Microsoft JhengHei",sans-serif;background:#f5f5f5;color:#333}
-.container{max-width:1200px;margin:0 auto;padding:24px}
-.header{text-align:center;margin-bottom:32px}
-.nav a{color:#666;text-decoration:none;margin:0 8px;padding:8px 16px;border:1px solid #ddd;border-radius:4px}
-.upload-area{background:#fff;border:2px dashed #ddd;border-radius:8px;padding:40px;text-align:center;margin-bottom:24px}
-.upload-area.dragover{border-color:#1976d2;background:#f3f8ff}
-.btn{background:#1976d2;color:#fff;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-size:14px}
-.btn:hover{background:#1565c0}
-.status{padding:16px;margin:16px 0;border-radius:6px}
-.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
-.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
-.progress{background:#fff3cd;color:#856404;border:1px solid #ffeaa7}
-.results{background:#fff;border-radius:8px;padding:20px;margin-top:20px}
-table{width:100%;border-collapse:collapse;margin-top:16px}
-th,td{padding:8px;border:1px solid #ddd;text-align:left}
-th{background:#f8f9fa}
-.btn-group{margin-top:16px}
-.btn-group .btn{margin-right:8px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13px;color:#1a1a1a}
+.topbar{background:#0f1923;color:#fff;height:52px;padding:0 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:300}
+.logo{font-size:15px;font-weight:600;margin-right:auto}.logo span{color:#f4a100}
+.btn{padding:7px 16px;border-radius:5px;border:none;font-size:13px;cursor:pointer;font-weight:500}
+.btn-yellow{background:#f4a100;color:#fff}.btn-green{background:#2e7d32;color:#fff}
+.btn-blue{background:#1a5fa8;color:#fff}.btn-red{background:#b71c1c;color:#fff}
+.btn-gray{background:#666;color:#fff}.btn:hover{opacity:.85}
+.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:20px}
+.card h2{font-size:14px;font-weight:500;color:#555;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #eee}
+.upload-area{border:2px dashed #ddd;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .2s}
+.upload-area:hover{border-color:#f4a100}
+.upload-area.drag{border-color:#f4a100;background:#fffbf0}
+.msg{padding:8px 14px;border-radius:5px;font-size:12px;margin:10px 20px}
+.msg-ok{background:#e8f5e9;color:#2e7d32}.msg-err{background:#ffebee;color:#b71c1c}
+.msg-warn{background:#fff8e1;color:#e65100}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:15px}
+thead th{background:#f5f5f5;padding:8px 6px;text-align:left;font-weight:500;color:#555;border-bottom:1.5px solid #ddd}
+td{padding:6px;border-bottom:.5px solid #eee;vertical-align:middle}
 </style>
 </head><body>
-<div class="container">
-  <div class="header">
-    <h1>📋 報關助手</h1>
-    <div class="nav">
-      <a href="/">🏠 返回首頁</a>
+<div class="topbar">
+  <div class="logo">📋 <span>報關助手</span></div>
+  <button class="btn btn-gray" onclick="location.href='/'">🏠 返回首頁</button>
+</div>
+
+<div class="card">
+  <h2>📁 檔案上傳</h2>
+  <div class="upload-area" id="upload" onclick="document.getElementById('file').click()">
+    <p>📄 點擊或拖曳上傳 Excel 檔案</p>
+    <p style="font-size:11px;color:#888;margin-top:5px">支援 .xlsx 格式</p>
+  </div>
+  <input type="file" id="file" accept=".xlsx" style="display:none">
+</div>
+
+<div id="msg-area"></div>
+<div id="preview-section" style="display:none">
+  <div class="card">
+    <h2>📊 資料預覽</h2>
+    <div style="margin-bottom:10px">
+      <button class="btn btn-green" onclick="exportExcel()">📄 匯出報關 Excel</button>
+      <button class="btn btn-blue" onclick="location.reload()">🔄 重新上傳</button>
     </div>
+    <div id="preview-table"></div>
   </div>
-  
-  <div class="upload-area" id="uploadArea">
-    <p>📁 上傳進貨清單 Excel 檔案（支援 .xlsx / .xls）</p>
-    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
-    <button class="btn" onclick="document.getElementById('fileInput').click()">選擇檔案</button>
-  </div>
-  
-  <div id="status" style="display:none"></div>
-  <div id="results" style="display:none"></div>
 </div>
 
 <script>
-const uploadArea = document.getElementById('uploadArea');
-const fileInput = document.getElementById('fileInput');
-const statusDiv = document.getElementById('status');
-const resultsDiv = document.getElementById('results');
+let uploadData = null;
 
-uploadArea.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  uploadArea.classList.add('dragover');
-});
-
-uploadArea.addEventListener('dragleave', () => {
-  uploadArea.classList.remove('dragover');
-});
-
-uploadArea.addEventListener('drop', (e) => {
-  e.preventDefault();
-  uploadArea.classList.remove('dragover');
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    handleFile(files[0]);
-  }
-});
-
-fileInput.addEventListener('change', (e) => {
+document.getElementById('file').addEventListener('change', function(e) {
   if (e.target.files.length > 0) {
     handleFile(e.target.files[0]);
   }
 });
 
+// 拖拽功能
+const uploadArea = document.getElementById('upload');
+uploadArea.addEventListener('dragover', function(e) {
+  e.preventDefault();
+  uploadArea.classList.add('drag');
+});
+uploadArea.addEventListener('dragleave', function() {
+  uploadArea.classList.remove('drag');
+});
+uploadArea.addEventListener('drop', function(e) {
+  e.preventDefault();
+  uploadArea.classList.remove('drag');
+  if (e.dataTransfer.files.length > 0) {
+    handleFile(e.dataTransfer.files[0]);
+  }
+});
+
+function showMsg(text, type = 'ok') {
+  const msgArea = document.getElementById('msg-area');
+  msgArea.innerHTML = `<div class="msg msg-${type}">${text}</div>`;
+}
+
 function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.xlsx')) {
+    showMsg('❌ 請選擇 .xlsx 格式的檔案', 'err');
+    return;
+  }
+
+  showMsg('📊 正在處理檔案...', 'warn');
+  
   const formData = new FormData();
   formData.append('file', file);
-  
-  statusDiv.style.display = 'block';
-  statusDiv.className = 'status progress';
-  statusDiv.innerHTML = '📊 正在處理 Excel 檔案...';
   
   fetch('/api/customs/upload', {
     method: 'POST',
@@ -1434,45 +1442,38 @@ function handleFile(file) {
   .then(response => response.json())
   .then(data => {
     if (data.ok) {
-      statusDiv.className = 'status success';
-      statusDiv.innerHTML = '✅ 檔案處理完成！找到 ' + data.count + ' 筆商品資料';
-      showResults(data.results);
+      uploadData = data.results;
+      showMsg(`✅ 檔案處理完成！找到 ${data.count} 筆商品資料`, 'ok');
+      showPreview(data.results);
     } else {
-      statusDiv.className = 'status error';
-      statusDiv.innerHTML = '❌ 處理失敗：' + data.msg;
+      showMsg(`❌ 處理失敗：${data.msg}`, 'err');
     }
   })
   .catch(error => {
-    statusDiv.className = 'status error';
-    statusDiv.innerHTML = '❌ 系統錯誤：' + error.message;
+    showMsg(`❌ 系統錯誤：${error.message}`, 'err');
   });
 }
 
-function showResults(results) {
-  resultsDiv.style.display = 'block';
-  resultsDiv.className = 'results';
-  
-  let html = '<h3>📊 商品分析結果</h3>';
-  html += '<table><thead><tr><th>商品編號</th><th>品名</th><th>數量</th><th>單價</th><th>狀態</th></tr></thead><tbody>';
+function showPreview(results) {
+  let html = '<table><thead><tr><th>商品編號</th><th>品名</th><th>數量</th><th>單價</th><th>狀態</th></tr></thead><tbody>';
   
   results.forEach(item => {
-    const status = item.found ? '✅ 已找到' : '❓ 需補充';
-    html += `<tr><td>${item.sku || ''}</td><td>${item.name || ''}</td><td>${item.qty || ''}</td><td>${item.price || ''}</td><td>${status}</td></tr>`;
+    const status = item.found ? '<span style="color:#2e7d32">✅ 已找到</span>' : '<span style="color:#b71c1c">❓ 需補充</span>';
+    html += `<tr><td>${item.sku}</td><td>${item.name}</td><td>${item.qty}</td><td>${item.price}</td><td>${status}</td></tr>`;
   });
   
   html += '</tbody></table>';
-  html += '<div class="btn-group">';
-  html += '<button class="btn" onclick="exportExcel()">📄 匯出報關 Excel</button>';
-  html += '<button class="btn" onclick="location.reload()">🔄 重新上傳</button>';
-  html += '</div>';
-  
-  resultsDiv.innerHTML = html;
+  document.getElementById('preview-table').innerHTML = html;
+  document.getElementById('preview-section').style.display = 'block';
 }
 
 function exportExcel() {
-  statusDiv.style.display = 'block';
-  statusDiv.className = 'status progress';
-  statusDiv.innerHTML = '📄 正在生成報關 Excel...';
+  if (!uploadData) {
+    showMsg('❌ 沒有資料可以匯出', 'err');
+    return;
+  }
+  
+  showMsg('📄 正在生成 Excel...', 'warn');
   
   fetch('/api/customs/export', {
     method: 'POST',
@@ -1489,29 +1490,33 @@ function exportExcel() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '報關資料_' + new Date().toISOString().substr(0,10) + '.xlsx';
+    a.download = `報關資料_${new Date().toISOString().substr(0,10)}.xlsx`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
     
-    statusDiv.className = 'status success';
-    statusDiv.innerHTML = '✅ Excel 檔案已下載完成';
+    showMsg('✅ Excel 檔案已下載完成', 'ok');
   })
   .catch(error => {
-    statusDiv.className = 'status error';
-    statusDiv.innerHTML = '❌ 匯出失敗：' + error.message;
+    showMsg(`❌ 匯出失敗：${error.message}`, 'err');
   });
 }
 </script>
-</body></html>""")
+</body></html>"""
+
+# ============================================================
+# 報關助手（完整功能）
+# ============================================================
+@app.route("/customs")
+@login_required 
+def customs_page():
+    from flask import Response
+    return Response(CUSTOMS_HTML, mimetype="text/html")
 
 @app.route("/api/customs/upload", methods=["POST"])
 @login_required
 def api_customs_upload():
-    try:
-        import openpyxl
-    except ImportError:
-        return jsonify({"ok": False, "msg": "請安裝 openpyxl"})
-
     f = request.files.get("file")
     if not f:
         return jsonify({"ok": False, "msg": "未收到檔案"})
@@ -1521,6 +1526,8 @@ def api_customs_upload():
         fname = f.filename.lower()
 
         if fname.endswith('.xlsx'):
+            # 直接使用openpyxl，不做額外檢查
+            import openpyxl
             wb = openpyxl.load_workbook(
                 io.BytesIO(file_bytes),
                 data_only=True,
@@ -1559,24 +1566,27 @@ def api_customs_upload():
             })
             
         else:
-            return jsonify({"ok": False, "msg": "僅支援 .xlsx 格式"})
+            return jsonify({"ok": False, "msg": "僅支援 .xlsx 格式，請確認檔案格式"})
             
+    except ImportError:
+        return jsonify({"ok": False, "msg": "系統缺少 openpyxl 套件，請聯絡管理員"})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"檔案處理失敗: {str(e)}"})
+
 
 @app.route("/api/customs/export", methods=["POST"])
 @login_required  
 def api_customs_export():
     try:
-        import openpyxl
-        from openpyxl.styles import Font, Alignment, Border, Side
-        
         # 取得處理過的資料
         customs_data = session.get('customs_data', [])
         if not customs_data:
             return jsonify({"ok": False, "msg": "沒有資料可匯出"}), 400
         
         # 創建新的Excel工作簿
+        import openpyxl
+        from openpyxl.styles import Font, Alignment
+        
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "報關資料"
@@ -1625,6 +1635,7 @@ def api_customs_export():
         
     except Exception as e:
         return jsonify({"ok": False, "msg": f"匯出失敗: {str(e)}"}), 500
+
 
 # ============================================================
 # 超人眼鏡 API（修復廣告自動化問題）
