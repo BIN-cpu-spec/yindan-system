@@ -8174,23 +8174,137 @@ def _bigseller_api(path, body=None):
     # Cookie 優先從記憶體（Extension 上傳），其次從環境變數
     cookie = _ad_scheduler_store.get("bs_cookie") or os.environ.get("BIGSELLER_COOKIE", "")
     if not cookie:
+        _ad_log("🔴 無 BigSeller Cookie，請用管理版超人眼鏡重新登入", write_sheet=True)
         return None
+    
     headers = {
         "Content-Type": "application/json",
         "Cookie": cookie,
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://www.bigseller.com/"
     }
     url = f"https://www.bigseller.com{path}"
+    
     try:
         if body is not None:
             r = _requests.post(url, json=body, headers=headers, timeout=30)
         else:
             r = _requests.get(url, headers=headers, timeout=30)
-        return r.json()
+        
+        # ⭐ 關鍵：檢查 HTTP 狀態碼
+        if r.status_code == 401:
+            _ad_log("🔴 BigSeller 認證失敗 (401)，Cookie 已失效", write_sheet=True)
+            _invalidate_cookie("401 Unauthorized")
+            return None
+        elif r.status_code == 403:
+            _ad_log("🔴 BigSeller 拒絕存取 (403)，Cookie 可能失效", write_sheet=True)
+            _invalidate_cookie("403 Forbidden")
+            return None
+        elif r.status_code != 200:
+            _ad_log(f"🔴 BigSeller API 錯誤：HTTP {r.status_code}", write_sheet=True)
+            return None
+        
+        # 解析回應
+        try:
+            data = r.json()
+        except Exception as e:
+            _ad_log(f"🔴 BigSeller API 回應格式錯誤：{str(e)[:100]}", write_sheet=True)
+            return None
+        
+        # 檢查 BigSeller 的業務狀態碼
+        if data.get("code") != 0:
+            msg = data.get("msg", "未知錯誤")
+            if any(keyword in str(msg).lower() for keyword in ["login", "auth", "登入", "認證", "token", "session"]):
+                _ad_log(f"🔴 BigSeller 要求重新登入：{msg}", write_sheet=True)
+                _invalidate_cookie(f"Business Error: {msg}")
+                return None
+            else:
+                # 其他業務錯誤不清空 Cookie，可能只是暫時問題
+                _ad_log(f"⚠️ BigSeller API 業務錯誤：{msg}", write_sheet=False)
+        
+        return data
+        
     except Exception as e:
-        _ad_log(f"API 錯誤 {path}: {e}")
+        error_msg = str(e)
+        if "timeout" in error_msg.lower():
+            _ad_log("⚠️ BigSeller API 請求逾時，可能網路問題")
+        elif "connection" in error_msg.lower():
+            _ad_log("⚠️ BigSeller API 連線失敗，可能網路問題")
+        else:
+            _ad_log(f"🔴 BigSeller API 例外：{error_msg[:200]}")
         return None
+
+def _invalidate_cookie(reason):
+    """標記 Cookie 失效並清空記憶體"""
+    _ad_log(f"🔴 Cookie 失效原因：{reason}，已清空快取", write_sheet=True)
+    _ad_scheduler_store["bs_cookie"] = ""
+    _ad_scheduler_store["cookie_ts"] = 0
+    _ad_scheduler_store["cookie_invalid_count"] = _ad_scheduler_store.get("cookie_invalid_count", 0) + 1
+    
+    # 如果失效次數過多，發送緊急通知
+    invalid_count = _ad_scheduler_store.get("cookie_invalid_count", 0)
+    if invalid_count >= 3:
+        _ad_log(f"🆘 Cookie 已連續失效 {invalid_count} 次，請檢查帳號狀態", write_sheet=True)
+
+def _check_cookie_health():
+    """檢查 Cookie 健康狀態，返回 True/False"""
+    cookie = _ad_scheduler_store.get("bs_cookie", "")
+    if not cookie:
+        _ad_log("🔴 Cookie 健康檢查：無 Cookie", write_sheet=True)
+        return False
+    
+    # 快速測試：呼叫店鋪清單 API（輕量級）
+    test_result = _bigseller_api("/api/v1/shop/list.json?platform=shopee")
+    
+    if test_result is None:
+        # _bigseller_api 內部已經處理了錯誤訊息和 Cookie 失效
+        return False
+    
+    if test_result.get("code") == 0:
+        # 成功時重設失效計數
+        _ad_scheduler_store["cookie_invalid_count"] = 0
+        _ad_scheduler_store["cookie_last_check"] = int(time.time())
+        return True
+    else:
+        msg = test_result.get("msg", "未知錯誤")
+        _ad_log(f"🔴 Cookie 健康檢查失敗：{msg}")
+        return False
+
+def _get_cookie_status():
+    """取得 Cookie 狀態摘要（用於 API 回應）"""
+    cookie = _ad_scheduler_store.get("bs_cookie", "")
+    if not cookie:
+        return {
+            "status": "missing",
+            "message": "無 Cookie，請重新上傳",
+            "last_check": None,
+            "invalid_count": 0
+        }
+    
+    last_check = _ad_scheduler_store.get("cookie_last_check", 0)
+    invalid_count = _ad_scheduler_store.get("cookie_invalid_count", 0)
+    
+    # 判斷狀態
+    if invalid_count >= 3:
+        status = "critical"
+        message = f"連續失效 {invalid_count} 次，請檢查帳號"
+    elif invalid_count > 0:
+        status = "warning"  
+        message = f"近期失效 {invalid_count} 次"
+    elif last_check > 0 and time.time() - last_check < 3600:
+        status = "healthy"
+        message = "運作正常"
+    else:
+        status = "unknown"
+        message = "未檢查或檢查時間過久"
+    
+    return {
+        "status": status,
+        "message": message,
+        "last_check": datetime.fromtimestamp(last_check).strftime("%Y-%m-%d %H:%M:%S") if last_check else None,
+        "invalid_count": invalid_count,
+        "cookie_length": len(cookie)
+    }
 
 def _get_target_roas(margin):
     """初始 ROAS：所有毛利統一按45%基本標準反推
@@ -8320,6 +8434,12 @@ def run_daily_ad_tasks(force=False):
         return  # 今天已跑過
 
     _ad_log("=== 開始每日廣告任務 ===")
+    
+    # ⭐ Cookie 健康檢查
+    if not _check_cookie_health():
+        _ad_log("❌ Cookie 健康檢查失敗，跳過每日任務", write_sheet=True)
+        return
+    
     cost_map = _get_cost_map()
     if not cost_map:
         _ad_log("無成本資料（記憶體+Sheets都是空的），跳過每日任務")
@@ -8561,6 +8681,12 @@ def run_hourly_budget_task(force=False):
         return  # 未滿1小時
 
     _ad_log("--- 開始每小時預算任務 ---")
+    
+    # ⭐ Cookie 健康檢查
+    if not _check_cookie_health():
+        _ad_log("❌ Cookie 健康檢查失敗，跳過每小時任務", write_sheet=True)
+        return
+    
     cost_map = _get_cost_map()
     if not cost_map:
         # 沒有成本不更新 last_hourly，下一分鐘繼續嘗試
@@ -8654,15 +8780,42 @@ def superman_glasses_save_cookie():
     """Extension 上傳 BigSeller Cookie 供排程使用"""
     if request.method == "OPTIONS":
         resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return resp
     try:
         data = request.get_json(force=True)
         cookie = data.get("cookie", "").strip()
+        source = data.get("source", "UNKNOWN")
+        version = data.get("version", "")
+        
         if not cookie:
-            return jsonify({"ok": False, "msg": "empty cookie"}), 400
+            resp = jsonify({"ok": False, "msg": "empty cookie"})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 400
+        
+        # ⭐ 來源控制：只接受管理版或自動更新
+        allowed_sources = ["BIN-ADMIN", "AUTO-UPDATE", "SUPERMAN-ADMIN"]
+        if source not in allowed_sources and "ADMIN" not in source:
+            resp = jsonify({"ok": False, "msg": f"只接受管理版 Cookie，當前來源：{source}"})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 403
+        
+        # 更新記憶體
+        old_cookie = _ad_scheduler_store.get("bs_cookie", "")
         _ad_scheduler_store["bs_cookie"] = cookie
         _ad_scheduler_store["cookie_ts"] = int(time.time())
-        _ad_log(f"Cookie 已更新，長度 {len(cookie)}")
+        _ad_scheduler_store["cookie_source"] = source
+        _ad_scheduler_store["cookie_version"] = version
+        
+        # 重設失效計數（新 Cookie 給新機會）
+        if cookie != old_cookie:
+            _ad_scheduler_store["cookie_invalid_count"] = 0
+        
+        # 記錄日誌
+        change_info = "更新" if cookie != old_cookie else "重複上傳"
+        _ad_log(f"Cookie 已{change_info} [{source}] 長度 {len(cookie)}")
+        
         # 寫入 Sheets 持久化（Railway 重啟後可讀回）
         def _persist_cookie():
             try:
@@ -8675,20 +8828,45 @@ def superman_glasses_save_cookie():
                     ws = sh.worksheet("⚙️ 排程狀態")
                 except Exception:
                     ws = sh.add_worksheet(title="⚙️ 排程狀態", rows=10, cols=2)
-                # 讀現有資料，更新 cookie 行
+                
+                # 更新多個欄位
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                updates = [
+                    ["bs_cookie", cookie],
+                    ["cookie_source", source], 
+                    ["cookie_version", version],
+                    ["cookie_updated", timestamp]
+                ]
+                
+                # 讀現有資料，批次更新
                 rows = ws.get_all_values()
-                state = {r[0]: i+1 for i, r in enumerate(rows) if r}
-                cookie_row = state.get("bs_cookie")
-                if cookie_row:
-                    ws.update_cell(cookie_row, 2, cookie)
-                else:
-                    ws.append_row(["bs_cookie", cookie], value_input_option="RAW")
+                state = {r[0]: i+1 for i, r in enumerate(rows) if len(r) > 0}
+                
+                for key, value in updates:
+                    row_num = state.get(key)
+                    if row_num:
+                        ws.update_cell(row_num, 2, str(value))
+                    else:
+                        ws.append_row([key, str(value)], value_input_option="RAW")
+                        
             except Exception as e:
                 print(f"[Cookie] 寫入 Sheets 失敗: {e}")
+        
         threading.Thread(target=_persist_cookie, daemon=True).start()
-        return jsonify({"ok": True, "len": len(cookie)})
+        
+        resp = jsonify({
+            "ok": True, 
+            "len": len(cookie),
+            "source": source,
+            "change": change_info
+        })
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 500
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
 
 
 @app.route("/api/superman-glasses/ad-log-sheet", methods=["GET"])
@@ -8800,6 +8978,7 @@ def superman_glasses_clear_war_room():
 
 @app.route("/api/superman-glasses/ad-log", methods=["GET"])
 def superman_glasses_ad_log():
+    cookie_status = _get_cookie_status()
     resp = jsonify({
         "ok": True,
         "log": _ad_scheduler_store["log"][:100],
@@ -8807,6 +8986,13 @@ def superman_glasses_ad_log():
         "last_hourly": _ad_scheduler_store["last_hourly"],
         "cookie_ok": bool(_ad_scheduler_store.get("bs_cookie")),
         "cost_count": _ad_scheduler_store.get("cost_count", 0),
+        # ⭐ 新增：詳細 Cookie 健康資訊
+        "cookie_status": cookie_status["status"],
+        "cookie_message": cookie_status["message"],
+        "cookie_last_check": cookie_status["last_check"],
+        "cookie_invalid_count": cookie_status["invalid_count"],
+        "cookie_source": _ad_scheduler_store.get("cookie_source", ""),
+        "cookie_version": _ad_scheduler_store.get("cookie_version", "")
     })
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
@@ -8925,6 +9111,35 @@ def superman_glasses_ext_log():
         resp = jsonify({"ok": False, "msg": str(e)})
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route("/api/superman-glasses/cookie-health", methods=["POST", "GET"])
+def superman_glasses_cookie_health():
+    """Cookie 健康檢查 API"""
+    try:
+        force_check = request.method == "POST"  # POST 強制檢查，GET 返回快取狀態
+        
+        if force_check:
+            # 強制執行健康檢查
+            is_healthy = _check_cookie_health()
+            status_info = _get_cookie_status()
+            status_info["health_check_result"] = is_healthy
+        else:
+            # 返回快取狀態
+            status_info = _get_cookie_status()
+            status_info["health_check_result"] = None
+        
+        resp = jsonify({
+            "ok": True,
+            "cookie_status": status_info,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 500
 
 @app.route("/api/superman-glasses/debug-hourly", methods=["POST", "GET"])
 def superman_glasses_debug_hourly():
