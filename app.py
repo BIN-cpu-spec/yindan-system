@@ -10257,7 +10257,11 @@ function processFile(file) {
   
   // 顯示載入狀態
   document.getElementById('results-section').style.display = 'block';
-  document.getElementById('stats').innerHTML = '<div style="text-align:center;padding:40px;color:#f4a100;">🔄 分析中...<br><small style="color:#888;">正在處理: ' + file.name + '</small></div>';
+  document.getElementById('summary').innerHTML = '<span style="color:#f4a100;">🔄 分析中：' + file.name + '</span>';
+  document.getElementById('splittable-orders').innerHTML = '';
+  document.getElementById('non-splittable-orders').innerHTML = '';
+  document.getElementById('splittable-count').textContent = '';
+  document.getElementById('non-splittable-count').textContent = '';
   
   fetch('/api/superman-glasses/oversize-analyze', {
     method: 'POST',
