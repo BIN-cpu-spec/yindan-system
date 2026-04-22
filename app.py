@@ -1398,7 +1398,7 @@ let uploadData = null;
 
 document.getElementById('file').addEventListener('change', function(e) {
   if (e.target.files.length > 0) {
-    handleFile(e.target.files[0]);
+    handleCustomsFile(e.target.files[0]);
   }
 });
 
@@ -1415,7 +1415,7 @@ uploadArea.addEventListener('drop', function(e) {
   e.preventDefault();
   uploadArea.classList.remove('drag');
   if (e.dataTransfer.files.length > 0) {
-    handleFile(e.dataTransfer.files[0]);
+    handleCustomsFile(e.dataTransfer.files[0]);
   }
 });
 
@@ -1424,7 +1424,7 @@ function showMsg(text, type = 'ok') {
   msgArea.innerHTML = `<div class="msg msg-${type}">${text}</div>`;
 }
 
-function handleFile(file) {
+function handleCustomsFile(file) {
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
     showMsg('❌ 請選擇 .xlsx 格式的檔案', 'err');
     return;
