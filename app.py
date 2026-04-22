@@ -1286,8 +1286,9 @@ function showMsg(text, type = 'ok') {
 }
 
 function handleCustomsFile(file) {
-  if (!file.name.toLowerCase().endsWith('.xlsx')) {
-    showMsg('❌ 請選擇 .xlsx 格式的檔案', 'err');
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+    showMsg('❌ 請選擇 .xlsx 或 .xls 格式的檔案', 'err');
     return;
   }
 
@@ -1426,8 +1427,80 @@ def api_customs_upload():
                 "results": results
             })
             
+        elif fname.endswith('.xls'):
+            # 處理舊版 .xls 格式
+            try:
+                import xlrd
+            except ImportError:
+                return jsonify({"ok": False, "msg": "系統缺少 xlrd 套件，無法處理 .xls 檔案"})
+            
+            wb = xlrd.open_workbook(file_contents=file_bytes)
+            ws = wb.sheet_by_index(0)  # 取第一個工作表
+            max_row = ws.nrows
+            
+            # 找到標題行（包含"品名"的行）
+            header_row = None
+            for i in range(min(10, max_row)):
+                for j in range(min(10, ws.ncols)):
+                    if str(ws.cell_value(i, j)).strip() == "品名":
+                        header_row = i
+                        break
+                if header_row is not None:
+                    break
+            
+            if header_row is None:
+                return jsonify({"ok": False, "msg": "無法找到標題行，請確認檔案格式包含'品名'欄位"})
+            
+            # 解析標題行，找出各欄位位置
+            headers = []
+            for j in range(ws.ncols):
+                header = str(ws.cell_value(header_row, j)).strip()
+                headers.append(header)
+            
+            # 找到各欄位的索引
+            sku_col = next((i for i, h in enumerate(headers) if h in ["嘜頭", "商品編號", "SKU"]), 0)
+            name_col = next((i for i, h in enumerate(headers) if h in ["品名", "商品名稱"]), 1)
+            qty_col = next((i for i, h in enumerate(headers) if h in ["PCS/件", "數量", "件數"]), -1)
+            price_col = next((i for i, h in enumerate(headers) if h in ["單價", "價格", "金額"]), -1)
+            
+            # 解析資料
+            results = []
+            for row in range(header_row + 1, max_row):  # 從標題行的下一行開始
+                try:
+                    sku = str(ws.cell_value(row, sku_col) or "").strip()
+                    name = str(ws.cell_value(row, name_col) or "").strip()
+                    qty = str(ws.cell_value(row, qty_col) or "").strip() if qty_col >= 0 else ""
+                    price = str(ws.cell_value(row, price_col) or "").strip() if price_col >= 0 else ""
+                    
+                    # 清理數量欄位（移除"雙"等單位）
+                    if qty:
+                        import re
+                        qty_match = re.search(r'(\d+(?:\.\d+)?)', qty)
+                        if qty_match:
+                            qty = qty_match.group(1)
+                    
+                    if sku and name:  # 必須有商品編號和品名
+                        results.append({
+                            "sku": sku,
+                            "name": name,
+                            "qty": qty, 
+                            "price": price,
+                            "found": bool(name)  # 簡化判斷
+                        })
+                except Exception as e:
+                    continue
+            
+            # 儲存到session供匯出用
+            session['customs_data'] = results
+            
+            return jsonify({
+                "ok": True,
+                "count": len(results),
+                "results": results
+            })
+            
         else:
-            return jsonify({"ok": False, "msg": "僅支援 .xlsx 格式，請確認檔案格式"})
+            return jsonify({"ok": False, "msg": "僅支援 .xlsx 和 .xls 格式，請確認檔案格式"})
             
     except ImportError:
         return jsonify({"ok": False, "msg": "系統缺少 openpyxl 套件，請聯絡管理員"})
