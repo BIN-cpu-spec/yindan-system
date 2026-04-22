@@ -9834,7 +9834,9 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
 .section { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); 
            border-radius: 16px; padding: 30px; margin-bottom: 30px; }
 .upload-zone { background: rgba(255,255,255,.02); border: 2px dashed rgba(255,255,255,.2); 
-               border-radius: 12px; padding: 40px; text-align: center; }
+               border-radius: 12px; padding: 40px; text-align: center; cursor: pointer;
+               transition: all 0.3s ease; position: relative; min-height: 100px; }
+.upload-zone:hover { border-color: #f4a100; background: rgba(244,161,0,.05); }
 .upload-btn { background: #f4a100; color: #000; border: none; padding: 12px 24px; 
               border-radius: 8px; cursor: pointer; font-weight: 600; }
 .results { margin-top: 20px; }
@@ -9857,11 +9859,14 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
   <div class="section">
     <h3 style="color:#f4a100;margin-bottom:15px;">📤 上傳 BigSeller 超材檔案</h3>
     <p style="color:#aaa;margin-bottom:20px;">請先在 BigSeller 匯出: 訂單處理→待處理→導出→挑單作業 Excel</p>
-    <div class="upload-zone">
+    <div class="upload-zone" id="upload-zone">
       <div style="font-size:48px;margin-bottom:15px;">📊</div>
       <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleFile(this)">
-      <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇檔案</button>
-      <div style="margin-top:15px;color:#666;font-size:12px;">支援 Excel (.xlsx, .xls) 或 CSV 格式</div>
+      <div class="upload-text">
+        <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇檔案</button>
+        <div style="margin-top:15px;color:#666;font-size:12px;">支援 Excel (.xlsx, .xls) 或 CSV 格式</div>
+        <div style="margin-top:8px;color:#888;font-size:11px;">或直接拖拽檔案到此區域</div>
+      </div>
     </div>
   </div>
   
@@ -9886,34 +9891,116 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
 <script>
 let analysisResults = null;
 
+// 初始化拖拽功能
+document.addEventListener('DOMContentLoaded', function() {
+  const uploadZone = document.getElementById('upload-zone');
+  const fileInput = document.getElementById('file-input');
+  
+  console.log('初始化上傳功能');
+  
+  // 點擊上傳區域觸發檔案選擇
+  uploadZone.addEventListener('click', function() {
+    fileInput.click();
+  });
+  
+  // 拖拽事件
+  uploadZone.addEventListener('dragover', handleDragOver);
+  uploadZone.addEventListener('dragleave', handleDragLeave);  
+  uploadZone.addEventListener('drop', handleDrop);
+  
+  // 防止整個頁面的拖拽事件
+  document.addEventListener('dragover', function(e) {
+    e.preventDefault();
+  });
+  document.addEventListener('drop', function(e) {
+    e.preventDefault();
+  });
+});
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('拖拽懸停');
+  this.style.borderColor = '#f4a100';
+  this.style.backgroundColor = 'rgba(244,161,0,.1)';
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('拖拽離開');
+  this.style.borderColor = 'rgba(255,255,255,.2)';
+  this.style.backgroundColor = 'rgba(255,255,255,.02)';
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('檔案拖拽放下');
+  
+  // 重置樣式
+  this.style.borderColor = 'rgba(255,255,255,.2)';
+  this.style.backgroundColor = 'rgba(255,255,255,.02)';
+  
+  const files = e.dataTransfer.files;
+  console.log('拖拽檔案數量:', files.length);
+  
+  if (files.length > 0) {
+    const file = files[0];
+    console.log('檔案名稱:', file.name, '檔案類型:', file.type);
+    
+    // 檢查檔案類型
+    if (file.name.match(/\.(xlsx|xls|csv)$/i)) {
+      processFile(file);
+    } else {
+      alert('請選擇 Excel (.xlsx, .xls) 或 CSV 格式的檔案\\n\\n目前檔案: ' + file.name);
+    }
+  }
+}
+
 function handleFile(input) {
   const file = input.files[0];
+  console.log('檔案選擇器觸發:', file ? file.name : '無檔案');
   if (!file) return;
+  processFile(file);
+}
+
+function processFile(file) {
+  console.log('開始處理檔案:', file.name, '大小:', Math.round(file.size/1024) + 'KB');
   
   const formData = new FormData();
   formData.append('file', file);
   
   // 顯示載入狀態
   document.getElementById('results-section').style.display = 'block';
-  document.getElementById('stats').innerHTML = '<div style="text-align:center;padding:40px;color:#f4a100;">🔄 分析中...</div>';
+  document.getElementById('stats').innerHTML = '<div style="text-align:center;padding:40px;color:#f4a100;">🔄 分析中...<br><small style="color:#888;">正在處理: ' + file.name + '</small></div>';
   
   fetch('/api/superman-glasses/oversize-analyze', {
     method: 'POST',
     body: formData
   })
-  .then(response => response.json())
+  .then(response => {
+    console.log('API回應狀態:', response.status);
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return response.json();
+  })
   .then(data => {
+    console.log('API回應資料:', data);
     if (data.ok) {
       displayResults(data.results);
     } else {
-      alert('分析失敗: ' + data.msg);
+      alert('❌ 分析失敗\\n\\n錯誤訊息: ' + data.msg);
       document.getElementById('results-section').style.display = 'none';
     }
   })
   .catch(error => {
-    alert('上傳失敗: ' + error.message);
+    console.error('上傳錯誤:', error);
+    alert('❌ 上傳失敗\\n\\n錯誤訊息: ' + error.message + '\\n\\n請檢查:\\n1. 檔案格式是否正確\\n2. 網路連線是否正常\\n3. 檔案是否損壞');
     document.getElementById('results-section').style.display = 'none';
   });
+}
 }
 
 function displayResults(results) {
