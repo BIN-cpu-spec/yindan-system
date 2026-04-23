@@ -2760,6 +2760,13 @@ async function loadSchedStatus() {
     const r = await fetch('/api/superman-glasses/ad-log');
     const d = await r.json();
 
+    console.log('[排程狀態] API 回傳:', { 
+      last_hourly: d.last_hourly, 
+      last_daily: d.last_daily,
+      cookie_ok: d.cookie_ok,
+      cost_count: d.cost_count 
+    });
+
     const cookieOk = d.cookie_ok;
     const costCount = d.cost_count || 0;
     const nowTs = Date.now() / 1000;
@@ -2768,6 +2775,13 @@ async function loadSchedStatus() {
     const lastHourlyTs = parseFloat(d.last_hourly) || 0;
     const hourlyGapSec = lastHourlyTs > 0 ? (nowTs - lastHourlyTs) : null;
     const hourlyGapMin = hourlyGapSec != null ? Math.floor(hourlyGapSec / 60) : null;
+
+    console.log('[排程狀態] 計算結果:', { 
+      lastHourlyTs, 
+      hourlyGapSec, 
+      hourlyGapMin,
+      nowTs 
+    });
 
     let hourlyColor, hourlyIcon, hourlyStatus, hourlyDetail;
     if (lastHourlyTs === 0) {
@@ -9988,9 +10002,31 @@ def oversize_analyze_api():
                 L = float(row.get("长", 0))
                 W = float(row.get("宽", 0))
                 H = float(row.get("高", 0))
-                weight_g = float(row.get("商品重量", 0)) * 1000  # kg → g
+                raw_weight = float(row.get("商品重量", 0))
                 qty = int(row.get("数量", 1) or 1)
                 sku = str(row.get("商品SKU", "")).strip()
+                
+                # 智能重量單位檢測（保守策略）
+                # 規則：如果原始重量 > 100，很可能已經是 g 單位
+                # 如果原始重量 ≤ 100，可能是 kg 單位（需轉換）
+                # 但如果轉換後超過 100kg，則原值就是 g
+                if raw_weight > 100:
+                    # 很可能已經是 g 單位
+                    weight_g = raw_weight
+                    unit_assumed = "g"
+                elif raw_weight > 0 and raw_weight <= 100:
+                    # 可能是 kg 單位，轉換但檢查合理性
+                    weight_g_converted = raw_weight * 1000
+                    if weight_g_converted > 100000:  # 超過 100kg，不合理
+                        weight_g = raw_weight  # 原值當作 g
+                        unit_assumed = "g (超大值當g處理)"
+                    else:
+                        weight_g = weight_g_converted  # kg→g
+                        unit_assumed = "kg→g"
+                else:
+                    # 重量為 0 或負值
+                    weight_g = raw_weight
+                    unit_assumed = "原值"
             except (ValueError, TypeError):
                 continue
             if not sku:
@@ -10007,6 +10043,12 @@ def oversize_analyze_api():
             #  不該因為「重量超標」就被歸為不可拆單）
             WEIGHT_SUSPECT_THRESHOLD = 100000  # 100kg
             weight_suspect = weight_g > WEIGHT_SUSPECT_THRESHOLD
+            
+            # Debug: 記錄重量單位檢測結果（前10個SKU）
+            if len(order_map) <= 10:
+                print(f"[重量檢測] SKU={sku}, 原始={raw_weight}, 轉換後={weight_g}g, 判斷={unit_assumed}")
+            elif len(order_map) == 11:
+                print(f"[重量檢測] ...（省略後續SKU日誌）")
 
             # 斜放判斷
             original_max = max(L, W, H)
