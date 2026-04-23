@@ -2659,6 +2659,28 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 
 <div class="sg-divider">
   <div class="sg-divider-line"></div>
+  <div class="sg-divider-text">&#x1F527; 工具</div>
+  <div class="sg-divider-line"></div>
+</div>
+
+<div style="max-width:960px;margin:0 auto 24px;padding:0 24px">
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+      <div style="font-size:24px;">&#x1F50D;</div>
+      <div>
+        <div style="font-weight:600;color:#f4a100">超材分析工具</div>
+        <div style="font-size:12px;color:#aaa">BigSeller 超材訂單自動分析與標記</div>
+      </div>
+    </div>
+    <div style="color:#ddd;line-height:1.6;margin-bottom:16px">
+      上傳 BigSeller 匯出的超材檔案，自動判斷可拆單/不可拆單，一鍵複製訂單號進行批量標記。
+    </div>
+    <a href="/oversize-tool" class="dl-btn">&#x1F680; 開始超材分析</a>
+  </div>
+</div>
+
+<div class="sg-divider">
+  <div class="sg-divider-line"></div>
   <div class="sg-divider-text">&#x1F4CA; 廣告調整日誌</div>
   <div class="sg-divider-line"></div>
 </div>
@@ -2669,6 +2691,9 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
       <div style="display:flex;gap:16px;align-items:center">
         <span id="log-daily-ts" style="font-size:12px;color:#555"></span>
         <span id="log-hourly-ts" style="font-size:12px;color:#555"></span>
+        <select id="shop-log-filter" onchange="filterLogByShop()" style="background:#1a2a24;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
+          <option value="all">全部店鋪</option>
+        </select>
       </div>
       <button onclick="loadAdLog()" style="background:rgba(29,158,117,.2);border:1px solid rgba(29,158,117,.4);color:#5DCAA5;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
     </div>
@@ -2708,95 +2733,48 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 
 <div class="sg-divider">
   <div class="sg-divider-line"></div>
-  <div class="sg-divider-text">🔍 超材分析工具</div>
-  <div class="sg-divider-line"></div>
-</div>
-
-<div style="max-width:960px;margin:0 auto 24px;padding:0 24px">
-  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
-      <div style="font-size:24px;">🔍</div>
-      <div>
-        <div style="font-weight:600;color:#f4a100">超材分析工具</div>
-        <div style="font-size:12px;color:#aaa">BigSeller 超材訂單自動分析與標記</div>
-      </div>
-    </div>
-    <div style="color:#ddd;line-height:1.6;margin-bottom:16px">
-      上傳 BigSeller 匯出的超材檔案，自動判斷可拆單/不可拆單，一鍵複製訂單號進行批量標記。
-    </div>
-    <a href="/oversize-tool" class="dl-btn">🚀 開始超材分析</a>
-  </div>
-</div>
-
-<div class="sg-divider">
-  <div class="sg-divider-line"></div>
   <div class="sg-divider-text">&#x1F4CA; 廣告自動化儀表板</div>
   <div class="sg-divider-line"></div>
 </div>
 
-<div style="max-width:960px;margin:0 auto;padding:0 24px 80px;display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-
-  <!-- 廣告排程狀態 -->
+<div style="max-width:960px;margin:0 auto;padding:0 24px 40px;">
   <div class="card" style="border-color:rgba(29,158,117,.35)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <div style="font-size:16px;font-weight:700;color:#5DCAA5;">&#x23F0; 排程狀態</div>
-      <button onclick="loadAdLog()" style="background:#0F6E56;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">重新整理</button>
+      <button onclick="loadSchedStatus()" style="background:#0F6E56;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">重新整理</button>
     </div>
     <div id="sched-status" style="font-size:13px;color:#888;line-height:2;">載入中...</div>
   </div>
-
-  <!-- 利潤警示 -->
-  <div class="card" style="border-color:rgba(244,161,0,.35)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div style="font-size:16px;font-weight:700;color:#f4a100;">&#x26A0; 利潤警示</div>
-      <span style="font-size:11px;color:#666;">毛利 &lt; 40%</span>
-    </div>
-    <div id="profit-warn" style="font-size:13px;color:#888;line-height:1.8;">載入中...</div>
-  </div>
-
-  <!-- 執行日誌（跨兩欄） -->
-  <div class="card" style="grid-column:1/-1;border-color:rgba(29,158,117,.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div style="font-size:16px;font-weight:700;color:#5DCAA5;">&#x1F4DC; 執行日誌</div>
-      <div id="log-meta" style="font-size:11px;color:#555;"></div>
-    </div>
-    <div id="ad-log-list" style="font-family:monospace;font-size:12px;color:#5DCAA5;background:#021c18;border-radius:8px;padding:12px;max-height:260px;overflow-y:auto;line-height:1.8;">載入中...</div>
-  </div>
-
 </div>
 
 <script>
-async function loadAdLog() {
+// ── 排程狀態監控（只更新 #sched-status） ──
+async function loadSchedStatus() {
+  const el = document.getElementById('sched-status');
+  if (!el) return;
   try {
     const r = await fetch('/api/superman-glasses/ad-log');
     const d = await r.json();
 
-    // ── 排程健康監控 ─────────────────────────────
     const cookieOk = d.cookie_ok;
     const costCount = d.cost_count || 0;
     const nowTs = Date.now() / 1000;
 
-    // 每小時預算：計算距離上次跑了多久
+    // 每小時預算排程：距離上次跑了多久
     const lastHourlyTs = parseFloat(d.last_hourly) || 0;
     const hourlyGapSec = lastHourlyTs > 0 ? (nowTs - lastHourlyTs) : null;
     const hourlyGapMin = hourlyGapSec != null ? Math.floor(hourlyGapSec / 60) : null;
 
-    // 健康判斷：
-    //   綠 (正常): 0 ~ 65 分鐘內跑過
-    //   黃 (稍微延遲): 65 ~ 120 分鐘
-    //   紅 (卡住): 120 分鐘以上，或從未執行
     let hourlyColor, hourlyIcon, hourlyStatus, hourlyDetail;
     if (lastHourlyTs === 0) {
       hourlyColor = '#e57373'; hourlyIcon = '&#x274C;';
       hourlyStatus = '從未執行'; hourlyDetail = '自 Railway 啟動後尚未跑過';
     } else if (hourlyGapMin <= 65) {
       hourlyColor = '#5DCAA5'; hourlyIcon = '&#x2705;';
-      hourlyStatus = '正常';
-      hourlyDetail = `${hourlyGapMin} 分鐘前執行`;
+      hourlyStatus = '正常'; hourlyDetail = `${hourlyGapMin} 分鐘前執行`;
     } else if (hourlyGapMin <= 120) {
       hourlyColor = '#f4a100'; hourlyIcon = '&#x26A0;';
-      hourlyStatus = '稍微延遲';
-      hourlyDetail = `${hourlyGapMin} 分鐘前（>1小時未跑）`;
+      hourlyStatus = '稍微延遲'; hourlyDetail = `${hourlyGapMin} 分鐘前（>1小時未跑）`;
     } else {
       hourlyColor = '#e57373'; hourlyIcon = '&#x274C;';
       hourlyStatus = '疑似卡住';
@@ -2805,18 +2783,15 @@ async function loadAdLog() {
     }
     const lastHourlyStr = lastHourlyTs > 0 ? new Date(lastHourlyTs * 1000).toLocaleString('zh-TW') : '—';
 
-    // 每日 ROAS：台灣時間 9 點跑，判斷今天跑過沒
-    const today = new Date().toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' })
-                    .replace(/\//g, '-');
-    // toLocaleDateString 可能給 2026/4/22 → 2026-4-22，手動 pad
+    // 每日 ROAS 排程：台灣時間 9 點跑
     const tw = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
-    const todayStr = tw; // en-CA 會給 2026-04-22 格式
+    const todayStr = tw;
     const twHour = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei', hour:'2-digit', hour12:false }));
     let dailyColor, dailyIcon, dailyStatus, dailyDetail;
     if (!d.last_daily) {
       if (twHour < 9) {
         dailyColor = '#888'; dailyIcon = '&#x1F4C5;';
-        dailyStatus = '等待中'; dailyDetail = `今天 09:00 才會首次執行`;
+        dailyStatus = '等待中'; dailyDetail = '今天 09:00 才會首次執行';
       } else {
         dailyColor = '#e57373'; dailyIcon = '&#x274C;';
         dailyStatus = '從未執行'; dailyDetail = '排程可能未啟動';
@@ -2825,7 +2800,6 @@ async function loadAdLog() {
       dailyColor = '#5DCAA5'; dailyIcon = '&#x2705;';
       dailyStatus = '今日已執行'; dailyDetail = d.last_daily;
     } else {
-      // last_daily 非今日
       if (twHour < 9) {
         dailyColor = '#888'; dailyIcon = '&#x1F4C5;';
         dailyStatus = '等待中'; dailyDetail = `上次：${d.last_daily}，今天 09:00 會跑`;
@@ -2835,7 +2809,7 @@ async function loadAdLog() {
       }
     }
 
-    document.getElementById('sched-status').innerHTML = `
+    el.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
         <div style="background:rgba(255,255,255,.03);border-left:3px solid ${hourlyColor};padding:10px 12px;border-radius:6px;">
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
@@ -2867,48 +2841,12 @@ async function loadAdLog() {
         </span>
       </div>
     `;
-
-    // 執行日誌（log 是 [{msg, time}] 格式）
-    const logs = d.log || [];
-    if (logs.length === 0) {
-      document.getElementById('ad-log-list').innerHTML = '<span style="color:#555;">尚無執行記錄</span>';
-    } else {
-      document.getElementById('ad-log-list').innerHTML = logs.map(l => {
-        const msg = typeof l === 'string' ? l : (l.msg || '');
-        const time = typeof l === 'object' ? l.time : '';
-        let color = '#5DCAA5';
-        if (msg.includes('失敗') || msg.includes('ERROR') || msg.includes('錯誤')) color = '#e57373';
-        else if (msg.includes('爆款') || msg.includes('加碼') || msg.includes('暫停')) color = '#f4a100';
-        else if (msg.startsWith('---')) color = '#444';
-        return `<div style="display:flex;gap:8px;color:${color};border-bottom:1px solid rgba(255,255,255,.04);padding:3px 0;font-size:12px;font-family:monospace">
-          <span style="color:#444;white-space:nowrap">${time}</span>
-          <span>${msg}</span>
-        </div>`;
-      }).join('');
-    }
-    document.getElementById('log-meta').textContent = `共 ${logs.length} 筆`;
-
-    // 利潤警示
-    const pwarn = document.getElementById('profit-warn');
-    const warnLogs = logs.filter(l => {
-      const msg = typeof l === 'string' ? l : (l.msg || '');
-      return msg.includes('低毛利') || msg.includes('暫停') || msg.includes('毛利');
-    });
-    if (warnLogs.length > 0) {
-      pwarn.innerHTML = warnLogs.slice(0, 10).map(l => {
-        const msg = typeof l === 'string' ? l : (l.msg || '');
-        return `<div style="color:#f4a100;border-bottom:1px solid rgba(255,255,255,.04);padding:2px 0;font-size:12px">${msg}</div>`;
-      }).join('');
-    } else {
-      pwarn.innerHTML = '<span style="color:#555;">目前無低毛利警示</span>';
-    }
   } catch(e) {
-    document.getElementById('sched-status').innerHTML = '<span style="color:#e57373;">無法連線</span>';
-    document.getElementById('ad-log-list').innerHTML = '<span style="color:#e57373;">載入失敗：' + e.message + '</span>';
+    el.innerHTML = '<span style="color:#e57373;">無法連線：' + e.message + '</span>';
   }
 }
-loadAdLog();
-setInterval(loadAdLog, 60000); // 每分鐘自動更新
+loadSchedStatus();
+setInterval(loadSchedStatus, 60000);
 </script>
 
 <script>
@@ -2988,7 +2926,10 @@ setInterval(loadAdLog, 60000); // 每分鐘自動更新
   loop();
 })();
 
-// ── 廣告日誌 ──
+// ── 廣告日誌 ── 
+let _adLogData = [];   // 全域儲存，供篩選用
+let _adLogSource = ''; 
+
 async function loadAdLog() {
   const el = document.getElementById('ad-log-list');
   try {
@@ -3017,43 +2958,93 @@ async function loadAdLog() {
       source = '記憶體（重啟後清空）';
     }
 
-    if (!logs.length) {
-      el.innerHTML = '<div style="text-align:center;color:#555;font-size:13px;padding:20px">尚無執行記錄</div>';
-      return;
-    }
-
-    const colorMap = {
-      'ROAS調整': '#5DCAA5', '爆款': '#f4a100', '暫停': '#E24B4A', '低毛利': '#E24B4A',
-      '預算加碼': '#85B7EB', '空燒': '#E24B4A', '排程': '#888', '完成': '#5DCAA5'
-    };
-    const typeColorMap = {
-      'ROAS調整': '#5DCAA5', '爆款降ROAS': '#f4a100', '廣告暫停': '#E24B4A',
-      '低毛利暫停': '#E24B4A', '預算加碼': '#85B7EB', '空燒警告': '#BA7517',
-      '排程開始': '#555', '其他': '#888'
-    };
-
-    el.innerHTML = `<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
-      資料來源：${source}
-    </div>` + logs.map(log => {
-      const msg = log.msg || '';
-      const type = log.type || '';
-      const time = log.time || '';
-      let color = typeColorMap[type] || '#888';
-      if (!type) {
-        for (const [k,v] of Object.entries(colorMap)) {
-          if (msg.includes(k)) { color = v; break; }
-        }
-      }
-      const typeBadge = type ? `<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:${color};margin-right:6px;flex-shrink:0">${type}</span>` : '';
-      return `<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
-        <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">${time}</span>
-        ${typeBadge}
-        <span style="color:${color};line-height:1.5;word-break:break-all">${msg}</span>
-      </div>`;
-    }).join('');
+    // 儲存到全域變數供篩選
+    _adLogData = logs;
+    _adLogSource = source;
+    
+    // 更新店鋪篩選選單
+    updateShopLogFilter();
+    
+    // 應用目前篩選
+    filterLogByShop();
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;color:#E24B4A;font-size:13px;padding:20px">無法載入：' + e.message + '</div>';
   }
+}
+
+function updateShopLogFilter() {
+  const filter = document.getElementById('shop-log-filter');
+  if (!filter) return;
+  
+  // 提取所有店鋪名稱
+  const shops = new Set();
+  _adLogData.forEach(log => {
+    const msg = log.msg || '';
+    const match = msg.match(/\[([^\]]+)\]/);
+    if (match) shops.add(match[1]);
+  });
+  
+  // 更新篩選選單
+  const currentValue = filter.value;
+  filter.innerHTML = '<option value="all">全部店鋪</option>';
+  Array.from(shops).sort().forEach(shop => {
+    filter.innerHTML += `<option value="${shop}">${shop}</option>`;
+  });
+  filter.value = currentValue; // 保持原選擇
+}
+
+function filterLogByShop() {
+  const el = document.getElementById('ad-log-list');
+  const filter = document.getElementById('shop-log-filter');
+  if (!el || !filter) return;
+  
+  const selectedShop = filter.value;
+  let logs = _adLogData;
+  
+  // 篩選店鋪
+  if (selectedShop !== 'all') {
+    logs = logs.filter(log => {
+      const msg = log.msg || '';
+      return msg.includes(`[${selectedShop}]`);
+    });
+  }
+
+  if (!logs.length) {
+    const emptyMsg = selectedShop === 'all' ? '尚無執行記錄' : `店鋪「${selectedShop}」無記錄`;
+    el.innerHTML = `<div style="text-align:center;color:#555;font-size:13px;padding:20px">${emptyMsg}</div>`;
+    return;
+  }
+
+  const colorMap = {
+    'ROAS調整': '#5DCAA5', '爆款': '#f4a100', '暫停': '#E24B4A', '低毛利': '#E24B4A',
+    '預算加碼': '#85B7EB', '空燒': '#E24B4A', '排程': '#888', '完成': '#5DCAA5'
+  };
+  const typeColorMap = {
+    'ROAS調整': '#5DCAA5', '爆款降ROAS': '#f4a100', '廣告暫停': '#E24B4A',
+    '低毛利暫停': '#E24B4A', '預算加碼': '#85B7EB', '空燒警告': '#BA7517',
+    '排程開始': '#555', '其他': '#888'
+  };
+
+  const filterSuffix = selectedShop !== 'all' ? ` | 篩選：${selectedShop}` : '';
+  el.innerHTML = `<div style="font-size:11px;color:#555;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)">
+    資料來源：${_adLogSource}${filterSuffix}
+  </div>` + logs.map(log => {
+    const msg = log.msg || '';
+    const type = log.type || '';
+    const time = log.time || '';
+    let color = typeColorMap[type] || '#888';
+    if (!type) {
+      for (const [k,v] of Object.entries(colorMap)) {
+        if (msg.includes(k)) { color = v; break; }
+      }
+    }
+    const typeBadge = type ? `<span style="background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:10px;color:${color};margin-right:6px;flex-shrink:0">${type}</span>` : '';
+    return `<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;font-family:monospace">
+      <span style="color:#444;white-space:nowrap;flex-shrink:0;min-width:110px">${time}</span>
+      ${typeBadge}
+      <span style="color:${color};line-height:1.5;word-break:break-all">${msg}</span>
+    </div>`;
+  }).join('');
 }
 
 // ── 低利潤警示 ──
@@ -8106,6 +8097,7 @@ _ad_scheduler_store = {
     "log": [],                 # 執行記錄（最多100筆）
     "low_margin_shops": [],    # 低利潤廣告（依店鋪分類）
     "low_margin_ts": 0,        # 上次更新時間
+    "pause_reasons": {},       # cid -> {"reason": str, "margin": float, "timestamp": str, "reason_type": str}
 }
 
 def _ad_log(msg, write_sheet=False):
@@ -8156,6 +8148,23 @@ def _ad_log(msg, write_sheet=False):
     elif "空燒警告" in msg:     suggestion = "近期有好轉跡象，繼續觀察7天"
     elif "庫存不足" in msg:     suggestion = "盡快補貨，補貨後廣告自動重啟"
     _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
+
+def _track_pause_reason(cid, reason_type, margin, detailed_reason):
+    """記錄廣告暫停原因，供重啟時對照"""
+    from datetime import timezone, timedelta
+    tw_tz = timezone(timedelta(hours=8))
+    ts = datetime.now(tw_tz).strftime("%Y/%m/%d %H:%M")
+    _ad_scheduler_store["pause_reasons"][str(cid)] = {
+        "reason_type": reason_type,  # "low_margin", "burn_30d", "burn_7d", "no_stock"
+        "margin": margin,
+        "detailed_reason": detailed_reason,
+        "timestamp": ts
+    }
+    # 保持最多200筆記錄（避免記憶體無限增長）
+    if len(_ad_scheduler_store["pause_reasons"]) > 200:
+        oldest_keys = list(_ad_scheduler_store["pause_reasons"].keys())[:50]
+        for k in oldest_keys:
+            del _ad_scheduler_store["pause_reasons"][k]
 
 def _flush_ad_log_to_sheets():
     """把佇列中的日誌一次批次寫入 Sheets"""
@@ -8566,6 +8575,7 @@ def run_daily_ad_tasks(force=False):
         # ── 毛利<=45% 自動暫停 ──
         if target_roas is None:
             if _edit_ad(cid, ad_type, shop_id, 2):
+                _track_pause_reason(cid, "low_margin", margin, f"毛利{margin:.1f}%<=45%")
                 _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:12]}] {name} 毛利{margin:.0f}%<=45% 不投廣告")
                 pause_ok += 1
             else:
@@ -8647,10 +8657,14 @@ def run_daily_ad_tasks(force=False):
                     cr_avg  = _ad_benchmark["cr_avg"]
                     if ctr_v < ctr_avg * 0.5:
                         reason = f"CTR{ctr_v:.1f}%低於均值{ctr_avg}%，建議換主圖/優化標題"
+                        reason_type = "burn_ctr"
                     elif cr_v < cr_avg * 0.5:
                         reason = f"CR{cr_v:.1f}%低於均值{cr_avg}%，建議優化商品頁/圖片"
+                        reason_type = "burn_cr"
                     else:
                         reason = f"整體表現差，建議全面檢視"
+                        reason_type = "burn_overall"
+                    _track_pause_reason(cid, reason_type, margin, f"30天ROAS{roi30:.1f}/7天ROAS{roi7:.1f} {reason}")
                     _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} | {reason}")
                     burned_today.add(cid)  # 記錄今天空燒暫停，不能被重啟
                     pause_ok += 1
@@ -8721,7 +8735,29 @@ def run_daily_ad_tasks(force=False):
             # 毛利>45% 且 有庫存 → 重啟廣告
             target_roas = _get_target_roas(margin)
             if _edit_ad(cid, ad_type, shop_id, 3):  # 3 = 恢復暫停廣告
-                _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.0f}% 庫存{stock} ROAS→{target_roas}")
+                # 檢查暫停原因，生成詳細重啟理由
+                pause_info = _ad_scheduler_store["pause_reasons"].get(str(cid))
+                if pause_info:
+                    old_margin = pause_info.get("margin", 0)
+                    reason_type = pause_info.get("reason_type", "unknown")
+                    old_reason = pause_info.get("detailed_reason", "原因不明")
+                    pause_time = pause_info.get("timestamp", "")
+                    
+                    # 生成詳細對比說明
+                    if reason_type == "low_margin":
+                        restart_reason = f"毛利改善 {old_margin:.1f}%→{margin:.1f}% (暫停:{pause_time[:10]})"
+                    elif reason_type.startswith("burn_"):
+                        restart_reason = f"空燒問題已改善，毛利{margin:.1f}% 庫存{stock} (暫停因:{old_reason[:20]})"
+                    else:
+                        restart_reason = f"條件改善，毛利{margin:.1f}% 庫存{stock} (前次暫停:{old_reason[:15]})"
+                    
+                    _ad_log(f"重啟 ✅ [{shop_name}] {name} {restart_reason} ROAS→{target_roas}")
+                    # 清除暫停記錄（已重啟）
+                    del _ad_scheduler_store["pause_reasons"][str(cid)]
+                else:
+                    # 沒有暫停記錄（可能是手動暫停或其他原因）
+                    _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.1f}% 庫存{stock} ROAS→{target_roas} (系統暫停→自動重啟)")
+                
                 restart_ok += 1
                 # 同時設定正確 ROAS
                 _edit_ad(cid, ad_type, shop_id, 11, target_roas)
