@@ -9991,6 +9991,10 @@ def oversize_analyze_api():
         order_channel = {}                  # order_id → channel
         order_shipping_fee = {}             # order_id → 買家運費（0=免運，>0=客人自付）
 
+        # 第一步：掃描整個檔案，收集所有重量數據進行單位分析
+        all_raw_weights = []
+        pending_items = []
+        
         for _, row in df.iterrows():
             channel = detect_channel_from_logistics(row.get("买家指定物流", ""))
             if channel == "未知通路":
@@ -10005,32 +10009,69 @@ def oversize_analyze_api():
                 raw_weight = float(row.get("商品重量", 0))
                 qty = int(row.get("数量", 1) or 1)
                 sku = str(row.get("商品SKU", "")).strip()
-                
-                # 智能重量單位檢測（保守策略）
-                # 規則：如果原始重量 > 100，很可能已經是 g 單位
-                # 如果原始重量 ≤ 100，可能是 kg 單位（需轉換）
-                # 但如果轉換後超過 100kg，則原值就是 g
-                if raw_weight > 100:
-                    # 很可能已經是 g 單位
-                    weight_g = raw_weight
-                    unit_assumed = "g"
-                elif raw_weight > 0 and raw_weight <= 100:
-                    # 可能是 kg 單位，轉換但檢查合理性
-                    weight_g_converted = raw_weight * 1000
-                    if weight_g_converted > 100000:  # 超過 100kg，不合理
-                        weight_g = raw_weight  # 原值當作 g
-                        unit_assumed = "g (超大值當g處理)"
-                    else:
-                        weight_g = weight_g_converted  # kg→g
-                        unit_assumed = "kg→g"
-                else:
-                    # 重量為 0 或負值
-                    weight_g = raw_weight
-                    unit_assumed = "原值"
             except (ValueError, TypeError):
                 continue
             if not sku:
                 continue
+            
+            all_raw_weights.append(raw_weight)
+            pending_items.append({
+                "row": row, "channel": channel, "spec": spec,
+                "L": L, "W": W, "H": H, "raw_weight": raw_weight, "qty": qty, "sku": sku
+            })
+        
+        # 智能重量單位檢測（基於整個檔案的重量分布）
+        if all_raw_weights:
+            # 統計分析
+            non_zero_weights = [w for w in all_raw_weights if w > 0]
+            if non_zero_weights:
+                max_weight = max(non_zero_weights)
+                weights_over_50 = sum(1 for w in non_zero_weights if w > 50)
+                weights_over_100 = sum(1 for w in non_zero_weights if w > 100)
+                total_weights = len(non_zero_weights)
+                
+                # 判斷規則：
+                # 1. 如果有任何重量 > 1000，肯定是 g 單位（沒有商品重 1kg+）
+                # 2. 如果 70% 以上重量 > 50，很可能是 g 單位
+                # 3. 否則判定為 kg 單位
+                if max_weight > 1000:
+                    is_gram_unit = True
+                    unit_reason = f"有重量 {max_weight}g，肯定是 g 單位"
+                elif weights_over_50 / total_weights > 0.7:
+                    is_gram_unit = True 
+                    unit_reason = f"{weights_over_50}/{total_weights} 個重量>50，判定為 g 單位"
+                elif weights_over_100 / total_weights > 0.3:
+                    is_gram_unit = True
+                    unit_reason = f"{weights_over_100}/{total_weights} 個重量>100，判定為 g 單位"
+                else:
+                    is_gram_unit = False
+                    unit_reason = f"重量分布偏小，判定為 kg 單位"
+                
+                print(f"[重量單位檢測] {unit_reason}")
+            else:
+                is_gram_unit = True  # 無有效重量，預設 g
+                print(f"[重量單位檢測] 無有效重量數據，預設 g 單位")
+        else:
+            is_gram_unit = True
+            print(f"[重量單位檢測] 無重量數據，預設 g 單位")
+        
+        # 第二步：處理所有商品（使用統一的單位判定）
+        for item in pending_items:
+            row = item["row"]
+            channel = item["channel"] 
+            spec = item["spec"]
+            L, W, H = item["L"], item["W"], item["H"]
+            raw_weight = item["raw_weight"]
+            qty = item["qty"]
+            sku = item["sku"]
+            
+            # 根據檔案單位統一轉換
+            if is_gram_unit:
+                weight_g = raw_weight  # 已是 g 單位
+                unit_note = "g"
+            else:
+                weight_g = raw_weight * 1000  # kg → g
+                unit_note = "kg→g"
 
             # 重量異常修正（已知 SKU 的修正表）
             if sku in OVERSIZE_WEIGHT_CORRECTIONS:
@@ -10044,11 +10085,11 @@ def oversize_analyze_api():
             WEIGHT_SUSPECT_THRESHOLD = 100000  # 100kg
             weight_suspect = weight_g > WEIGHT_SUSPECT_THRESHOLD
             
-            # Debug: 記錄重量單位檢測結果（前10個SKU）
-            if len(order_map) <= 10:
-                print(f"[重量檢測] SKU={sku}, 原始={raw_weight}, 轉換後={weight_g}g, 判斷={unit_assumed}")
-            elif len(order_map) == 11:
-                print(f"[重量檢測] ...（省略後續SKU日誌）")
+            # Debug: 記錄前幾個SKU的單位轉換結果
+            if len(order_map) <= 5:
+                print(f"[重量轉換] SKU={sku}, 原始={raw_weight}, 轉換後={weight_g}g ({unit_note})")
+            elif len(order_map) == 6:
+                print(f"[重量轉換] ...（省略後續SKU）")
 
             # 斜放判斷
             original_max = max(L, W, H)
