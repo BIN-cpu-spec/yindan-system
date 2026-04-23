@@ -2641,20 +2641,12 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   <p>SUPER WAREHOUSE AGENT SYSTEM &nbsp;|&nbsp; 選擇你的任務</p>
 </div>
 <div class="cards">
-  <a href="/split" class="card card-split">
-    <span class="card-badge badge-ready">&#x2713; 上線中</span>
-    <span class="card-icon">&#x1F4E6;</span>
-    <div class="card-title">分單中心</div>
-    <div class="card-desc">上傳 4Sale 訂單 CSV，自動依通路和倉庫區域分單，一鍵複製交易序號到 4Sale 暫存區。</div>
-  </a>
   <a href="/customs" class="card card-customs">
     <span class="card-badge badge-ready">&#x2713; 上線中</span>
     <span class="card-icon">&#x1F4CB;</span>
     <div class="card-title">報關助手</div>
     <div class="card-desc">上傳倉庫進貨清單，自動對應商品報關資料庫，帶入材質、品名、單價，一鍵匯出報關 Excel。</div>
   </a>
-
-
 </div>
 
 <div class="sg-divider">
