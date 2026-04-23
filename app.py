@@ -2704,7 +2704,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 <div style="max-width:960px;margin:0 auto 24px;padding:0 24px">
   <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <span style="font-size:12px;color:#555">依店鋪分類顯示，資料來自超人眼鏡最近一次廣告分析</span>
+      <span style="font-size:12px;color:#555">依店鋪分類顯示商品利潤率，資料來自超人眼鏡最近一次利潤分析</span>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <select id="shop-filter" onchange="_selectedShop=this.value;renderLowMargin()" style="background:#1a2a24;color:#5DCAA5;border:1px solid #1D9E75;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer">
           <option value="all">全部店鋪</option>
@@ -2714,7 +2714,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
           <option value="45" selected>警告 &lt;45%</option>
           <option value="55">關注 &lt;55%</option>
         </select>
-        <button onclick="loadLowMargin()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x27F3; 重新整理</button>
+        <button onclick="loadLowMargin()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">&#x1F504; 同步資料</button>
       </div>
     </div>
     <div id="low-margin-list">
@@ -2729,7 +2729,9 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   <div class="sg-divider-line"></div>
 </div>
 
-<div style="max-width:960px;margin:0 auto;padding:0 24px 40px;">
+<div style="max-width:960px;margin:0 auto;padding:0 24px 40px;display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+  
+  <!-- 排程狀態 -->
   <div class="card" style="border-color:rgba(29,158,117,.35)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <div style="font-size:16px;font-weight:700;color:#5DCAA5;">&#x23F0; 排程狀態</div>
@@ -2737,6 +2739,16 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
     </div>
     <div id="sched-status" style="font-size:13px;color:#888;line-height:2;">載入中...</div>
   </div>
+
+  <!-- 今日執行摘要 -->
+  <div class="card" style="border-color:rgba(244,161,0,.35)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#f4a100;">&#x1F4CA; 今日執行摘要</div>
+      <button onclick="loadTodaySummary()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;">同步</button>
+    </div>
+    <div id="today-summary" style="font-size:13px;color:#888;line-height:1.8;">載入中...</div>
+  </div>
+
 </div>
 
 <script>
@@ -2839,6 +2851,76 @@ async function loadSchedStatus() {
 }
 loadSchedStatus();
 setInterval(loadSchedStatus, 60000);
+
+// ── 今日執行摘要 ──
+async function loadTodaySummary() {
+  const el = document.getElementById('today-summary');
+  if (!el) return;
+  try {
+    // 從廣告日誌 API 取得今日統計
+    const r = await fetch('/api/superman-glasses/ad-log');
+    const d = await r.json();
+    const logs = d.log || [];
+    
+    // 取得台灣今日日期
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 2026-04-23 格式
+    const todayLogs = logs.filter(entry => {
+      const time = entry.time || '';
+      const msg = entry.msg || (typeof entry === 'string' ? entry : '');
+      return time.includes(today.slice(5)) || time.includes(today.slice(8)); // 匹配 04/23 或 23 格式
+    });
+
+    // 統計各種操作
+    let roasCount = 0, pauseCount = 0, restartCount = 0, budgetCount = 0, boomCount = 0;
+    todayLogs.forEach(entry => {
+      const msg = entry.msg || (typeof entry === 'string' ? entry : '');
+      if (msg.includes('ROAS ✅')) roasCount++;
+      if (msg.includes('暫停 ✅')) pauseCount++;
+      if (msg.includes('重啟 ✅')) restartCount++;
+      if (msg.includes('預算 ✅')) budgetCount++;
+      if (msg.includes('爆款 ✅')) boomCount++;
+    });
+
+    const totalOps = roasCount + pauseCount + restartCount + budgetCount + boomCount;
+    
+    if (totalOps === 0) {
+      el.innerHTML = '<div style="text-align:center;color:#666;padding:10px;">今日尚無自動化執行記錄</div>';
+      return;
+    }
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px;">
+        <div style="background:rgba(93,202,165,.1);border:1px solid rgba(93,202,165,.2);border-radius:6px;padding:8px;text-align:center;">
+          <div style="color:#5DCAA5;font-weight:600;font-size:16px;">${roasCount}</div>
+          <div style="color:#888;font-size:11px;">ROAS調整</div>
+        </div>
+        <div style="background:rgba(244,161,0,.1);border:1px solid rgba(244,161,0,.2);border-radius:6px;padding:8px;text-align:center;">
+          <div style="color:#f4a100;font-weight:600;font-size:16px;">${boomCount}</div>
+          <div style="color:#888;font-size:11px;">爆款降ROAS</div>
+        </div>
+        <div style="background:rgba(232,75,74,.1);border:1px solid rgba(232,75,74,.2);border-radius:6px;padding:8px;text-align:center;">
+          <div style="color:#E24B4A;font-weight:600;font-size:16px;">${pauseCount}</div>
+          <div style="color:#888;font-size:11px;">廣告暫停</div>
+        </div>
+        <div style="background:rgba(133,183,235,.1);border:1px solid rgba(133,183,235,.2);border-radius:6px;padding:8px;text-align:center;">
+          <div style="color:#85B7EB;font-weight:600;font-size:16px;">${budgetCount}</div>
+          <div style="color:#888;font-size:11px;">預算調整</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,255,255,.03);border-radius:6px;">
+        <span style="font-size:12px;color:#888;">重啟廣告</span>
+        <span style="color:#5DCAA5;font-weight:600;">${restartCount} 筆</span>
+      </div>
+      <div style="text-align:center;margin-top:8px;font-size:11px;color:#666;">
+        今日共執行 ${totalOps} 次自動化操作
+      </div>
+    `;
+  } catch(e) {
+    el.innerHTML = '<span style="color:#e57373;">載入失敗：' + e.message + '</span>';
+  }
+}
+loadTodaySummary();
+setInterval(loadTodaySummary, 120000); // 每2分鐘更新
 </script>
 
 <script>
