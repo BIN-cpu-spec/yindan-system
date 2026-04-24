@@ -2744,7 +2744,10 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
   <div class="card" style="border-color:rgba(244,161,0,.35)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <div style="font-size:16px;font-weight:700;color:#f4a100;">&#x1F4CA; 今日執行摘要</div>
-      <button onclick="loadTodaySummary()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;">同步</button>
+      <div style="display:flex;gap:6px;">
+        <button onclick="loadTodaySummary()" style="background:rgba(244,161,0,.15);border:1px solid rgba(244,161,0,.4);color:#f4a100;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;">同步</button>
+        <button onclick="diagnoseScheduler()" style="background:rgba(93,202,165,.15);border:1px solid rgba(93,202,165,.4);color:#5DCAA5;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;">排程診斷</button>
+      </div>
     </div>
     <div id="today-summary" style="font-size:13px;color:#888;line-height:1.8;">載入中...</div>
   </div>
@@ -2935,6 +2938,63 @@ async function loadTodaySummary() {
 }
 loadTodaySummary();
 setInterval(loadTodaySummary, 120000); // 每2分鐘更新
+
+// ── 排程診斷 ──
+async function diagnoseScheduler() {
+  const summaryEl = document.getElementById('today-summary');
+  if (!summaryEl) return;
+  
+  try {
+    summaryEl.innerHTML = '<div style="text-align:center;color:#f4a100;">🔍 檢查排程狀態...</div>';
+    
+    const r = await fetch('/api/superman-glasses/scheduler-status');
+    const d = await r.json();
+    
+    if (!d.ok) {
+      summaryEl.innerHTML = `<div style="color:#e57373;">診斷失敗：${d.error}</div>`;
+      return;
+    }
+    
+    const s = d.status;
+    const issues = s.issues || [];
+    const healthy = s.healthy;
+    
+    let html = `
+      <div style="margin-bottom:12px;padding:8px;background:${healthy ? 'rgba(93,202,165,.1)' : 'rgba(244,161,0,.1)'};border:1px solid ${healthy ? 'rgba(93,202,165,.2)' : 'rgba(244,161,0,.2)'};border-radius:6px;">
+        <div style="font-weight:600;color:${healthy ? '#5DCAA5' : '#f4a100'};margin-bottom:4px;">
+          ${healthy ? '✅ 排程狀態正常' : '⚠️ 排程狀態異常'}
+        </div>
+        <div style="font-size:11px;color:#888;">台灣時間: ${s.taiwan_time}</div>
+      </div>
+    `;
+    
+    if (issues.length > 0) {
+      html += '<div style="margin-bottom:12px;">';
+      issues.forEach(issue => {
+        html += `<div style="font-size:12px;margin-bottom:2px;color:#f4a100;">${issue}</div>`;
+      });
+      html += '</div>';
+    }
+    
+    html += `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;">
+        <div>每日任務: <span style="color:${s.daily_ran_today ? '#5DCAA5' : '#f4a100'}">${s.daily_ran_today ? '今日已執行' : '未執行'}</span></div>
+        <div>每小時任務: <span style="color:${s.hourly_status === '正常' ? '#5DCAA5' : '#f4a100'}">${s.hourly_status}</span></div>
+        <div>Cookie: <span style="color:${s.checks.cookie_valid ? '#5DCAA5' : '#e57373'}">${s.checks.cookie_valid ? '有效' : '失效'}</span></div>
+        <div>成本: <span style="color:${s.checks.has_cost ? '#5DCAA5' : '#e57373'}">${s.checks.cost_count} 筆</span></div>
+      </div>
+    `;
+    
+    if (s.recent_logs && s.recent_logs.length > 0) {
+      html += '<div style="margin-top:8px;font-size:10px;color:#666;">最近日誌: ' + s.recent_logs[0].msg.substring(0, 50) + '...</div>';
+    }
+    
+    summaryEl.innerHTML = html;
+    
+  } catch(e) {
+    summaryEl.innerHTML = `<div style="color:#e57373;">診斷錯誤：${e.message}</div>`;
+  }
+}
 </script>
 
 <script>
@@ -8978,19 +9038,47 @@ def run_hourly_budget_task(force=False):
 def ad_scheduler_thread():
     """廣告排程背景執行緒"""
     time.sleep(30)  # 啟動後等30秒再開始
+    _ad_log(f"廣告排程啟動 - 伺服器時間: {datetime.now().isoformat()}")
+    
     while True:
         try:
-            # 用 UTC+8 台灣時間判斷
+            # 用 UTC+8 台灣時間判斷（修正版 - 更嚴格的時區處理）
             from datetime import timezone, timedelta
-            tw_tz = timezone(timedelta(hours=8))
-            now_tw = datetime.now(tw_tz)
-            # 每天台灣時間9點跑每日任務
-            if now_tw.hour == 9:
-                run_daily_ad_tasks()
-            # 每小時跑預算任務
-            run_hourly_budget_task()
+            import pytz
+            
+            # 方法1: pytz（更可靠）
+            try:
+                taiwan_tz = pytz.timezone('Asia/Taipei')
+                now_tw = datetime.now(taiwan_tz)
+                timezone_method = "pytz"
+            except:
+                # 方法2: 手動 UTC+8 fallback
+                utc_now = datetime.utcnow()
+                tw_offset = timedelta(hours=8)
+                now_tw = utc_now + tw_offset
+                timezone_method = "manual_utc+8"
+            
+            current_hour = now_tw.hour
+            current_date = now_tw.strftime("%Y-%m-%d")
+            
+            # 詳細時區 debug（每小時記錄一次）
+            if now_tw.minute == 0:
+                _ad_log(f"[時區檢查] 台灣時間: {now_tw.strftime('%Y-%m-%d %H:%M:%S')} | 方法: {timezone_method} | 小時: {current_hour}")
+            
+            # 每天台灣時間9點跑每日任務（寬鬆檢查：9-10點間都可以跑）
+            if 9 <= current_hour <= 10:
+                last_daily = _ad_scheduler_store.get("last_daily")
+                if last_daily != current_date:  # 今天還沒跑過
+                    _ad_log(f"觸發每日任務 - 台灣時間 {current_hour}:00")
+                    run_daily_ad_tasks()
+            
+            # 每小時跑預算任務（跳過 9-10 點，避免與每日任務衝突）
+            if not (9 <= current_hour <= 10):
+                run_hourly_budget_task()
+                
         except Exception as e:
             _ad_log(f"排程錯誤: {e}")
+        
         time.sleep(60)  # 每分鐘檢查一次
 
 # ── 廣告排程 API（查看執行記錄）──────────────────────────────
@@ -9427,6 +9515,91 @@ def superman_glasses_ad_run_now():
     resp = jsonify({"ok": True, "msg": f"已觸發 {task} 任務"})
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route("/api/superman-glasses/scheduler-status", methods=["GET"])
+def superman_glasses_scheduler_status():
+    """檢查排程執行狀態和診斷問題"""
+    from datetime import timezone, timedelta
+    import time
+    
+    try:
+        tw_tz = timezone(timedelta(hours=8))
+        now_tw = datetime.now(tw_tz)
+        today = now_tw.strftime("%Y-%m-%d")
+        
+        # 基本狀態
+        status = {
+            "taiwan_time": now_tw.strftime("%Y-%m-%d %H:%M:%S"),
+            "current_hour": now_tw.hour,
+            "today": today,
+            "should_run_daily_now": now_tw.hour == 9,
+            "last_daily": _ad_scheduler_store.get("last_daily"),
+            "last_hourly": _ad_scheduler_store.get("last_hourly", 0),
+            "daily_ran_today": _ad_scheduler_store.get("last_daily") == today,
+        }
+        
+        # 每小時任務狀態
+        last_hourly = status["last_hourly"]
+        if last_hourly > 0:
+            hourly_gap_min = (time.time() - last_hourly) / 60
+            status["hourly_gap_minutes"] = round(hourly_gap_min, 1)
+            status["hourly_status"] = "正常" if hourly_gap_min < 70 else "延遲"
+        else:
+            status["hourly_gap_minutes"] = None
+            status["hourly_status"] = "從未執行"
+        
+        # 前置條件檢查
+        cookie = _ad_scheduler_store.get("bs_cookie", "")
+        cost_count = _ad_scheduler_store.get("cost_count", 0)
+        
+        status["checks"] = {
+            "has_cookie": bool(cookie),
+            "cookie_length": len(cookie),
+            "cost_count": cost_count,
+            "has_cost": cost_count > 0
+        }
+        
+        # Cookie 健康測試
+        if cookie:
+            try:
+                test_result = _bigseller_api("/api/v1/shop/list.json?platform=shopee")
+                status["checks"]["cookie_valid"] = test_result is not None
+            except:
+                status["checks"]["cookie_valid"] = False
+        else:
+            status["checks"]["cookie_valid"] = False
+        
+        # 問題診斷
+        issues = []
+        if not status["checks"]["has_cookie"]:
+            issues.append("❌ 缺少 BigSeller Cookie")
+        elif not status["checks"]["cookie_valid"]:
+            issues.append("❌ BigSeller Cookie 已失效")
+        
+        if not status["checks"]["has_cost"]:
+            issues.append("❌ 缺少成本資料")
+            
+        if not status["daily_ran_today"] and now_tw.hour > 9:
+            issues.append(f"⚠️ 今日每日任務未執行（現在{now_tw.hour}點）")
+            
+        if status["hourly_status"] != "正常":
+            issues.append(f"⚠️ 每小時任務異常：{status['hourly_status']}")
+        
+        status["issues"] = issues
+        status["healthy"] = len(issues) == 0
+        
+        # 最近日誌
+        status["recent_logs"] = _ad_scheduler_store.get("log", [])[:5]
+        
+        resp = jsonify({"ok": True, "status": status})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        import traceback
+        resp = jsonify({"ok": False, "error": str(e), "traceback": traceback.format_exc()})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
 
 
 _cost_store = {
