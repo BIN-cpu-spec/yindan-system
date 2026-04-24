@@ -7006,7 +7006,8 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       const skuMatch = skuText.match(/([A-Z]{2,}\d{3,}[-\w]*)/);
       const sku = skuMatch?.[1];
       const costText = cells[12]?.textContent?.trim() || '';  // 從欄15改為欄12
-      const costMatch = costText.match(/([\d]+\.[\d]+|[\d]+)/);
+      // 處理 TWD 前綴，例如 "TWD 115.06" → "115.06"
+      const costMatch = costText.match(/TWD\s+([\d]+\.[\d]+|[\d]+)/) || costText.match(/([\d]+\.[\d]+|[\d]+)/);
       const cost = costMatch ? parseFloat(costMatch[1]) : 0;
       
       // Debug logging for specific SKU or first few rows
