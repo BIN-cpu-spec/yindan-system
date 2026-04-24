@@ -7001,11 +7001,32 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
         return;
       }
       
-      // 欄1=SKU，欄12=加權成本價（BigSeller 介面已改版）
+      // 欄1=SKU，智能尋找加權成本價欄位
       const skuText = cells[1]?.textContent?.trim() || '';
       const skuMatch = skuText.match(/([A-Z]{2,}\d{3,}[-\w]*)/);
       const sku = skuMatch?.[1];
-      const costText = cells[12]?.textContent?.trim() || '';  // 從欄15改為欄12
+      
+      // 方法1：優先使用欄12 (加權成本價標準位置)
+      let costText = cells[12]?.textContent?.trim() || '';
+      let costColumn = 12;
+      
+      // 方法2：如果欄12不是TWD格式，智能尋找真正的加權成本價
+      if (!costText.includes('TWD')) {
+        // 在欄10-16範圍內尋找包含TWD且數值>10的欄位
+        for (let i = 10; i <= 16; i++) {
+          const candidateText = cells[i]?.textContent?.trim() || '';
+          if (candidateText.includes('TWD')) {
+            const candidateMatch = candidateText.match(/TWD\s+([\d]+\.[\d]+|[\d]+)/);
+            const candidateValue = candidateMatch ? parseFloat(candidateMatch[1]) : 0;
+            if (candidateValue >= 10) {  // 合理的成本範圍 (>=10 TWD)
+              costText = candidateText;
+              costColumn = i;
+              break;
+            }
+          }
+        }
+      }
+      
       // 處理 TWD 前綴，例如 "TWD 115.06" → "115.06"
       const costMatch = costText.match(/TWD\s+([\d]+\.[\d]+|[\d]+)/) || costText.match(/([\d]+\.[\d]+|[\d]+)/);
       const cost = costMatch ? parseFloat(costMatch[1]) : 0;
@@ -7013,17 +7034,15 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       // Debug logging for specific SKU or first few rows
       if (sku === 'POP130-004' || rowIndex < 3) {
         console.log(`[成本掃描] 第${rowIndex}行 SKU=${sku}`);
-        console.log(`[成本掃描] 欄12原始文字: "${costText}"`);
+        console.log(`[成本掃描] 使用欄${costColumn} 原始文字: "${costText}"`);
         console.log(`[成本掃描] 解析成本: ${cost}`);
         
-        // 額外檢查其他可能的成本欄位
-        for (let i = 10; i <= 20; i++) {
-          const cellText = cells[i]?.textContent?.trim() || '';
-          if (cellText && /^[\d]+\.[\d]+$/.test(cellText)) {
-            const value = parseFloat(cellText);
-            if (value > 10 && value < 1000) {  // 合理的成本範圍
-              console.log(`[成本掃描] 欄${i}可能是成本: "${cellText}" = ${value}`);
-            }
+        // 如果是POP130-004，特別檢查預測日銷量欄位
+        if (sku === 'POP130-004') {
+          const forecast15 = cells[15]?.textContent?.trim() || '';
+          console.log(`[成本掃描] 欄15(預測日銷量): "${forecast15}"`);
+          if (forecast15.includes('0.73')) {
+            console.log(`[成本掃描] ⚠️ 確認欄15是預測日銷量，不是成本！`);
           }
         }
       }
@@ -9850,7 +9869,10 @@ def superman_glasses_cost_post():
                     ws = sh.add_worksheet(title="💾 成本備份", rows=10000, cols=3)
                 ws.clear()
                 ws.append_row(["SKU", "成本", "更新時間"], value_input_option="RAW")
-                now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+                # 使用台灣時間 (UTC+8)
+                import pytz
+                tw_tz = pytz.timezone('Asia/Taipei')
+                now_str = datetime.now(tw_tz).strftime("%Y/%m/%d %H:%M")
                 rows = [[sku, cost, now_str] for sku, cost in cost_map.items()]
                 ws.append_rows(rows, value_input_option="RAW")
                 print(f"[成本備份] 已寫入 Sheets {len(rows)} 筆")
@@ -9907,7 +9929,10 @@ def superman_glasses_cost_correction():
                     ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
                     ws.clear()
                     ws.append_row(["SKU", "成本", "更新時間"], value_input_option="RAW")
-                    now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+                    # 使用台灣時間 (UTC+8)
+                    import pytz
+                    tw_tz = pytz.timezone('Asia/Taipei')
+                    now_str = datetime.now(tw_tz).strftime("%Y/%m/%d %H:%M")
                     rows = [[sku, cost, now_str] for sku, cost in current_map.items()]
                     ws.append_rows(rows, value_input_option="RAW")
                     print(f"[成本修正] 已同步到 Sheets")
