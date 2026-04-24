@@ -9862,10 +9862,62 @@ def superman_glasses_cost_post():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
-@app.route("/api/superman-glasses/cost", methods=["OPTIONS"])
-def superman_glasses_cost_options():
-    resp = jsonify({"ok": True})
-    return resp
+@app.route("/api/superman-glasses/cost-correction", methods=["POST"])
+def superman_glasses_cost_correction():
+    """手動修正錯誤的成本資料"""
+    try:
+        data = request.get_json(force=True)
+        corrections = data.get("corrections", [])  # [{"sku": "POP130-004", "action": "delete"}, {"sku": "ABC001", "cost": 100.5}]
+        
+        if not corrections:
+            return jsonify({"ok": False, "msg": "無修正資料"}), 400
+            
+        current_map = _cost_store.get("map", {})
+        changes = []
+        
+        for correction in corrections:
+            sku = correction.get("sku")
+            action = correction.get("action")
+            new_cost = correction.get("cost")
+            
+            if not sku:
+                continue
+                
+            if action == "delete":
+                if sku in current_map:
+                    del current_map[sku]
+                    changes.append(f"刪除 {sku}")
+            elif new_cost is not None:
+                old_cost = current_map.get(sku, "無")
+                current_map[sku] = float(new_cost)
+                changes.append(f"{sku}: {old_cost} → {new_cost}")
+        
+        if changes:
+            _cost_store["map"] = current_map
+            _cost_store["count"] = len(current_map)
+            _cost_store["ts"] = int(time.time() * 1000)
+            
+            # 同步到 Google Sheets
+            def _backup_corrected_cost():
+                try:
+                    sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+                    if not sheet_id: return
+                    client, err = get_sheets_client()
+                    if err: return
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                    ws.clear()
+                    ws.append_row(["SKU", "成本", "更新時間"], value_input_option="RAW")
+                    now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+                    rows = [[sku, cost, now_str] for sku, cost in current_map.items()]
+                    ws.append_rows(rows, value_input_option="RAW")
+                    print(f"[成本修正] 已同步到 Sheets")
+                except Exception as e:
+                    print(f"[成本修正] Sheets 同步失敗: {e}")
+            threading.Thread(target=_backup_corrected_cost, daemon=True).start()
+        
+        return jsonify({"ok": True, "changes": changes, "count": len(current_map)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
 
 @app.after_request
 def add_cors_headers(resp):
