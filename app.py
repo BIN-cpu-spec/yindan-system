@@ -6996,23 +6996,23 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
     
     rows.forEach((row, rowIndex) => {
       const cells = row.querySelectorAll('.vxe-body--column');
-      if (cells.length < 16) {
-        if (rowIndex < 5) console.log(`[成本掃描] 第${rowIndex}行欄位不足: ${cells.length} < 16`);
+      if (cells.length < 13) {  // 欄12需要至少13欄
+        if (rowIndex < 5) console.log(`[成本掃描] 第${rowIndex}行欄位不足: ${cells.length} < 13`);
         return;
       }
       
-      // 欄1=SKU，欄15=加權成本價
+      // 欄1=SKU，欄12=加權成本價（BigSeller 介面已改版）
       const skuText = cells[1]?.textContent?.trim() || '';
       const skuMatch = skuText.match(/([A-Z]{2,}\d{3,}[-\w]*)/);
       const sku = skuMatch?.[1];
-      const costText = cells[15]?.textContent?.trim() || '';
+      const costText = cells[12]?.textContent?.trim() || '';  // 從欄15改為欄12
       const costMatch = costText.match(/([\d]+\.[\d]+|[\d]+)/);
       const cost = costMatch ? parseFloat(costMatch[1]) : 0;
       
       // Debug logging for specific SKU or first few rows
       if (sku === 'POP130-004' || rowIndex < 3) {
         console.log(`[成本掃描] 第${rowIndex}行 SKU=${sku}`);
-        console.log(`[成本掃描] 欄15原始文字: "${costText}"`);
+        console.log(`[成本掃描] 欄12原始文字: "${costText}"`);
         console.log(`[成本掃描] 解析成本: ${cost}`);
         
         // 額外檢查其他可能的成本欄位
