@@ -6992,9 +6992,15 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   function readCostFromDOM() {
     const map = {};
     const rows = document.querySelectorAll('.vxe-body--row');
-    rows.forEach(row => {
+    console.log('[成本掃描] 開始掃描，總行數:', rows.length);
+    
+    rows.forEach((row, rowIndex) => {
       const cells = row.querySelectorAll('.vxe-body--column');
-      if (cells.length < 16) return;
+      if (cells.length < 16) {
+        if (rowIndex < 5) console.log(`[成本掃描] 第${rowIndex}行欄位不足: ${cells.length} < 16`);
+        return;
+      }
+      
       // 欄1=SKU，欄15=加權成本價
       const skuText = cells[1]?.textContent?.trim() || '';
       const skuMatch = skuText.match(/([A-Z]{2,}\d{3,}[-\w]*)/);
@@ -7002,8 +7008,34 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
       const costText = cells[15]?.textContent?.trim() || '';
       const costMatch = costText.match(/([\d]+\.[\d]+|[\d]+)/);
       const cost = costMatch ? parseFloat(costMatch[1]) : 0;
-      if (sku && cost > 0) map[sku] = cost;
+      
+      // Debug logging for specific SKU or first few rows
+      if (sku === 'POP130-004' || rowIndex < 3) {
+        console.log(`[成本掃描] 第${rowIndex}行 SKU=${sku}`);
+        console.log(`[成本掃描] 欄15原始文字: "${costText}"`);
+        console.log(`[成本掃描] 解析成本: ${cost}`);
+        
+        // 額外檢查其他可能的成本欄位
+        for (let i = 10; i <= 20; i++) {
+          const cellText = cells[i]?.textContent?.trim() || '';
+          if (cellText && /^[\d]+\.[\d]+$/.test(cellText)) {
+            const value = parseFloat(cellText);
+            if (value > 10 && value < 1000) {  // 合理的成本範圍
+              console.log(`[成本掃描] 欄${i}可能是成本: "${cellText}" = ${value}`);
+            }
+          }
+        }
+      }
+      
+      if (sku && cost > 0) {
+        map[sku] = cost;
+        if (sku === 'POP130-004') {
+          console.log(`[成本掃描] ✅ 已記錄 ${sku} = ${cost}`);
+        }
+      }
     });
+    
+    console.log('[成本掃描] 完成，共掃描到', Object.keys(map).length, '個SKU');
     return map;
   }
 
@@ -7055,6 +7087,84 @@ _SUPERMAN_GLASSES_SCRIPT = r"""
   // ── 庫存頁面：建立掃描 UI ────────────────────────────────────
   function initInventoryScanner() {
     if (document.getElementById('sg-scanner-btn')) return;
+
+    // 診斷按鈕：檢查成本掃描問題
+    const diagBtn = document.createElement('button');
+    diagBtn.id = 'sg-cost-diag-btn';
+    diagBtn.textContent = '🔍 診斷成本掃描';
+    diagBtn.style.cssText = `
+      position:fixed;top:10px;right:10px;z-index:9999;
+      background:#f4a100;color:white;border:none;padding:8px 16px;
+      border-radius:6px;font-size:12px;cursor:pointer;font-weight:500;
+      box-shadow:0 2px 8px rgba(0,0,0,0.2);
+    `;
+    diagBtn.onclick = () => {
+      console.clear();
+      console.log('=== 🔍 BigSeller 成本掃描診斷 ===');
+      
+      // 檢查頁面結構
+      const rows = document.querySelectorAll('.vxe-body--row');
+      console.log('📊 總行數:', rows.length);
+      
+      if (rows.length === 0) {
+        console.log('❌ 未找到資料行，可能頁面未載入完成');
+        return;
+      }
+      
+      // 檢查表格標題
+      const headers = document.querySelectorAll('.vxe-header--column');
+      console.log('📋 表格標題 (前20欄):');
+      for (let i = 0; i < Math.min(20, headers.length); i++) {
+        const title = headers[i]?.textContent?.trim() || '';
+        console.log(`  欄${i}: ${title}`);
+      }
+      
+      // 尋找 POP130-004
+      console.log('\\n🎯 搜尋 POP130-004:');
+      let found = false;
+      rows.forEach((row, rowIndex) => {
+        const cells = row.querySelectorAll('.vxe-body--column');
+        const skuCell = cells[1]?.textContent?.trim() || '';
+        
+        if (skuCell.includes('POP130-004')) {
+          found = true;
+          console.log(`✅ 在第${rowIndex}行找到 POP130-004`);
+          console.log('📋 該行所有欄位 (前20欄):');
+          
+          for (let i = 0; i < Math.min(20, cells.length); i++) {
+            const content = cells[i]?.textContent?.trim() || '';
+            const isNumber = /^[\\d]+\\.[\\d]+$/.test(content);
+            const symbol = isNumber ? (parseFloat(content) > 100 ? '💰' : '💸') : '';
+            console.log(`  欄${i}: ${content} ${symbol}`);
+            
+            // 特別標記包含關鍵數字的欄位
+            if (content.includes('115.06')) {
+              console.log(`    🎯 欄${i} 包含 115.06 (正確成本)`);
+            }
+            if (content.includes('0.73')) {
+              console.log(`    ⚠️ 欄${i} 包含 0.73 (錯誤成本)`);
+            }
+          }
+        }
+      });
+      
+      if (!found) {
+        console.log('❌ 未找到 POP130-004，請確認該SKU在當前頁面');
+        console.log('💡 建議：搜尋該SKU或換頁查找');
+      }
+      
+      // 當前掃描結果
+      console.log('\\n🔍 當前掃描邏輯結果:');
+      const currentMap = readCostFromDOM();
+      if (currentMap['POP130-004']) {
+        console.log(`🎯 POP130-004 掃描結果: ${currentMap['POP130-004']}`);
+      } else {
+        console.log('❌ POP130-004 未被掃描到');
+      }
+      
+      console.log('\\n📌 請截圖這些 Console 輸出給 BIN，找到正確的成本欄位');
+    };
+    document.body.appendChild(diagBtn);
 
     const style = document.createElement('style');
     style.textContent = `
@@ -8245,7 +8355,6 @@ _ad_scheduler_store = {
     "log": [],                 # 執行記錄（最多100筆）
     "low_margin_shops": [],    # 低利潤廣告（依店鋪分類）
     "low_margin_ts": 0,        # 上次更新時間
-    "pause_reasons": {},       # cid -> {"reason": str, "margin": float, "timestamp": str, "reason_type": str}
 }
 
 def _ad_log(msg, write_sheet=False):
@@ -8296,23 +8405,6 @@ def _ad_log(msg, write_sheet=False):
     elif "空燒警告" in msg:     suggestion = "近期有好轉跡象，繼續觀察7天"
     elif "庫存不足" in msg:     suggestion = "盡快補貨，補貨後廣告自動重啟"
     _ad_scheduler_store.setdefault("sheet_queue", []).append([ts_full, shop, msg, suggestion])
-
-def _track_pause_reason(cid, reason_type, margin, detailed_reason):
-    """記錄廣告暫停原因，供重啟時對照"""
-    from datetime import timezone, timedelta
-    tw_tz = timezone(timedelta(hours=8))
-    ts = datetime.now(tw_tz).strftime("%Y/%m/%d %H:%M")
-    _ad_scheduler_store["pause_reasons"][str(cid)] = {
-        "reason_type": reason_type,  # "low_margin", "burn_30d", "burn_7d", "no_stock"
-        "margin": margin,
-        "detailed_reason": detailed_reason,
-        "timestamp": ts
-    }
-    # 保持最多200筆記錄（避免記憶體無限增長）
-    if len(_ad_scheduler_store["pause_reasons"]) > 200:
-        oldest_keys = list(_ad_scheduler_store["pause_reasons"].keys())[:50]
-        for k in oldest_keys:
-            del _ad_scheduler_store["pause_reasons"][k]
 
 def _flush_ad_log_to_sheets():
     """把佇列中的日誌一次批次寫入 Sheets"""
@@ -8723,7 +8815,6 @@ def run_daily_ad_tasks(force=False):
         # ── 毛利<=45% 自動暫停 ──
         if target_roas is None:
             if _edit_ad(cid, ad_type, shop_id, 2):
-                _track_pause_reason(cid, "low_margin", margin, f"毛利{margin:.1f}%<=45%")
                 _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:12]}] {name} 毛利{margin:.0f}%<=45% 不投廣告")
                 pause_ok += 1
             else:
@@ -8805,14 +8896,10 @@ def run_daily_ad_tasks(force=False):
                     cr_avg  = _ad_benchmark["cr_avg"]
                     if ctr_v < ctr_avg * 0.5:
                         reason = f"CTR{ctr_v:.1f}%低於均值{ctr_avg}%，建議換主圖/優化標題"
-                        reason_type = "burn_ctr"
                     elif cr_v < cr_avg * 0.5:
                         reason = f"CR{cr_v:.1f}%低於均值{cr_avg}%，建議優化商品頁/圖片"
-                        reason_type = "burn_cr"
                     else:
                         reason = f"整體表現差，建議全面檢視"
-                        reason_type = "burn_overall"
-                    _track_pause_reason(cid, reason_type, margin, f"30天ROAS{roi30:.1f}/7天ROAS{roi7:.1f} {reason}")
                     _ad_log(f"暫停 ✅ [{ad.get('shopName','')[:10]}] {name} 30天ROAS{roi30:.1f} 7天ROAS{roi7:.1f} | {reason}")
                     burned_today.add(cid)  # 記錄今天空燒暫停，不能被重啟
                     pause_ok += 1
@@ -8883,29 +8970,7 @@ def run_daily_ad_tasks(force=False):
             # 毛利>45% 且 有庫存 → 重啟廣告
             target_roas = _get_target_roas(margin)
             if _edit_ad(cid, ad_type, shop_id, 3):  # 3 = 恢復暫停廣告
-                # 檢查暫停原因，生成詳細重啟理由
-                pause_info = _ad_scheduler_store["pause_reasons"].get(str(cid))
-                if pause_info:
-                    old_margin = pause_info.get("margin", 0)
-                    reason_type = pause_info.get("reason_type", "unknown")
-                    old_reason = pause_info.get("detailed_reason", "原因不明")
-                    pause_time = pause_info.get("timestamp", "")
-                    
-                    # 生成詳細對比說明
-                    if reason_type == "low_margin":
-                        restart_reason = f"毛利改善 {old_margin:.1f}%→{margin:.1f}% (暫停:{pause_time[:10]})"
-                    elif reason_type.startswith("burn_"):
-                        restart_reason = f"空燒問題已改善，毛利{margin:.1f}% 庫存{stock} (暫停因:{old_reason[:20]})"
-                    else:
-                        restart_reason = f"條件改善，毛利{margin:.1f}% 庫存{stock} (前次暫停:{old_reason[:15]})"
-                    
-                    _ad_log(f"重啟 ✅ [{shop_name}] {name} {restart_reason} ROAS→{target_roas}")
-                    # 清除暫停記錄（已重啟）
-                    del _ad_scheduler_store["pause_reasons"][str(cid)]
-                else:
-                    # 沒有暫停記錄（可能是手動暫停或其他原因）
-                    _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.1f}% 庫存{stock} ROAS→{target_roas} (系統暫停→自動重啟)")
-                
+                _ad_log(f"重啟 ✅ [{shop_name}] {name} 毛利{margin:.0f}% 庫存{stock} ROAS→{target_roas}")
                 restart_ok += 1
                 # 同時設定正確 ROAS
                 _edit_ad(cid, ad_type, shop_id, 11, target_roas)
