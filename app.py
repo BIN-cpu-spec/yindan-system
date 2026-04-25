@@ -10743,6 +10743,49 @@ def oversize_analyze_api():
                     for it in items
                 ],
             }
+            
+            # 🎯 新竹物流特殊判斷：檢查客人運費是否足夠
+            if channel == "新竹物流":
+                buyer_fee = order_shipping_fee.get(order_id, 0)  # 客人實付運費
+                volume_pricing = spec.get("volume_pricing", {})
+                
+                # 計算包裹的實際三邊和（用於運費計算）
+                package_L = max(it["L"] for it in items)
+                package_W = max(it["W"] for it in items)  
+                package_H = max(it["H"] for it in items)
+                package_dims = sorted([package_L, package_W, package_H], reverse=True)
+                package_total_dim = sum(package_dims)
+                
+                # 計算實際所需運費（根據新竹物流費率表）
+                required_fee = 335  # 默認最高費用
+                for max_size in sorted(volume_pricing.keys()):
+                    if package_total_dim <= max_size:
+                        required_fee = volume_pricing[max_size]
+                        break
+                
+                # 判斷運費是否不足（只要實際需要的運費 > 客人付費就是不足）
+                if required_fee > buyer_fee:
+                    fee_shortage = required_fee - buyer_fee
+                    
+                    # 設定超材標記
+                    order_entry["split_ok"] = False  # 新竹物流本來就不可拆單
+                    order_entry["hsinchu_fee_issue"] = True
+                    order_entry["buyer_fee"] = buyer_fee
+                    order_entry["required_fee"] = required_fee
+                    order_entry["fee_shortage"] = fee_shortage
+                    order_entry["package_total_dim"] = package_total_dim
+                    
+                    # 添加運費不足的原因說明
+                    fee_reason = f"💰 新竹物流運費不足：包裹 {package_total_dim:.0f}cm 需付 {required_fee}元，客人僅付 {buyer_fee}元，差額 {fee_shortage}元"
+                    order_entry["reasons"].append(fee_reason)
+                        
+                    # 如果只是運費問題（無其他超材），標記為特殊處理
+                    other_issues = [r for r in reasons if "運費不足" not in r and "💰" not in r]
+                    if len(other_issues) == 0:
+                        order_entry["fee_only_issue"] = True
+                        order_entry["split_msg"] = f"僅運費不足：差額 {fee_shortage}元。建議聯繫客人補差額或改其他物流"
+                    else:
+                        order_entry["split_msg"] = f"尺寸超材 + 運費不足 {fee_shortage}元"
 
             if spec["splittable"]:
                 # 嘗試 FFD 拆單
