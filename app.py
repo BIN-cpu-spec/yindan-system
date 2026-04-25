@@ -10703,16 +10703,73 @@ def oversize_analyze_api():
                     tag = f"{it['sku']}×{it['qty']}"
                     reasons.append(f"{tag}：" + "、".join(single_notes))
 
-            # 訂單層級總和檢查（多 SKU 合箱情境）—— 先用「所有件堆在一起」作最壞估計
+            # 訂單層級總和檢查（多 SKU 合箱情境）—— 使用智能包裝邏輯
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
-            total_sum = 0
-            max_eff_side = 0
-            for it in items:
-                others = sorted([it["L"], it["W"], it["H"]])[:2]
-                for _ in range(it["qty"]):
-                    total_sum += it["effective_side"] + sum(others)
-                    max_eff_side = max(max_eff_side, it["effective_side"])
+            
+            # 🎯 使用智能包裝邏輯計算實際包裝尺寸
+            if len(items) == 1 and items[0]["qty"] > 1:
+                # 單SKU多件：使用智能疊加邏輯
+                it = items[0]
+                L, W, H = it["L"], it["W"], it["H"]
+                qty = it["qty"]
+                
+                if H <= 2.0:  # 扁平商品（如保冷袋、貼紙）
+                    # 可疊加包裝
+                    package_L = L + 2  # 包材厚度
+                    package_W = W + 2
+                    
+                    # 智能疊加高度（考慮壓縮）
+                    if qty <= 5:
+                        compression_factor = 0.9   # 輕微壓縮
+                    elif qty <= 10:
+                        compression_factor = 0.7   # 中度壓縮  
+                    else:
+                        compression_factor = 0.6   # 較大壓縮
+                        
+                    stacking_height = H * qty * compression_factor
+                    package_H = stacking_height + 2  # 包材厚度
+                    
+                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                    total_sum = sum(smart_dims)
+                    max_eff_side = smart_dims[0]
+                    
+                else:
+                    # 厚實商品：並排或立體擺放
+                    # 估算最優包裝箱
+                    import math
+                    item_volume = L * W * H
+                    total_volume = item_volume * qty
+                    optimal_cube_side = math.pow(total_volume * 1.2, 1/3)  # 20% 填充損失
+                    
+                    package_L = max(optimal_cube_side, L + 2)
+                    package_W = max(optimal_cube_side, W + 2) 
+                    package_H = max(optimal_cube_side, H + 2)
+                    
+                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                    total_sum = sum(smart_dims)
+                    max_eff_side = smart_dims[0]
+                    
+            else:
+                # 多SKU或傳統邏輯：使用改進的計算方式
+                package_L = max(it["L"] for it in items) + 2
+                package_W = max(it["W"] for it in items) + 2
+                
+                # 高度採用最佳擺放策略
+                total_height = 0
+                for it in items:
+                    qty = it["qty"]
+                    if it["H"] <= 2.0:  # 扁平商品可疊加
+                        total_height += it["H"] * qty * 0.8  # 壓縮疊加
+                    else:  # 厚實商品並排，高度取最大值
+                        total_height = max(total_height, it["H"])
+                        
+                package_H = total_height + 2  # 包材厚度
+                
+                smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                total_sum = sum(smart_dims)
+                max_eff_side = smart_dims[0]
+            
             order_level_over = (total_weight > spec["max_weight"]
                               or total_sum > spec["max_sum"]
                               or max_eff_side > spec["max_single"])
