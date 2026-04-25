@@ -9625,7 +9625,7 @@ def superman_glasses_scheduler_status():
         
         # 每小時任務狀態
         last_hourly = status["last_hourly"]
-        if last_hourly > 0:
+        if last_hourly and last_hourly > 0:
             hourly_gap_min = (time.time() - last_hourly) / 60
             status["hourly_gap_minutes"] = round(hourly_gap_min, 1)
             status["hourly_status"] = "正常" if hourly_gap_min < 70 else "延遲"
@@ -9992,6 +9992,7 @@ def superman_glasses_version():
 
 @app.route("/api/superman-glasses/download")
 def superman_glasses_download():
+    """提供 Chrome 擴充功能下載（v3.7.1 - 修復成本掃描）"""
     """讀 extension/v3.7/ 打包成 zip 供員工下載。
     
     v3.7 為員工正式版 (standalone content.js，不含廣告自動化)。
