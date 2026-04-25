@@ -8584,7 +8584,7 @@ def _bigseller_api(path, body=None):
                 return None
             else:
                 # 其他業務錯誤不清空 Cookie，可能只是暫時問題
-                _ad_log(f"⚠️ BigSeller API 業務錯誤：{msg}", write_sheet=False)
+                _ad_log(f"⚠️ BigSeller API 業務錯誤：{msg}", write_sheet=True)  # 修復：添加具體錯誤信息並記錄到表格
         
         return data
         
@@ -8711,7 +8711,19 @@ def _edit_ad(campaign_id, ad_type, shop_id, edit_action, value=None):
 def _fetch_ads_range(days=None):
     """抓廣告資料，可帶日期範圍"""
     from datetime import timedelta
-    body = {"pageNo": 1, "pageSize": 200}
+    # 修復：添加BigSeller API必需參數
+    body = {
+        "pageNo": 1, 
+        "pageSize": 200,
+        "platform": "shopee",      # 必需參數
+        "campaignStatus": "",       # 必需參數
+        "sortName": "",            # 必需參數
+        "sortType": "",            # 必需參數
+        "searchType": "",          # 必需參數
+        "searchValue": "",         # 必需參數
+        "adSource": "",            # 額外參數
+        "shopId": ""               # 額外參數
+    }
     if days:
         today = datetime.now()
         start = today - timedelta(days=days)
@@ -9157,9 +9169,8 @@ def ad_scheduler_thread():
                     _ad_log(f"觸發每日任務 - 台灣時間 {current_hour}:00")
                     run_daily_ad_tasks()
             
-            # 每小時跑預算任務（跳過 9-10 點，避免與每日任務衝突）
-            if not (9 <= current_hour <= 10):
-                run_hourly_budget_task()
+            # 每小時跑預算任務（每小時都執行，與每日任務並行不衝突）
+            run_hourly_budget_task()
                 
         except Exception as e:
             _ad_log(f"排程錯誤: {e}")
