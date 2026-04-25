@@ -412,7 +412,28 @@ def split_orders(rows):
 
         dims = sorted([L, W, H], reverse=True)
         o["max_side"]       = effective_side
-        o["total_dim"]      = sum(dims)
+        
+        # 🎯 修復多商品包裝三邊和錯誤累加問題
+        if len(o["products"]) > 1:
+            # 多商品：使用智能包裝計算
+            product_count = len(o["products"])
+            
+            # 智能包裝邏輯：扁平商品疊加，厚商品並排
+            if H <= 2.0:  # 扁平商品（如垃圾袋、貼紙等）
+                smart_height = H + (H * (product_count - 1) * 0.7)  # 額外商品70%疊加
+                method = f"扁平疊加({product_count}件)"
+            else:  # 厚實商品
+                smart_height = H  # 並排包裝，高度不變
+                method = f"厚實並排({product_count}件)"
+            
+            # 重新計算智能包裝的三邊和
+            smart_dims = sorted([L, W, smart_height], reverse=True)
+            o["total_dim"] = sum(smart_dims)
+            o["packaging_method"] = method
+        else:
+            # 單商品：維持原邏輯
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
         o["diagonal_used"]  = diagonal_applied
         o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
             o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
@@ -1023,7 +1044,28 @@ def split_orders(rows):
 
         dims = sorted([L, W, H], reverse=True)
         o["max_side"]       = effective_side
-        o["total_dim"]      = sum(dims)
+        
+        # 🎯 修復多商品包裝三邊和錯誤累加問題
+        if len(o["products"]) > 1:
+            # 多商品：使用智能包裝計算
+            product_count = len(o["products"])
+            
+            # 智能包裝邏輯：扁平商品疊加，厚商品並排
+            if H <= 2.0:  # 扁平商品（如垃圾袋、貼紙等）
+                smart_height = H + (H * (product_count - 1) * 0.7)  # 額外商品70%疊加
+                method = f"扁平疊加({product_count}件)"
+            else:  # 厚實商品
+                smart_height = H  # 並排包裝，高度不變
+                method = f"厚實並排({product_count}件)"
+            
+            # 重新計算智能包裝的三邊和
+            smart_dims = sorted([L, W, smart_height], reverse=True)
+            o["total_dim"] = sum(smart_dims)
+            o["packaging_method"] = method
+        else:
+            # 單商品：維持原邏輯
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
         o["diagonal_used"]  = diagonal_applied
         o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
             o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
@@ -1634,7 +1676,28 @@ def split_orders(rows):
 
         dims = sorted([L, W, H], reverse=True)
         o["max_side"]       = effective_side
-        o["total_dim"]      = sum(dims)
+        
+        # 🎯 修復多商品包裝三邊和錯誤累加問題
+        if len(o["products"]) > 1:
+            # 多商品：使用智能包裝計算
+            product_count = len(o["products"])
+            
+            # 智能包裝邏輯：扁平商品疊加，厚商品並排
+            if H <= 2.0:  # 扁平商品（如垃圾袋、貼紙等）
+                smart_height = H + (H * (product_count - 1) * 0.7)  # 額外商品70%疊加
+                method = f"扁平疊加({product_count}件)"
+            else:  # 厚實商品
+                smart_height = H  # 並排包裝，高度不變
+                method = f"厚實並排({product_count}件)"
+            
+            # 重新計算智能包裝的三邊和
+            smart_dims = sorted([L, W, smart_height], reverse=True)
+            o["total_dim"] = sum(smart_dims)
+            o["packaging_method"] = method
+        else:
+            # 單商品：維持原邏輯
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
         o["diagonal_used"]  = diagonal_applied
         o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
             o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
@@ -2287,7 +2350,28 @@ def split_orders(rows):
                 break
 
         o["max_side"]       = effective_side
-        o["total_dim"]      = sum(dims)
+        
+        # 🎯 修復多商品包裝三邊和錯誤累加問題
+        if len(o["products"]) > 1:
+            # 多商品：使用智能包裝計算
+            product_count = len(o["products"])
+            
+            # 智能包裝邏輯：扁平商品疊加，厚商品並排
+            if H <= 2.0:  # 扁平商品（如垃圾袋、貼紙等）
+                smart_height = H + (H * (product_count - 1) * 0.7)  # 額外商品70%疊加
+                method = f"扁平疊加({product_count}件)"
+            else:  # 厚實商品
+                smart_height = H  # 並排包裝，高度不變
+                method = f"厚實並排({product_count}件)"
+            
+            # 重新計算智能包裝的三邊和
+            smart_dims = sorted([L, W, smart_height], reverse=True)
+            o["total_dim"] = sum(smart_dims)
+            o["packaging_method"] = method
+        else:
+            # 單商品：維持原邏輯
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
         o["diagonal_used"]  = diagonal_applied
         o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
             o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"], o["fee"]
