@@ -8578,13 +8578,18 @@ def _bigseller_api(path, body=None):
         # 檢查 BigSeller 的業務狀態碼
         if data.get("code") != 0:
             msg = data.get("msg", "未知錯誤")
+            # 🎯 修復：無論何種錯誤都要記錄詳細信息
+            detailed_error = f"{msg} (code: {data.get('code')}, data: {data})"
+            
             if any(keyword in str(msg).lower() for keyword in ["login", "auth", "登入", "認證", "token", "session"]):
-                _ad_log(f"🔴 BigSeller 要求重新登入：{msg}", write_sheet=True)
+                _ad_log(f"🔴 BigSeller 要求重新登入：{detailed_error}", write_sheet=True)
                 _invalidate_cookie(f"Business Error: {msg}")
                 return None
             else:
-                # 其他業務錯誤不清空 Cookie，可能只是暫時問題
-                _ad_log(f"⚠️ BigSeller API 業務錯誤：{msg}", write_sheet=True)  # 修復：添加具體錯誤信息並記錄到表格
+                # 其他業務錯誤也要記錄詳細信息
+                _ad_log(f"⚠️ BigSeller API 業務錯誤：{detailed_error}", write_sheet=True)  
+                # 🎯 修復：繼續返回data以便上層處理，而不是None
+                return data
         
         return data
         
@@ -8711,7 +8716,7 @@ def _edit_ad(campaign_id, ad_type, shop_id, edit_action, value=None):
 def _fetch_ads_range(days=None):
     """抓廣告資料，可帶日期範圍"""
     from datetime import timedelta
-    # 修復：添加BigSeller API必需參數
+    # 修復：添加BigSeller API必需參數（基於localStorage分析）
     body = {
         "pageNo": 1, 
         "pageSize": 200,
@@ -8722,19 +8727,42 @@ def _fetch_ads_range(days=None):
         "searchType": "",          # 必需參數
         "searchValue": "",         # 必需參數
         "adSource": "",            # 額外參數
-        "shopId": ""               # 額外參數
+        "shopId": "",              # 額外參數
+        # 🎯 新發現的關鍵參數（來自localStorage分析）
+        "shopGroupId": "",         # 店鋪群組ID
+        "shopIds": [4732630],      # 店鋪ID數組（從localStorage發現）
+        "labelId": "",             # 標籤ID
+        "currency": "TWD",         # 幣種（台幣）
+        "timeQuickDay": 1,         # 快速日期選擇
+        "beginDate": "",           # 開始日期
+        "endDate": "",             # 結束日期
+        "dateTypeDate": []         # 日期類型數組
     }
     if days:
         today = datetime.now()
         start = today - timedelta(days=days)
         body["startDateStr"] = start.strftime("%Y-%m-%d")
         body["endDateStr"]   = today.strftime("%Y-%m-%d")
+        # 🎯 修復：正確設置日期參數（基於localStorage格式）
+        body["beginDate"] = start.strftime("%Y-%m-%d")
+        body["endDate"] = today.strftime("%Y-%m-%d")
+        body["dateTypeDate"] = [start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")]
     ads = []
     page = 1
     while True:
         body["pageNo"] = page
         d = _bigseller_api("/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json", body)
-        if not d or d.get("code") != 0: break
+        
+        # 🎯 修復：改善錯誤處理和診斷信息
+        if not d:
+            _ad_log(f"⚠️ BigSeller API 第{page}頁：無回應數據", write_sheet=True)
+            break
+        
+        if d.get("code") != 0:
+            error_msg = d.get("msg", "未知錯誤")
+            _ad_log(f"⚠️ BigSeller API 第{page}頁失敗：{error_msg} (完整參數: {len(body)}個)", write_sheet=True)
+            break
+            
         rows = d.get("data", {}).get("rows", [])
         for row in rows:
             if row.get("biddingMethod") == "autoRoas" and row.get("campaignStatus") == "ongoing":
