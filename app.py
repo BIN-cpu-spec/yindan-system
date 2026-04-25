@@ -10719,13 +10719,21 @@ def oversize_analyze_api():
                     package_L = L + 2  # 包材厚度
                     package_W = W + 2
                     
-                    # 智能疊加高度（考慮壓縮）
-                    if qty <= 5:
-                        compression_factor = 0.9   # 輕微壓縮
-                    elif qty <= 10:
-                        compression_factor = 0.7   # 中度壓縮  
-                    else:
-                        compression_factor = 0.6   # 較大壓縮
+                    # 智能疊加高度（考慮壓縮）- 區分極扁平和一般扁平商品
+                    if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
+                        if qty <= 10:
+                            compression_factor = 0.4   # 高壓縮60%
+                        elif qty <= 50:
+                            compression_factor = 0.3   # 更高壓縮70%
+                        else:
+                            compression_factor = 0.25  # 極高壓縮75%
+                    else:  # 一般扁平商品（貼紙、薄片等）
+                        if qty <= 5:
+                            compression_factor = 0.9   # 輕微壓縮
+                        elif qty <= 10:
+                            compression_factor = 0.7   # 中度壓縮  
+                        else:
+                            compression_factor = 0.6   # 較大壓縮
                         
                     stacking_height = H * qty * compression_factor
                     package_H = stacking_height + 2  # 包材厚度
