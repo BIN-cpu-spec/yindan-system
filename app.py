@@ -212,6 +212,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
       上傳 BigSeller 匯出的超材檔案，自動判斷可拆單/不可拆單，一鍵複製訂單號進行批量標記。
     </div>
     <a href="/oversize-tool" class="dl-btn">&#x1F680; 開始超材分析</a>
+    <a href="/settings/diagonal" class="dl-btn" style="margin-left:8px;background:#1a4a8a;color:#9ec5e8">&#x2699;&#xFE0F; 特殊商品白名單</a>
   </div>
 </div>
 
@@ -7894,78 +7895,35 @@ def oversize_analyze_api():
             # 訂單層級總和檢查（多 SKU 合箱情境）—— 使用智能包裝邏輯
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
-            
-            # 🎯 使用智能包裝邏輯計算實際包裝尺寸
-            if len(items) == 1 and items[0]["qty"] > 1:
-                # 單SKU多件：使用智能疊加邏輯
-                it = items[0]
-                L, W, H = it["L"], it["W"], it["H"]
-                qty = it["qty"]
-                
-                if H <= 2.0:  # 扁平商品（如保冷袋、貼紙）
-                    # 可疊加包裝
-                    package_L = L + 2  # 包材厚度
-                    package_W = W + 2
-                    
-                    # 智能疊加高度（考慮壓縮）- 區分極扁平和一般扁平商品
-                    if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
-                        if qty <= 10:
-                            compression_factor = 0.4   # 高壓縮60%
-                        elif qty <= 50:
-                            compression_factor = 0.3   # 更高壓縮70%
-                        else:
-                            compression_factor = 0.25  # 極高壓縮75%
-                    else:  # 一般扁平商品（貼紙、薄片等）
-                        if qty <= 5:
-                            compression_factor = 0.9   # 輕微壓縮
-                        elif qty <= 10:
-                            compression_factor = 0.7   # 中度壓縮  
-                        else:
-                            compression_factor = 0.6   # 較大壓縮
-                        
-                    stacking_height = H * qty * compression_factor
-                    package_H = stacking_height + 2  # 包材厚度
-                    
-                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                    total_sum = sum(smart_dims)
-                    max_eff_side = smart_dims[0]
-                    
-                else:
-                    # 厚實商品：並排或立體擺放
-                    # 估算最優包裝箱
-                    import math
-                    item_volume = L * W * H
-                    total_volume = item_volume * qty
-                    optimal_cube_side = math.pow(total_volume * 1.2, 1/3)  # 20% 填充損失
-                    
-                    package_L = max(optimal_cube_side, L + 2)
-                    package_W = max(optimal_cube_side, W + 2) 
-                    package_H = max(optimal_cube_side, H + 2)
-                    
-                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                    total_sum = sum(smart_dims)
-                    max_eff_side = smart_dims[0]
-                    
-            else:
-                # 多SKU或傳統邏輯：使用改進的計算方式
-                package_L = max(it["L"] for it in items) + 2
-                package_W = max(it["W"] for it in items) + 2
-                
-                # 高度採用最佳擺放策略
-                total_height = 0
-                for it in items:
-                    qty = it["qty"]
-                    if it["H"] <= 2.0:  # 扁平商品可疊加
-                        total_height += it["H"] * qty * 0.8  # 壓縮疊加
-                    else:  # 厚實商品並排，高度取最大值
-                        total_height = max(total_height, it["H"])
-                        
-                package_H = total_height + 2  # 包材厚度
-                
-                smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                total_sum = sum(smart_dims)
-                max_eff_side = smart_dims[0]
-            
+
+            # 🎯 修法3:基於真實體積守恆的智能裝箱演算法
+            # 設計原則:
+            #   1. 以「最大商品形狀」為基準箱(箱子最少要這麼大才裝得下最大件)
+            #   2. 用「商品總體積 × 鬆散係數」決定箱子需要多大
+            #   3. 基準箱裝得下 → 直接用基準尺寸(其他商品塞縫)
+            #      基準箱裝不下 → 把高度方向加長(模擬往上堆疊)
+            #   4. 不再用「+2 包材厚度」「扁平/厚實 if-else」這類拍腦袋公式
+            PACK_DENSITY = 1.3  # 鬆散係數:留 30% 空隙給包材與不規則形狀
+
+            # 基準箱:必須容納最大那件商品的每一邊
+            box_L = max(it["L"] for it in items)
+            box_W = max(it["W"] for it in items)
+            box_H = max(it["H"] for it in items)
+
+            # 商品總體積(可疑重量的 SKU 也照算體積,因為體積資料通常正確)
+            total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
+            required_volume = total_volume * PACK_DENSITY
+
+            base_volume = box_L * box_W * box_H
+            if base_volume < required_volume and box_L * box_W > 0:
+                # 基準箱裝不下 → 把箱子加高(往上堆疊)
+                shortage = required_volume - base_volume
+                box_H = box_H + shortage / (box_L * box_W)
+
+            smart_dims = sorted([box_L, box_W, box_H], reverse=True)
+            total_sum = sum(smart_dims)
+            max_eff_side = smart_dims[0]
+
             order_level_over = (total_weight > spec["max_weight"]
                               or total_sum > spec["max_sum"]
                               or max_eff_side > spec["max_single"])
