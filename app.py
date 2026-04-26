@@ -11003,16 +11003,88 @@ def check_oversize_single_item(length, width, height, weight, sku, channel_spec)
     except (ValueError, TypeError):
         return False, ["數據格式錯誤"]
 
+
+def smart_pack_box(items):
+    """共用的真實裝箱演算法（修法 3.4：以最大件為基準箱 + 容積守恆 + 形狀合理化）
+
+    輸入：items = [{"L":..., "W":..., "H":..., "qty":...}, ...]
+    回傳：(box_L, box_W, box_H) 真實裝箱後的箱子三邊（已含 30% 鬆散包材空間）
+
+    設計原則：
+      1. 基準箱 = 每邊取 max（最大那件商品的對應邊）→ 箱子最少要這個尺寸
+      2. 單件訂單：直接用商品本身尺寸（不加鬆散）
+      3. 多件訂單：算需要的容積（總體積 × 1.3）
+         - 基準箱已經夠大 → 用基準箱
+         - 不夠 → 優先往 H 軸疊高（符合真實裝箱直覺）
+         - 疊太高（超過長邊）→ 改用三邊等比例擴張（避免變超長條）
+
+    為什麼這樣設計：
+      - 6 片滑鼠墊 23×18×1 → 疊高為 23×18×8（合理，員工真的這樣裝）
+      - 100 個 8×6×6 玻璃瓶 → 立方擴張為 40×30×30（合理）
+      - 不會出現「23+18+1 × 4件 = 99cm 三邊和」這種死碼公式錯誤
+    """
+    import math as _math
+    if not items:
+        return 0.0, 0.0, 0.0
+
+    total_qty = sum(it.get("qty", 1) for it in items)
+
+    # 基準箱：每邊取 max
+    L_base = float(max(it["L"] for it in items))
+    W_base = float(max(it["W"] for it in items))
+    H_base = float(max(it["H"] for it in items))
+
+    if total_qty <= 1:
+        return L_base, W_base, H_base
+
+    # 多件：算需要的容積（×1.3 鬆散）
+    PACK_DENSITY = 1.3
+    total_volume = sum(it["L"] * it["W"] * it["H"] * it.get("qty", 1) for it in items)
+    required_volume = total_volume * PACK_DENSITY
+
+    base_volume = L_base * W_base * H_base
+    if base_volume <= 0 or base_volume >= required_volume:
+        return L_base, W_base, H_base
+
+    # 策略 A：優先往 H 軸疊高
+    needed_H = required_volume / (L_base * W_base)
+    longest_LW = max(L_base, W_base)
+
+    if needed_H <= longest_LW:
+        # 疊高合理（高度不會超過長邊）→ 採用
+        return L_base, W_base, needed_H
+
+    # 策略 B：疊太高 → 改用三邊等比例擴張
+    scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
+    return L_base * scale, W_base * scale, H_base * scale
+
+
+def _check_pack_fit(items, max_sum, max_single, max_weight):
+    """檢查一堆商品裝箱後是否符合通路規格
+    回傳：(合規?, 三邊和, 最長邊, 總重量, 是否有可疑重量)
+    """
+    L, W, H = smart_pack_box(items)
+    dims = sorted([L, W, H], reverse=True)
+    total_sum = sum(dims)
+    max_side = dims[0]
+    # 重量不算 weight_suspect 的（待人工確認）
+    total_weight = sum(it["weight_g"] * it.get("qty", 1) for it in items if not it.get("weight_suspect"))
+    has_suspect = any(it.get("weight_suspect") for it in items)
+
+    fit = (total_sum <= max_sum and max_side <= max_single and total_weight <= max_weight)
+    return fit, total_sum, max_side, total_weight, has_suspect
+
+
 def ffd_pack_order(items, channel_spec):
-    """First-Fit Decreasing 裝箱演算法：把訂單內的 SKU 單件展開後，
-    盡量用最少箱數裝進通路材積內。
-    
-    ⭐ 修復版本：對同SKU多件商品使用智能疊加邏輯
-    
+    """裝箱拆單演算法（修法 3.4：統一用 smart_pack_box）
+
     items: [{"sku":str, "name":str, "L":float, "W":float, "H":float,
-             "weight_g":float, "qty":int, "diagonal":bool, "effective_side":float}]
+             "weight_g":float, "qty":int, "diagonal":bool, "effective_side":float,
+             "weight_suspect":bool}]
+    channel_spec: {"max_sum":int, "max_single":int, "max_weight":int, "max_split":int}
+
     回傳: (packages, msg)
-      packages = [[{"sku":.., "qty":.., "name":..}, ...], ...]  每個內層list是一個包裹
+      packages = [{"items":[...], "total_sum":..., "max_side":..., "weight_g":..., "has_suspect_weight":...}]
       msg = 空字串 或 拆不掉的原因
     """
     import math
@@ -11021,174 +11093,130 @@ def ffd_pack_order(items, channel_spec):
     max_weight = channel_spec["max_weight"]
     max_split  = channel_spec.get("max_split", 5)
 
-    # 🎯 預檢查：如果是單SKU多件且可以智能疊加，直接判斷是否需要拆單
-    if len(items) == 1 and items[0].get("qty", 1) > 1:
-        it = items[0]
-        L, W, H = it["L"], it["W"], it["H"]
-        qty = it.get("qty", 1)
-        
-        # 使用智能疊加邏輯計算實際包裝尺寸
-        if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
-            if qty <= 10:
-                compression_factor = 0.4   # 高壓縮60%
-            elif qty <= 50:
-                compression_factor = 0.3   # 更高壓縮70%
-            else:
-                compression_factor = 0.25  # 極高壓縮75%
-                
-            package_L = L + 2  # 包材厚度
-            package_W = W + 2
-            stacking_height = H * qty * compression_factor
-            package_H = stacking_height + 2  # 包材厚度
-            
-            smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-            total_sum = sum(smart_dims)
-            max_side = smart_dims[0]
-            total_weight = it["weight_g"] * qty
-            
-            # 判斷智能疊加後是否仍然超材
-            if (total_sum <= max_sum and 
-                max_side <= max_single and 
-                total_weight <= max_weight):
-                # 智能疊加後合規，不需要拆單
-                return None, f"智能疊加後合規：{total_sum:.1f}cm ≤ {max_sum}cm，無需拆單"
-            
-            # 如果智能疊加後仍超材，才進行拆單邏輯
-            # 計算需要拆成幾包
-            target_packages = 2  # 先嘗試拆成2包
-            while target_packages <= max_split:
-                items_per_package = math.ceil(qty / target_packages)
-                test_height = H * items_per_package * compression_factor + 2
-                test_dims = sorted([package_L, package_W, test_height], reverse=True)
-                test_total = sum(test_dims)
-                test_weight = it["weight_g"] * items_per_package
-                
-                if (test_total <= max_sum and 
-                    test_dims[0] <= max_single and 
-                    test_weight <= max_weight):
-                    # 可以拆成target_packages包
-                    packages = []
-                    remaining_qty = qty
-                    for i in range(target_packages):
-                        if remaining_qty <= 0:
-                            break
-                        pkg_qty = min(items_per_package, remaining_qty)
-                        pkg_height = H * pkg_qty * compression_factor + 2
-                        pkg_dims = sorted([package_L, package_W, pkg_height], reverse=True)
-                        
-                        packages.append({
-                            "items": [{"sku": it["sku"], "qty": pkg_qty, "name": it.get("name", "")}],
-                            "total_sum": sum(pkg_dims),
-                            "max_side": pkg_dims[0],
-                            "weight_g": it["weight_g"] * pkg_qty,
-                            "has_suspect_weight": it.get("weight_suspect", False),
-                        })
-                        remaining_qty -= pkg_qty
-                    
-                    return packages, ""
-                    
-                target_packages += 1
-            
-            # 無法在max_split內拆成合規包裹
-            return None, f"需拆超過 {max_split} 包才能合規"
-    
-    # 🔄 原有邏輯：多SKU或厚實商品使用傳統FFD算法
-    # 1) 展開件數 → 每個 item 是一件實體
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Step 1: 全部塞一包試試（用 smart_pack_box）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    fit, total_sum, max_side, total_weight, has_suspect = _check_pack_fit(
+        items, max_sum, max_single, max_weight
+    )
+    if fit:
+        # 一包就裝得下
+        return [{
+            "items": [{"sku": it["sku"], "qty": it.get("qty", 1), "name": it.get("name", "")}
+                      for it in items],
+            "total_sum": round(total_sum, 1),
+            "max_side":  round(max_side, 1),
+            "weight_g":  round(total_weight, 0),
+            "has_suspect_weight": has_suspect,
+        }], ""
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Step 2: 預檢查：單件就超規 → 無法拆
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    for it in items:
+        eff_side = it.get("effective_side", max(it["L"], it["W"], it["H"]))
+        if eff_side > max_single:
+            msg = f"SKU {it['sku']} 單件最長邊 {eff_side:.0f}cm > {max_single}cm"
+            if not it.get("diagonal"):
+                msg += "（若此商品可斜放，請將 SKU 加入斜放白名單）"
+            return None, msg
+        if not it.get("weight_suspect") and it["weight_g"] > max_weight:
+            return None, f"SKU {it['sku']} 單件重量 {it['weight_g']:.0f}g > {max_weight}g"
+        # 單件三邊和檢查（用 smart_pack_box 算單件的三邊和）
+        L1, W1, H1 = smart_pack_box([{"L": it["L"], "W": it["W"], "H": it["H"], "qty": 1}])
+        single_sum = L1 + W1 + H1
+        if single_sum > max_sum:
+            return None, f"SKU {it['sku']} 單件三邊和 {single_sum:.0f}cm > {max_sum}cm"
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Step 3: 展開成「單件清單」做 First-Fit Decreasing
+    #         每次嘗試把一件加進現有的包，加進去後用 smart_pack_box 驗算
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     units = []
     for it in items:
         for _ in range(max(1, it.get("qty", 1))):
-            eff_side = it.get("effective_side", max(it["L"], it["W"], it["H"]))
             units.append({
                 "sku": it["sku"],
                 "name": it.get("name", ""),
                 "L": it["L"], "W": it["W"], "H": it["H"],
                 "weight_g": it["weight_g"],
                 "weight_suspect": it.get("weight_suspect", False),
-                "eff_side": eff_side,
                 "diagonal": it.get("diagonal", False),
             })
 
-    # 2) 單件是否就已超規（可疑重量跳過重量檢查 — 視為資料異常，待人工確認）
+    # 排序：體積大的優先放（FFD 通常對裝箱效率較好）
+    units.sort(key=lambda u: -(u["L"] * u["W"] * u["H"]))
+
+    # 把現有包裹的 units 列表轉成 smart_pack_box 可吃的格式
+    def units_to_items(unit_list):
+        # 同 SKU 合併計數，提供 smart_pack_box 用
+        from collections import defaultdict
+        grouped = defaultdict(lambda: {"L": 0, "W": 0, "H": 0, "qty": 0,
+                                        "weight_g": 0, "weight_suspect": False})
+        for u in unit_list:
+            key = (u["L"], u["W"], u["H"])  # 同尺寸合併
+            g = grouped[key]
+            g["L"], g["W"], g["H"] = u["L"], u["W"], u["H"]
+            g["qty"] += 1
+            g["weight_g"] = u["weight_g"]  # 假設同尺寸=同重量
+            g["weight_suspect"] = g["weight_suspect"] or u["weight_suspect"]
+        return list(grouped.values())
+
+    def can_fit(box_units, new_unit):
+        """嘗試把 new_unit 加入 box_units，看會不會超規"""
+        test_units = box_units + [new_unit]
+        test_items = units_to_items(test_units)
+        fit, _, _, _, _ = _check_pack_fit(test_items, max_sum, max_single, max_weight)
+        return fit
+
+    # FFD 主迴圈
+    boxes = []  # 每個 box 是 unit list
     for u in units:
-        if u["eff_side"] > max_single:
-            msg = f"SKU {u['sku']} 單件最長邊 {u['eff_side']:.0f}cm > {max_single}cm"
-            if not u["diagonal"]:
-                msg += "（若此商品可斜放，請將 SKU 加入斜放白名單）"
-            return None, msg
-        if not u.get("weight_suspect") and u["weight_g"] > max_weight:
-            return None, f"SKU {u['sku']} 單件重量 {u['weight_g']:.0f}g > {max_weight}g"
-        # 三邊和：用有效最長邊 + 另兩短邊
-        others = sorted([u["L"], u["W"], u["H"]])[:2]
-        single_sum = u["eff_side"] + sum(others)
-        if single_sum > max_sum:
-            return None, f"SKU {u['sku']} 單件三邊和 {single_sum:.0f}cm > {max_sum}cm"
-
-    # 3) FFD：依「單件三邊和」由大到小排序，逐件放入第一個塞得下的箱
-    def unit_sum(u):
-        others = sorted([u["L"], u["W"], u["H"]])[:2]
-        return u["eff_side"] + sum(others)
-
-    units_sorted = sorted(units, key=lambda u: (-unit_sum(u), -u["weight_g"]))
-
-    # 裝箱規則：最保守的近似（鼓勵多拆、避免超材被退）
-    #   包裹最長邊 = max(各件 eff_side)
-    #   包裹「其他邊加總」= sum(各件其他兩邊)
-    #   包裹三邊和 ≈ 最長邊 + 其他邊加總
-    # 可疑重量的 item 不計入包裹重量（已警告，待人工確認）
-    def item_weight(u):
-        return 0 if u.get("weight_suspect") else u["weight_g"]
-
-    def try_fit(box, u):
-        new_weight = box["weight"] + item_weight(u)
-        if new_weight > max_weight: return False
-        new_eff_side = max(box["eff_side"], u["eff_side"])
-        if new_eff_side > max_single: return False
-        new_other = box["other_sum"] + sum(sorted([u["L"], u["W"], u["H"]])[:2])
-        if new_eff_side + new_other > max_sum: return False
-        return True
-
-    def put(box, u):
-        box["weight"] += item_weight(u)
-        box["eff_side"] = max(box["eff_side"], u["eff_side"])
-        box["other_sum"] += sum(sorted([u["L"], u["W"], u["H"]])[:2])
-        box["has_suspect"] = box.get("has_suspect", False) or u.get("weight_suspect", False)
-        box["units"].append(u)
-
-    boxes = []
-    for u in units_sorted:
         placed = False
         for box in boxes:
-            if try_fit(box, u):
-                put(box, u)
+            if can_fit(box, u):
+                box.append(u)
                 placed = True
                 break
         if not placed:
-            new_box = {"weight": 0, "eff_side": 0, "other_sum": 0, "units": [], "has_suspect": False}
-            if not try_fit(new_box, u):
-                return None, f"SKU {u['sku']} 新開箱仍裝不下（內部錯誤）"
-            put(new_box, u)
-            boxes.append(new_box)
+            # 開新箱
+            boxes.append([u])
 
     if len(boxes) > max_split:
         return None, f"需拆 {len(boxes)} 包，超過通路上限 {max_split} 包"
 
-    # 4) 整理輸出：每個 box 再 group 回 SKU x qty
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Step 4: 整理輸出
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     from collections import Counter
     packages = []
     for box in boxes:
-        counter = Counter()
-        names = {}
-        for u in box["units"]:
-            counter[u["sku"]] += 1
-            names[u["sku"]] = u["name"]
-        items_out = [{"sku": sku, "qty": qty, "name": names.get(sku, "")}
-                     for sku, qty in counter.most_common()]
+        # 統計 SKU 數量
+        sku_counter = Counter()
+        sku_names = {}
+        for u in box:
+            sku_counter[u["sku"]] += 1
+            sku_names[u["sku"]] = u["name"]
+        items_out = [{"sku": sku, "qty": qty, "name": sku_names.get(sku, "")}
+                     for sku, qty in sku_counter.most_common()]
+
+        # 用 smart_pack_box 算這包的真實尺寸
+        box_items = units_to_items(box)
+        L, W, H = smart_pack_box(box_items)
+        dims = sorted([L, W, H], reverse=True)
+        box_total_sum = sum(dims)
+        box_max_side = dims[0]
+
+        # 重量
+        box_weight = sum(u["weight_g"] for u in box if not u["weight_suspect"])
+        box_has_suspect = any(u["weight_suspect"] for u in box)
+
         packages.append({
             "items": items_out,
-            "total_sum": round(box["eff_side"] + box["other_sum"], 1),
-            "max_side":  round(box["eff_side"], 1),
-            "weight_g":  round(box["weight"], 0),
-            "has_suspect_weight": box.get("has_suspect", False),
+            "total_sum": round(box_total_sum, 1),
+            "max_side":  round(box_max_side, 1),
+            "weight_g":  round(box_weight, 0),
+            "has_suspect_weight": box_has_suspect,
         })
     return packages, ""
 
@@ -11421,42 +11449,9 @@ def oversize_analyze_api():
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
 
-            # 🎯 修法3.2:基於真實體積守恆的智能裝箱演算法(等比例擴張版)
-            #
-            # 設計原則:
-            #   1. 以「最大商品形狀」為基準箱(箱子最少要這麼大才裝得下最大件)
-            #   2. 單件訂單(qty 總和=1):直接用商品本身尺寸,不加鬆散係數
-            #      → 解決「曬被架 45×45×2 被加成 49×49×2」的誤判
-            #   3. 多件訂單:用「總體積 × 鬆散係數」決定箱子總體積,
-            #      然後從基準箱「等比例擴張」到容納所需體積
-            #      → 解決「100 個玻璃瓶被算成 8×6×780cm」的單向加高 bug
-            #   4. 不再用「+2 包材厚度」「扁平/厚實 if-else」這類拍腦袋公式
-            import math as _math
-
-            total_qty_in_order = sum(it["qty"] for it in items)
-
-            # 基準箱:必須容納最大那件商品的每一邊
-            box_L = float(max(it["L"] for it in items))
-            box_W = float(max(it["W"] for it in items))
-            box_H = float(max(it["H"] for it in items))
-
-            if total_qty_in_order <= 1:
-                # 單件:直接用商品本身尺寸,不加鬆散
-                pass
-            else:
-                # 多件:商品總體積 × 鬆散係數
-                PACK_DENSITY = 1.3  # 留 30% 空隙給包材與不規則形狀
-                total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
-                required_volume = total_volume * PACK_DENSITY
-
-                base_volume = box_L * box_W * box_H
-                if base_volume > 0 and base_volume < required_volume:
-                    # 等比例擴張:三邊一起膨脹(像吹氣球),
-                    # 比「全部往高度加」更接近真實裝箱物理
-                    scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
-                    box_L *= scale
-                    box_W *= scale
-                    box_H *= scale
+            # 🎯 修法 3.4：使用共用的 smart_pack_box 演算法
+            # 與 ffd_pack_order 拆單建議使用「同一套」裝箱邏輯，保證一致性
+            box_L, box_W, box_H = smart_pack_box(items)
 
             smart_dims = sorted([box_L, box_W, box_H], reverse=True)
             total_sum = sum(smart_dims)
@@ -11684,8 +11679,112 @@ body { font-family: "Microsoft JhengHei", sans-serif; background: #0f1923; color
 .pkg-item { font-family: monospace; font-size: 11px; color: #ccc; padding: 1px 0; }
 .pkg-meta { font-size: 10px; color: #666; margin-top: 4px; }
 .no-result { text-align: center; padding: 30px; color: #666; font-size: 13px; }
+
+/* 白名單快速加入 */
+.wl-btn { background: #1a4a8a; color: #9ec5e8; border: 1px solid #2563eb;
+          padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 10px;
+          margin-left: 8px; transition: all 0.2s; }
+.wl-btn:hover { background: #2563eb; color: #fff; }
+.wl-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,.7); z-index: 9999; align-items: center; justify-content: center; }
+.wl-modal.show { display: flex; }
+.wl-box { background: #1a2332; border: 1px solid #2563eb; border-radius: 12px;
+          padding: 24px; width: 90%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+.wl-box h3 { color: #f4a100; font-size: 16px; margin-bottom: 16px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+.wl-box .wl-info { background: rgba(255,255,255,.04); padding: 8px 12px; border-radius: 6px;
+                   font-size: 12px; color: #aaa; margin-bottom: 16px; }
+.wl-box .wl-info b { color: #f4a100; }
+.wl-section { margin-bottom: 18px; }
+.wl-section .wl-label { font-size: 12px; color: #ddd; margin-bottom: 6px; font-weight: 600; }
+.wl-section .wl-hint { font-size: 10px; color: #888; margin-bottom: 6px; }
+.wl-row { display: flex; gap: 6px; align-items: center; }
+.wl-row input[type="number"] { width: 70px; padding: 6px; background: #0f1923;
+                                border: 1px solid #444; color: #fff; border-radius: 4px; }
+.wl-row label { font-size: 11px; color: #aaa; }
+.wl-channel { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+              margin-bottom: 6px; padding: 6px; background: rgba(255,255,255,.02); border-radius: 4px; }
+.wl-channel input[type="checkbox"] { width: 14px; height: 14px; }
+.wl-channel input[type="number"] { width: 60px; padding: 4px; background: #0f1923;
+                                    border: 1px solid #444; color: #fff; border-radius: 4px; font-size: 12px; }
+.wl-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.wl-btn-primary { background: #2563eb; color: #fff; border: none; padding: 8px 16px;
+                  border-radius: 6px; cursor: pointer; font-weight: 600; }
+.wl-btn-primary:hover { background: #1d4ed8; }
+.wl-btn-cancel { background: #444; color: #ccc; border: none; padding: 8px 16px;
+                 border-radius: 6px; cursor: pointer; }
+.wl-status { padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; display: none; }
+.wl-status.ok { background: rgba(76,175,80,.15); color: #81c784; display: block; }
+.wl-status.err { background: rgba(244,67,54,.15); color: #ef9a9a; display: block; }
 </style></head>
 <body>
+<!-- 白名單快速加入彈窗 -->
+<div class="wl-modal" id="wl-modal">
+  <div class="wl-box">
+    <h3>⚙️ 加入特殊商品白名單</h3>
+    <div class="wl-info">
+      SKU: <b id="wl-sku-display"></b><br>
+      原始尺寸: <b id="wl-dims-display"></b> cm
+    </div>
+
+    <div class="wl-section">
+      <div class="wl-label">📦 實際運送尺寸（折疊/壓縮後，覆寫原始尺寸）</div>
+      <div class="wl-hint">適用於收納袋、可折疊商品。不填則用 BigSeller 原始尺寸計算。</div>
+      <div class="wl-row">
+        L: <input type="number" id="wl-ship-L" step="0.1" min="0" placeholder="長">
+        W: <input type="number" id="wl-ship-W" step="0.1" min="0" placeholder="寬">
+        H: <input type="number" id="wl-ship-H" step="0.1" min="0" placeholder="高">
+        <label>cm</label>
+      </div>
+    </div>
+
+    <div class="wl-section">
+      <div class="wl-label">🔄 斜放後最長邊（取代最長邊判斷）</div>
+      <div class="wl-hint">適用於可斜放商品（如桌子、長棍）。不填則用商品最長邊。</div>
+      <div class="wl-row">
+        <input type="number" id="wl-side" step="0.1" min="0" placeholder="斜放最長邊">
+        <label>cm</label>
+      </div>
+    </div>
+
+    <div class="wl-section">
+      <div class="wl-label">📋 各通路每包最大件數（獨立設定）</div>
+      <div class="wl-hint">勾選並填寫件數。同 SKU 在不同通路上限可不同。</div>
+      <div class="wl-channel">
+        <input type="checkbox" id="wl-cb-store_to_store">
+        <label for="wl-cb-store_to_store">蝦皮店到店</label>
+        <input type="number" id="wl-qty-store_to_store" min="1" placeholder="件">
+      </div>
+      <div class="wl-channel">
+        <input type="checkbox" id="wl-cb-store_to_home">
+        <label for="wl-cb-store_to_home">蝦皮店到家</label>
+        <input type="number" id="wl-qty-store_to_home" min="1" placeholder="件">
+      </div>
+      <div class="wl-channel">
+        <input type="checkbox" id="wl-cb-cvs">
+        <label for="wl-cb-cvs">超商取貨</label>
+        <input type="number" id="wl-qty-cvs" min="1" placeholder="件">
+      </div>
+      <div class="wl-channel">
+        <input type="checkbox" id="wl-cb-jiali">
+        <label for="wl-cb-jiali">嘉里快遞</label>
+        <input type="number" id="wl-qty-jiali" min="1" placeholder="件">
+      </div>
+      <div class="wl-channel">
+        <input type="checkbox" id="wl-cb-hsinchu">
+        <label for="wl-cb-hsinchu">新竹物流</label>
+        <input type="number" id="wl-qty-hsinchu" min="1" placeholder="件">
+      </div>
+    </div>
+
+    <div class="wl-status" id="wl-status"></div>
+
+    <div class="wl-actions">
+      <button class="wl-btn-cancel" onclick="closeWhitelist()">取消</button>
+      <button class="wl-btn-primary" onclick="submitWhitelist()">確認加入</button>
+    </div>
+  </div>
+</div>
+
 <div class="topbar">
   <div class="logo">🔍 超材<span>分析工具</span></div>
   <a href="/" class="btn-home">🏠 返回首頁</a>
@@ -11878,7 +11977,10 @@ function renderReasons(reasons) {
 function renderItems(items) {
   return items.map(it => {
     const diagBadge = it.diagonal ? '<span class="dim-diag"> [斜放 ' + it.eff_side + 'cm]</span>' : '';
-    return `<div class="item-line">• ${esc(it.sku)} ×${it.qty} | ${it.dims}cm${diagBadge} | ${it.weight_g}g | ${esc(it.name)}</div>`;
+    const sku = esc(it.sku);
+    const dims = esc(it.dims);
+    const wlBtn = `<button class="wl-btn" onclick="openWhitelist('${sku}','${dims}')" title="加入特殊商品白名單">⚙️ 白名單</button>`;
+    return `<div class="item-line">• ${sku} ×${it.qty} | ${it.dims}cm${diagBadge} | ${it.weight_g}g | ${esc(it.name)} ${wlBtn}</div>`;
   }).join('');
 }
 
@@ -11945,6 +12047,132 @@ function copyOrders(type) {
     alert(`已複製 ${orders.length} 個${type === 'splittable' ? '可拆單' : '不可拆單'}訂單號！`);
   });
 }
+// ============ 白名單快速加入 ============
+function openWhitelist(sku, dims) {
+  document.getElementById('wl-sku-display').textContent = sku;
+  document.getElementById('wl-dims-display').textContent = dims;
+  // 重置所有欄位
+  ['wl-ship-L','wl-ship-W','wl-ship-H','wl-side',
+   'wl-qty-store_to_store','wl-qty-store_to_home','wl-qty-cvs',
+   'wl-qty-jiali','wl-qty-hsinchu'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  ['wl-cb-store_to_store','wl-cb-store_to_home','wl-cb-cvs',
+   'wl-cb-jiali','wl-cb-hsinchu'].forEach(id => {
+    document.getElementById(id).checked = false;
+  });
+  // 預填原始尺寸到 ship_L/W/H 提示框（佔位文字）
+  const parts = (dims || '').split('×');
+  if (parts.length === 3) {
+    document.getElementById('wl-ship-L').placeholder = parts[0] + ' (原)';
+    document.getElementById('wl-ship-W').placeholder = parts[1] + ' (原)';
+    document.getElementById('wl-ship-H').placeholder = parts[2] + ' (原)';
+  }
+  // 隱藏狀態
+  const status = document.getElementById('wl-status');
+  status.className = 'wl-status';
+  status.textContent = '';
+  // 暫存當前 SKU
+  document.getElementById('wl-modal').dataset.currentSku = sku;
+  document.getElementById('wl-modal').classList.add('show');
+}
+
+function closeWhitelist() {
+  document.getElementById('wl-modal').classList.remove('show');
+}
+
+async function submitWhitelist() {
+  const sku = document.getElementById('wl-modal').dataset.currentSku;
+  if (!sku) return;
+
+  const status = document.getElementById('wl-status');
+  status.className = 'wl-status';
+  status.textContent = '';
+
+  // 收集資料
+  const payload = { sku: sku };
+
+  // 實際運送尺寸（要三個都有才算）
+  const sL = document.getElementById('wl-ship-L').value;
+  const sW = document.getElementById('wl-ship-W').value;
+  const sH = document.getElementById('wl-ship-H').value;
+  if (sL && sW && sH) {
+    payload.ship_L = parseFloat(sL);
+    payload.ship_W = parseFloat(sW);
+    payload.ship_H = parseFloat(sH);
+  } else if (sL || sW || sH) {
+    status.className = 'wl-status err';
+    status.textContent = '⚠️ 實際運送尺寸 L、W、H 三邊都要填或都留空';
+    return;
+  }
+
+  // 斜放最長邊
+  const side = document.getElementById('wl-side').value;
+  if (side) payload.side = parseFloat(side);
+
+  // 各通路件數
+  const channelMap = {
+    'store_to_store': '蝦皮店到店',
+    'store_to_home': '蝦皮店到家',
+    'cvs': '超商取貨',
+    'jiali': '嘉里快遞',
+    'hsinchu': '新竹物流'
+  };
+  const channelQty = {};
+  for (const [key, label] of Object.entries(channelMap)) {
+    if (document.getElementById('wl-cb-' + key).checked) {
+      const qty = document.getElementById('wl-qty-' + key).value;
+      if (!qty || parseInt(qty) < 1) {
+        status.className = 'wl-status err';
+        status.textContent = '⚠️ ' + label + ' 已勾選但未填件數';
+        return;
+      }
+      channelQty[key] = parseInt(qty);
+    }
+  }
+  if (Object.keys(channelQty).length > 0) payload.channel_qty = channelQty;
+
+  // 至少要有一項設定
+  if (!payload.ship_L && !payload.side && Object.keys(channelQty).length === 0) {
+    status.className = 'wl-status err';
+    status.textContent = '⚠️ 請至少填寫一項設定（運送尺寸 / 斜放邊 / 通路件數）';
+    return;
+  }
+
+  // 送出
+  status.className = 'wl-status';
+  status.textContent = '⏳ 儲存中...';
+  status.style.display = 'block';
+  try {
+    const r = await fetch('/api/diagonal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      status.className = 'wl-status ok';
+      status.textContent = '✅ 已加入白名單！下次分析會自動套用。';
+      setTimeout(closeWhitelist, 1500);
+    } else {
+      status.className = 'wl-status err';
+      status.textContent = '❌ 失敗：' + (d.msg || '未知錯誤');
+    }
+  } catch(e) {
+    status.className = 'wl-status err';
+    status.textContent = '❌ 連線錯誤：' + e.message;
+  }
+}
+
+// 點背景關閉彈窗
+document.getElementById('wl-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeWhitelist();
+});
+// ESC 關閉
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeWhitelist();
+});
+
 </script>
 </body></html>''')
 
