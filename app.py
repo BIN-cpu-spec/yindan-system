@@ -10384,6 +10384,8 @@ def ffd_pack_order(items, channel_spec):
     """First-Fit Decreasing 裝箱演算法：把訂單內的 SKU 單件展開後，
     盡量用最少箱數裝進通路材積內。
     
+    ⭐ 修復版本：對同SKU多件商品使用智能疊加邏輯
+    
     items: [{"sku":str, "name":str, "L":float, "W":float, "H":float,
              "weight_g":float, "qty":int, "diagonal":bool, "effective_side":float}]
     回傳: (packages, msg)
@@ -10396,6 +10398,78 @@ def ffd_pack_order(items, channel_spec):
     max_weight = channel_spec["max_weight"]
     max_split  = channel_spec.get("max_split", 5)
 
+    # 🎯 預檢查：如果是單SKU多件且可以智能疊加，直接判斷是否需要拆單
+    if len(items) == 1 and items[0].get("qty", 1) > 1:
+        it = items[0]
+        L, W, H = it["L"], it["W"], it["H"]
+        qty = it.get("qty", 1)
+        
+        # 使用智能疊加邏輯計算實際包裝尺寸
+        if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
+            if qty <= 10:
+                compression_factor = 0.4   # 高壓縮60%
+            elif qty <= 50:
+                compression_factor = 0.3   # 更高壓縮70%
+            else:
+                compression_factor = 0.25  # 極高壓縮75%
+                
+            package_L = L + 2  # 包材厚度
+            package_W = W + 2
+            stacking_height = H * qty * compression_factor
+            package_H = stacking_height + 2  # 包材厚度
+            
+            smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+            total_sum = sum(smart_dims)
+            max_side = smart_dims[0]
+            total_weight = it["weight_g"] * qty
+            
+            # 判斷智能疊加後是否仍然超材
+            if (total_sum <= max_sum and 
+                max_side <= max_single and 
+                total_weight <= max_weight):
+                # 智能疊加後合規，不需要拆單
+                return None, f"智能疊加後合規：{total_sum:.1f}cm ≤ {max_sum}cm，無需拆單"
+            
+            # 如果智能疊加後仍超材，才進行拆單邏輯
+            # 計算需要拆成幾包
+            target_packages = 2  # 先嘗試拆成2包
+            while target_packages <= max_split:
+                items_per_package = math.ceil(qty / target_packages)
+                test_height = H * items_per_package * compression_factor + 2
+                test_dims = sorted([package_L, package_W, test_height], reverse=True)
+                test_total = sum(test_dims)
+                test_weight = it["weight_g"] * items_per_package
+                
+                if (test_total <= max_sum and 
+                    test_dims[0] <= max_single and 
+                    test_weight <= max_weight):
+                    # 可以拆成target_packages包
+                    packages = []
+                    remaining_qty = qty
+                    for i in range(target_packages):
+                        if remaining_qty <= 0:
+                            break
+                        pkg_qty = min(items_per_package, remaining_qty)
+                        pkg_height = H * pkg_qty * compression_factor + 2
+                        pkg_dims = sorted([package_L, package_W, pkg_height], reverse=True)
+                        
+                        packages.append({
+                            "items": [{"sku": it["sku"], "qty": pkg_qty, "name": it.get("name", "")}],
+                            "total_sum": sum(pkg_dims),
+                            "max_side": pkg_dims[0],
+                            "weight_g": it["weight_g"] * pkg_qty,
+                            "has_suspect_weight": it.get("weight_suspect", False),
+                        })
+                        remaining_qty -= pkg_qty
+                    
+                    return packages, ""
+                    
+                target_packages += 1
+            
+            # 無法在max_split內拆成合規包裹
+            return None, f"需拆超過 {max_split} 包才能合規"
+    
+    # 🔄 原有邏輯：多SKU或厚實商品使用傳統FFD算法
     # 1) 展開件數 → 每個 item 是一件實體
     units = []
     for it in items:
