@@ -1,21 +1,117 @@
 # -*- coding: utf-8 -*-
 """
-超人特工倉系統 (yindan-system)
-功能模組：
-  - 報關助手 /customs        商品報關資料庫管理、Excel 匯出
-  - 貨架入庫 /warehouse      商品貨架位掃描入庫
-  - 超人眼鏡 /api/superman-glasses/*  Chrome Extension 廣告自動化後端
-  - 超材分析 /oversize-tool  BigSeller 超材訂單分析與拆單建議
-  - 斜放白名單 /settings/diagonal     特殊可斜放商品設定
+4Sale 自動分單印單系統 v4
+五個通路：宅配 / 超商 / 店到店 / 店到店隔日配 / 無包裝
+區域細分：倉庫(前倉/主倉/備用倉) + 區域字母(A/B/C...)
 """
 
 import sys, csv, io, os, re, json, threading, time, hashlib, secrets, schedule
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
 
+# ── 圖片URL解析：將 =IMAGE("url") 公式轉成純 URL ──
+
+def calculate_volumetric_packaging(products, order_L, order_W, order_H):
+    """
+    🎯 基於材積的智能多商品包裝計算
+    
+    解決問題：
+    - 修復三邊和錯誤累加（如933cm的不合理結果）
+    - 基於實際包裝物理特性計算
+    - 考慮商品形狀、疊加性、包材厚度
+    
+    Args:
+        products: 訂單中的商品列表 [{"sku": str, ...}]
+        order_L, order_W, order_H: 訂單層級的長寬高（取max值）
+    
+    Returns:
+        tuple: (box_length, box_width, box_height, total_dim, method, old_dim)
+    """
+    import math
+    
+    if not products:
+        return 0, 0, 0, 0, "無商品", 0
+    
+    product_count = len(products)
+    
+    # 計算原錯誤算法（供對比和診斷）
+    old_dims = sorted([order_L, order_W, order_H], reverse=True) 
+    old_total_dim = sum(old_dims)
+    
+    if product_count == 1:
+        # 單商品：維持原邏輯，確保向後兼容性
+        return order_L, order_W, order_H, old_total_dim, "單商品", old_total_dim
+    
+    # 🎯 多商品：基於材積的智能包裝算法
+    
+    # 估算總體積（使用訂單層級尺寸）
+    estimated_volume_per_item = (order_L * order_W * order_H) / product_count
+    total_estimated_volume = estimated_volume_per_item * product_count
+    
+    # 商品特性分析（基於高度判斷商品類型）
+    is_flat_dominant = order_H <= 2.0  # 扁平商品（如垃圾袋、貼紙）
+    
+    if is_flat_dominant:
+        # 🗂️ 扁平商品主導：疊加包裝策略
+        
+        # 長寬使用最大尺寸（商品可重疊）
+        box_length = order_L + 2  # +2cm 包材厚度
+        box_width = order_W + 2   # +2cm 包材厚度
+        
+        # 高度可疊加，但考慮壓縮效應
+        if product_count <= 3:
+            compression_factor = 0.9   # 輕微壓縮
+        elif product_count <= 6:
+            compression_factor = 0.8   # 中度壓縮
+        else:
+            compression_factor = 0.7   # 較大壓縮
+            
+        stacking_height = order_H * product_count * compression_factor
+        box_height = stacking_height + 2  # +2cm 包材厚度
+        
+        method = f"扁平疊加({product_count}件,壓縮{int((1-compression_factor)*100)}%)"
+        
+    else:
+        # 📦 厚實商品主導：立方體優化包裝策略
+        
+        # 基於總體積估算最優包裝箱
+        fill_efficiency = 0.7 if product_count <= 3 else 0.6  # 填充效率
+        required_volume = total_estimated_volume / fill_efficiency
+        optimal_cube_side = math.pow(required_volume, 1/3)
+        
+        # 包裝箱尺寸不能小於最大商品尺寸
+        min_box_length = order_L + 2  # 最小長度
+        min_box_width = order_W + 2   # 最小寬度  
+        min_box_height = order_H + 2  # 最小高度
+        
+        # 計算最終包裝箱尺寸
+        box_length = max(optimal_cube_side, min_box_length)
+        box_width = max(optimal_cube_side, min_box_width)
+        box_height = max(optimal_cube_side, min_box_height)
+        
+        # 多件商品可能需要調整長寬以便並排
+        if product_count > 2:
+            box_length *= 1.1  # 稍微加寬以容納並排
+            box_width *= 1.1
+            method = f"厚實並排({product_count}件,填充{int(fill_efficiency*100)}%)"
+        else:
+            method = f"厚實包裝({product_count}件)"
+    
+    # 🎯 計算最終三邊和
+    smart_dims = sorted([box_length, box_width, box_height], reverse=True)
+    smart_total_dim = sum(smart_dims)
+    
+    # 合理性檢查：確保結果比原算法更合理
+    if smart_total_dim > old_total_dim * 1.5:
+        # 如果智能算法結果異常大，降級到簡化邏輯
+        safe_dims = sorted([order_L + 4, order_W + 4, order_H * 1.2 + 2], reverse=True)
+        smart_total_dim = sum(safe_dims)
+        method = f"安全包裝({product_count}件)"
+        box_length, box_width, box_height = safe_dims[0], safe_dims[1], safe_dims[2]
+    
+    return box_length, box_width, box_height, smart_total_dim, method, old_total_dim
 
 def parse_image_url(cell_value):
-    """將 Google Sheets 的 =IMAGE("url") 公式或純 URL 字串轉成乾淨的 URL"""
     if not cell_value:
         return ""
     s = str(cell_value).strip()
@@ -26,21 +122,2568 @@ def parse_image_url(cell_value):
         return s
     return ""
 
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+# ============================================================
+# 設定區
+# ============================================================
 CONFIG = {
     "company_name": "我的電商公司",
     "flask_port":   5000,
+    "auto_run_hour":7,
+    "auto_run_min": 30,
 
-    # ★ 特殊可出超材品清單（SKU → 斜放/件數限制設定）
-    # 由 /settings/diagonal 頁面維護，並由 oversize-analyze 與 settings.json 持久化使用
-    # 格式：{"SKU-001": {"side": 44.0, "max_qty": 5, "channels": ["store"]}}
-    "diagonal_skus": {},
+    # CSV 欄位名稱
+    "col_txn":      "子交易序號",
+    "col_order_id": "訂單編號",
+    "col_shipping": "出貨類型",
+    "col_warehouse":"商品倉庫儲位",
+    "col_sku":      "商品編號",
+    "col_length":   "商品長",       # 單位 cm
+    "col_width":    "商品寬",       # 單位 cm
+    "col_height":   "商品高",       # 單位 cm
+    "col_weight":   "子交易總重量", # 單位 kg（整張訂單已加總）
+    "col_fee":      "運費",         # 運費欄位（0=可拆單，>0=買家已付不拆單）
+
+    # 通路判斷關鍵字
+    "kw_delivery": ["新竹物流", "嘉里", "店到家"],
+    "kw_cvs":      ["7-11", "711", "全家", "萊爾富"],
+    "kw_nextday":  ["隔日到貨"],
+    "kw_nopkg":    ["無包裝"],
+    "kw_store":    ["店到店"],
+
+    # 倉庫前綴
+    "wh_prefix": {
+        "?前": "參前",
+        "?倉": "參前",
+        "主":  "參倉",
+    },
+
+    # 超材規則（整張訂單加總後判斷）
+    "oversize_rules": {
+        # 通路key → (三邊總和上限cm, 最長邊上限cm, 重量上限kg, 說明)
+        "cvs":      (105, 45,  10, "超商"),
+        "store":    (105, 45,  10, "店到店"),
+        "nextday":  (105, 45,  10, "店到店隔日配"),
+        "nopkg":    (105, 45,  10, "無包裝"),
+        "delivery_jialy":   (200, 120, 20, "嘉里快遞"),
+        "delivery_hsinchu": (210, 150, 20, "新竹物流"),
+        "delivery_store":   (150, 100, 15, "店到家大型"),
+    },
+
+    # 新竹物流補助運費對照（三邊總和 → 買家自付運費）
+    # ≦150cm 正常補助，151~210cm 買家自付，>210cm 異常
+    "hsinchu_surcharge": [
+        (150, 0,   "正常補助"),
+        (160, 135, "買家自付135元"),
+        (170, 165, "買家自付165元"),
+        (180, 195, "買家自付195元"),
+        (190, 225, "買家自付225元"),
+        (200, 285, "買家自付285元"),
+        (210, 335, "買家自付335元"),
+    ],
+
+    # ★ 特殊可出超材品清單（SKU → 斜放後有效最長邊cm）
+    # 斜放後最長邊 = √(長²+寬²+高²)，填入計算後的值
+    # 例如：55x40x30 的商品，對角線 ≈ 74cm，但斜放進箱後最長邊可能只有 44cm
+    # 請依實際測量填入，系統會用此值取代原始最長邊判斷超材
+    "diagonal_skus": {
+        # "SKU-001": 44,   # 範例：SKU-001 斜放後有效最長邊 44cm
+        # "SKU-002": 43,
+    },
+
+    # 拆單規則（店到店/店到家超材時）
+    "split_max_units":   5,     # 最多拆幾單
+    "split_max_dim":     105,   # 每包三邊總和上限 cm
+    "split_max_side":    45,    # 每包最長邊上限 cm
+    "split_max_weight":  10,    # 每包重量上限 kg
+}
+
+# 通路顯示設定
+CHANNEL_META = {
+    "delivery": {"label": "宅配",         "icon": "🚙", "color": "#1565c0"},
+    "cvs":      {"label": "超商",         "icon": "🏪", "color": "#c85000"},
+    "store":    {"label": "店到店",       "icon": "🏬", "color": "#2e7d32"},
+    "nextday":  {"label": "店到店隔日配", "icon": "⚡",   "color": "#6a1b9a"},
+    "nopkg":    {"label": "無包裝",       "icon": "📦", "color": "#00838f"},
+}
+
+state = {
+    "groups": {}, "total": 0, "last_update": None,
+    "status": "idle", "status_msg": "請上傳 CSV 開始分單",
+    "log": [], "summary": {},
 }
 
 def log(msg):
-    """系統日誌(印出至 stdout,Railway / gunicorn 會收進 log stream)"""
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}")
+    line = f"[{ts}] {msg}"
+    print(line)
+    state["log"].append(line)
+    if len(state["log"]) > 200:
+        state["log"] = state["log"][-200:]
+
+# ============================================================
+# 分單邏輯
+# ============================================================
+def detect_channel(val):
+    s = (val or "").strip()
+    if any(k in s for k in CONFIG["kw_delivery"]): return "delivery"
+    if any(k in s for k in CONFIG["kw_cvs"]):      return "cvs"
+    if any(k in s for k in CONFIG["kw_nextday"]):  return "nextday"
+    if any(k in s for k in CONFIG["kw_nopkg"]):    return "nopkg"
+    if any(k in s for k in CONFIG["kw_store"]):    return "store"
+    return "delivery"
+
+def parse_location(raw):
+    """儲位 → (倉庫名稱, 區域字母)"""
+    raw = (raw or "").strip()
+    wh, rest = "其他", raw
+    for prefix, name in CONFIG["wh_prefix"].items():
+        if raw.startswith(prefix):
+            wh, rest = name, raw[len(prefix):]
+            break
+    m = re.match(r"([A-Z])", rest)
+    zone = m.group(1) if m else "?"
+    return wh, zone
+
+def safe_float(val):
+    try: return float((str(val) or "0").strip())
+    except: return 0.0
+
+def parse_fee(val):
+    """解析運費，去除 $ NT$ 等符號，回傳數字"""
+    try:
+        s = str(val or "0").strip()
+        # 移除常見貨幣符號
+        s = s.replace("NT$", "").replace("$", "").replace(",", "").strip()
+        return float(s) if s else 0.0
+    except:
+        return 0.0
+
+def check_oversize(ch, ship_raw, total_dim, max_side, weight):
+    """
+    判斷是否超材。
+    回傳 (is_oversize: bool, warn_msg: str, can_split: bool, split_rules: dict)
+    split_rules: {"max_dim": int, "max_side": int, "max_weight": int} 或 None
+    """
+    if total_dim == 0 and weight == 0:
+        return False, "", False, None
+
+    # 新竹物流
+    if "新竹物流" in ship_raw:
+        if total_dim > 210 or max_side > 150 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        for limit, fee, desc in CONFIG["hsinchu_surcharge"]:
+            if total_dim <= limit:
+                if fee > 0:
+                    return True, f"新竹補助不足 {total_dim:.0f}cm → {desc}", False, None
+                return False, "", False, None
+        return True, f"超規 {total_dim:.0f}cm → 異常單", False, None
+
+    # 嘉里快遞
+    if "嘉里" in ship_raw:
+        if total_dim > 200 or max_side > 120 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        return False, "", False, None
+
+    # 店到家宅配 — 標準 or 大型
+    if "店到家" in ship_raw:
+        # 標準合規
+        if total_dim <= 105 and max_side <= 45 and weight <= 10:
+            return False, "", False, None
+        # 大型合規
+        if total_dim <= 150 and max_side <= 100 and weight <= 15:
+            return False, "", False, None
+        # 超材：先嘗試用大型規格拆，再嘗試標準規格拆
+        rules = {"max_dim": 150, "max_side": 100, "max_weight": 15, "label": "店到家大型"}
+        return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+
+    # 超商（7-11 / 全家 / 萊爾富）
+    if ch == "cvs":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "超商"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 店到店
+    if ch == "store":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "店到店"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 隔日配 / 無包裝
+    if ch in ("nextday", "nopkg"):
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", False, None
+        return False, "", False, None
+
+    return False, "", False, None
+
+def apply_diagonal(sku, L, W, H):
+    """
+    如果此 SKU 在可斜放清單內，回傳斜放後的有效最長邊。
+    否則回傳原始最長邊。
+    """
+    import math
+    diag_map = CONFIG.get("diagonal_skus", {})
+    if sku in diag_map:
+        effective = diag_map[sku]
+        return effective, True   # (有效最長邊, 是否斜放)
+    return max(L, W, H), False
+
+def suggest_split(products, weight_per_item, L, W, H, rules=None):
+    """
+    建議拆單方式。
+    rules: {"max_dim": int, "max_side": int, "max_weight": int}
+    """
+    if rules is None:
+        rules = {
+            "max_dim":    CONFIG["split_max_dim"],
+            "max_side":   CONFIG["split_max_side"],
+            "max_weight": CONFIG["split_max_weight"],
+        }
+    max_units  = CONFIG["split_max_units"]
+    max_dim    = rules["max_dim"]
+    max_side   = rules["max_side"]
+    max_weight = rules["max_weight"]
+
+    # 展開所有件數為一個清單
+    all_items = []
+    for p in products:
+        for _ in range(max(1, p.get("qty", 1))):
+            all_items.append(p["sku"])
+
+    total_items = len(all_items)
+
+    # 單件尺寸判斷
+    sides = sorted([L, W, H], reverse=True)
+    single_dim  = sum(sides)
+    single_side = sides[0]
+    single_w    = weight_per_item
+
+    # 如果單件就超規，無法拆單
+    if single_dim > max_dim or single_side > max_side or single_w > max_weight:
+        return None, "單件商品已超規，無法拆單"
+
+    # 每包最多放幾件
+    max_per_pkg_dim    = int(max_dim    // single_dim)  if single_dim  > 0 else 999
+    max_per_pkg_side   = int(max_side   // single_side) if single_side > 0 else 999
+    max_per_pkg_weight = int(max_weight // single_w)    if single_w    > 0 else 999
+    max_per_pkg = min(max_per_pkg_dim, max_per_pkg_side, max_per_pkg_weight)
+    max_per_pkg = max(1, max_per_pkg)
+
+    # 需要幾包
+    import math
+    needed = math.ceil(total_items / max_per_pkg)
+
+    if needed > max_units:
+        return None, f"需要 {needed} 包，超過最多 {max_units} 單上限，無法自動拆單"
+
+    # 建立拆單建議（同SKU盡量放同一包）
+    packages = []
+    current_pkg = []
+    current_count = 0
+
+    # 按SKU分組，同SKU連續放
+    from collections import Counter
+    sku_counts = Counter(all_items)
+    sorted_skus = sorted(sku_counts.items(), key=lambda x: -x[1])
+
+    remaining = []
+    for sku, qty in sorted_skus:
+        remaining.extend([sku] * qty)
+
+    for item in remaining:
+        if current_count >= max_per_pkg:
+            packages.append(current_pkg[:])
+            current_pkg = []
+            current_count = 0
+        current_pkg.append(item)
+        current_count += 1
+
+    if current_pkg:
+        packages.append(current_pkg)
+
+    result = []
+    for i, pkg in enumerate(packages):
+        pkg_counter = Counter(pkg)
+        items_str = ", ".join(f"{sku}×{cnt}" for sku, cnt in sorted(pkg_counter.items()))
+        pkg_dim    = single_dim * len(pkg)
+        pkg_weight = single_w   * len(pkg)
+        result.append({
+            "pkg_no":  i + 1,
+            "count":   len(pkg),
+            "items":   items_str,
+            "dim":     round(pkg_dim, 1),
+            "weight":  round(pkg_weight, 2),
+        })
+
+    return result, ""
+
+def _get_zone_label(locs):
+    """取得區域描述字串，供宅配分群用"""
+    whs   = set(wh for wh, z in locs)
+    zones = set(z  for wh, z in locs if z != "?")
+    if not zones: zones = {"?"}
+    if len(whs) == 1 and len(zones) == 1:
+        return f"{next(iter(whs))}{next(iter(zones))}區"
+    elif len(whs) == 1:
+        return f"{next(iter(whs))}混單"
+    return "混單"
+
+def get_sort_key(k):
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
+    if k == "__delivery__":     return (0,  k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
+    if k == "__nopkg__":        return (88, k, k)
+    if k == "__splittable__":   return (92, k, k)
+    if k == "__oversize__":     return (95, k, k)
+    order = {"店到店":2, "店到店隔日配":3}
+    for label, pri in order.items():
+        if k.startswith(label):
+            if "混單" in k: return (pri*10+9, "zzz", k)
+            return (pri*10, k, k)
+    return (99, k, k)
+
+def split_orders(rows):
+    # ── 以交易序號合併同一張訂單 ──────────────────────
+    order_map = {}
+    for row in rows:
+        txn = (row.get(CONFIG["col_txn"], "") or "").strip()
+        if not txn: continue
+        if txn not in order_map:
+            order_map[txn] = {
+                "txn":       txn,
+                "channel":   detect_channel(row.get(CONFIG["col_shipping"], "")),
+                "ship_raw":  (row.get(CONFIG["col_shipping"], "") or "").strip(),
+                "order_ids": [],
+                "products":  [],
+                "locations": set(),
+                "total_qty": 0,
+                # 尺寸（取該訂單最大值，因為同訂單多列尺寸應相同）
+                "length":    0.0,
+                "width":     0.0,
+                "height":    0.0,
+                "weight":    0.0,
+                "fee":       0.0,  # 運費
+            }
+        oid    = (row.get(CONFIG["col_order_id"], "") or "").strip()
+        raw_wh = (row.get(CONFIG["col_warehouse"], "") or "").strip()
+        sku    = (row.get(CONFIG["col_sku"], "") or "").strip()
+        wh, zone = parse_location(raw_wh)
+
+        # 尺寸取最大值（避免空值覆蓋有效值）
+        L = safe_float(row.get(CONFIG["col_length"], 0))
+        W = safe_float(row.get(CONFIG["col_width"],  0))
+        H = safe_float(row.get(CONFIG["col_height"], 0))
+        Wt= safe_float(row.get(CONFIG["col_weight"], 0))
+        Fe= parse_fee(row.get(CONFIG["col_fee"], 0))
+        if L > 0: order_map[txn]["length"]  = max(order_map[txn]["length"],  L)
+        if W > 0: order_map[txn]["width"]   = max(order_map[txn]["width"],   W)
+        if H > 0: order_map[txn]["height"]  = max(order_map[txn]["height"],  H)
+        if Wt> 0: order_map[txn]["weight"]  = max(order_map[txn]["weight"],  Wt)
+        if Fe> 0: order_map[txn]["fee"]     = max(order_map[txn]["fee"],     Fe)
+
+        order_map[txn]["order_ids"].append(oid)
+        order_map[txn]["products"].append({
+            "oid": oid, "sku": sku,
+            "zone_raw": raw_wh, "wh": wh, "zone": zone,
+        })
+        order_map[txn]["locations"].add((wh, zone))
+        order_map[txn]["total_qty"] += 1
+
+    # ── 計算三邊總和、最長邊，斜放判斷，超材檢查 ────────
+    for txn, o in order_map.items():
+        L, W, H = o["length"], o["width"], o["height"]
+
+        # 斜放判斷：若訂單內有可斜放 SKU，用對角線取代最長邊
+        skus_in_order = [p["sku"] for p in o["products"]]
+        diagonal_applied = False
+        effective_side = max(L, W, H)
+        for sku in skus_in_order:
+            eff, is_diag = apply_diagonal(sku, L, W, H)
+            if is_diag:
+                effective_side = eff
+                diagonal_applied = True
+                break
+
+        dims = sorted([L, W, H], reverse=True)
+        o["max_side"]       = effective_side
+        # 🎯 基於材積的智能多商品包裝計算（修復三邊和錯誤累加）
+        if len(o["products"]) > 1:
+            # 多商品：使用基於材積的智能包裝算法
+            box_L, box_W, box_H, smart_total, method, old_total = calculate_volumetric_packaging(
+                o["products"], L, W, H
+            )
+            
+            o["total_dim"] = smart_total
+            o["packaging_method"] = method
+            o["box_dimensions"] = f"{box_L:.1f}×{box_W:.1f}×{box_H:.1f}cm"
+            o["old_total_dim"] = old_total  # 保存原錯誤計算供對比
+            
+            # 診斷信息
+            improvement = ((old_total - smart_total) / old_total * 100) if old_total > 0 else 0
+            o["improvement_percent"] = f"{improvement:.1f}%"
+            
+        else:
+            # 單商品：維持原邏輯，確保向後兼容
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
+            o["box_dimensions"] = f"{L:.1f}×{W:.1f}×{H:.1f}cm"
+            o["old_total_dim"] = sum(dims)
+            o["improvement_percent"] = "0%"
+        o["diagonal_used"]  = diagonal_applied
+        o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
+            o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
+        )
+
+        # 若斜放後不超材，標示說明
+        if diagonal_applied and not o["oversize"]:
+            o["oversize_msg"] = "斜放後合規"
+
+        # 拆單建議（運費=0才可拆單）
+        o["split_suggestion"] = None
+        o["split_error"]      = ""
+        o["fee_paid"]         = o["fee"] > 0
+
+        # 運費>0 → 標示買家已付，不拆單
+        if o["oversize"] and o["fee"] > 0:
+            o["oversize_msg"] += f"｜買家已付運費 {o['fee']:.0f} 元"
+
+        can_split = o["oversize"] and o["can_split"] and o["fee"] == 0
+        if can_split and o["total_qty"] > 0:
+            weight_per = o["weight"] / o["total_qty"] if o["total_qty"] > 0 else 0
+            from collections import Counter
+            sku_count = Counter(p["sku"] for p in o["products"])
+            prods = [{"sku": sku, "qty": qty} for sku, qty in sku_count.items()]
+            suggestion, err = suggest_split(prods, weight_per, L, W, H, o["split_rules"])
+            o["split_suggestion"] = suggestion
+            o["split_error"]      = err
+
+    # ── 套用分單規則 ──────────────────────────────────
+    groups = {}
+
+    def add(key, title, icon, color, o):
+        if key not in groups:
+            groups[key] = {"title": title, "icon": icon, "color": color, "orders": []}
+        groups[key]["orders"].append(o)
+
+    summary = {}
+
+    for txn, o in order_map.items():
+        ch    = o["channel"]
+        locs  = o["locations"]
+        meta  = CHANNEL_META.get(ch, CHANNEL_META["delivery"])
+        label = meta["label"]
+        icon  = meta["icon"]
+        color = meta["color"]
+
+        # 超材處理
+        if o["oversize"]:
+            o["oversize_channel"] = label
+            if o["can_split"] and o["split_suggestion"]:
+                # 可拆單 → 獨立可拆單分類
+                add("__splittable__", "✂ 可拆單", "✂", "#e65100", o)
+                summary["✂ 可拆單"] = summary.get("✂ 可拆單", 0) + 1
+            else:
+                # 不可拆單 → 超材異常分類
+                add("__oversize__", "⚠ 超材", "⚠", "#b71c1c", o)
+                summary["⚠ 超材"] = summary.get("⚠ 超材", 0) + 1
+            continue
+
+        # 無包裝 → 全部合併成一組
+        if ch == "nopkg":
+            add("__nopkg__", "📦 無包裝", "📦", "#00838f", o)
+            summary["無包裝"] = summary.get("無包裝", 0) + 1
+            continue
+
+        # 宅配（新竹/嘉里/店到家）→ 外層一個大分類，內部依區域分群
+        if ch == "delivery":
+            o["delivery_zone"] = _get_zone_label(locs)  # 記錄區域供分群用
+            add("__delivery__", "🚚 宅配", "🚚", "#1565c0", o)
+            summary["宅配"] = summary.get("宅配", 0) + 1
+            continue
+
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
+        skus = set(p["sku"] for p in o["products"] if p["sku"])
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
+        if not zones:
+            zones = {"?"}
+
+        if len(whs) == 1 and len(zones) == 1:
+            wh    = next(iter(whs))
+            zone  = next(iter(zones))
+            key   = f"{label} - {wh}{zone}區"
+            title = f"{icon} {label} ｜ {wh} {zone} 區"
+        elif len(whs) == 1:
+            key   = f"{label} - {next(iter(whs))}混單"
+            title = f"{icon} {label} ｜ {next(iter(whs))} 混單"
+        else:
+            key   = f"{label} - 混單"
+            title = f"{icon} {label} ｜ 混單（跨倉）"
+
+        if "混單" in key:
+            color = color + "bb"
+
+        add(key, title, icon, color, o)
+        summary[label] = summary.get(label, 0) + 1
+
+    state["summary"] = summary
+    return dict(sorted(groups.items(), key=lambda x: get_sort_key(x[0])))
+
+def load_csv(source, is_text=False):
+    for enc in ["utf-8-sig", "big5", "cp950", "utf-8"]:
+        try:
+            if is_text:
+                reader = csv.DictReader(io.StringIO(source))
+            else:
+                f = open(source, encoding=enc, newline="")
+                reader = csv.DictReader(f)
+            rows = list(reader)
+            if not is_text: f.close()
+            if rows: return rows, enc
+        except Exception:
+            continue
+    return [], None
+
+def run_pipeline(rows=None):
+    state["status"] = "fetching"
+    if not rows:
+        state["status"] = "error"
+        state["status_msg"] = "無資料"
+        return
+    groups = split_orders(rows)
+    state["groups"]      = groups
+    state["total"]       = len(set((r.get(CONFIG["col_txn"]) or "") for r in rows))
+    state["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state["status"]      = "ready"
+    state["status_msg"]  = f"共 {state['total']} 張訂單，分成 {len(groups)} 組 | {state['last_update']}"
+    for k, g in groups.items():
+        log(f"  {g['title']}：{len(g['orders'])} 張")
+    log("分單完成")
+
+def scheduler():
+    while True:
+        now = datetime.now()
+        if now.hour == CONFIG["auto_run_hour"] and now.minute == CONFIG["auto_run_min"]:
+            log("定時觸發")
+            time.sleep(61)
+        time.sleep(30)
+
+# ============================================================
+# 設定檔持久化（斜放商品清單）
+# ============================================================
+def _get_base_dir():
+    """取得執行檔所在目錄（支援 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        # 打包成 exe 後，exe 所在目錄
+        return os.path.dirname(sys.executable)
+    else:
+        # 一般 Python 執行
+        return os.path.dirname(os.path.abspath(__file__))
+
+SETTINGS_FILE = os.path.join(_get_base_dir(), "settings.json")
+
+def load_settings():
+    """從 settings.json 讀取設定，啟動時呼叫"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            if "diagonal_skus" in data:
+                CONFIG["diagonal_skus"] = data["diagonal_skus"]
+                log(f"已載入特殊可出超材品設定：{len(CONFIG['diagonal_skus'])} 筆")
+    except Exception as e:
+        log(f"讀取設定檔失敗：{e}")
+
+def save_settings():
+    """將設定寫入 settings.json"""
+    try:
+        data = {"diagonal_skus": CONFIG["diagonal_skus"]}
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"儲存設定檔失敗：{e}")
+
+# ============================================================
+# Flask 網頁
+# ============================================================
+app = Flask(__name__)
+
+# -*- coding: utf-8 -*-
+"""
+4Sale 自動分單印單系統 v4
+五個通路：宅配 / 超商 / 店到店 / 店到店隔日配 / 無包裝
+區域細分：倉庫(前倉/主倉/備用倉) + 區域字母(A/B/C...)
+"""
+
+import sys, csv, io, os, re, json, threading, time
+from datetime import datetime
+from flask import Flask, render_template_string, request, jsonify
+
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# ============================================================
+# 設定區
+# ============================================================
+CONFIG = {
+    "company_name": "我的電商公司",
+    "flask_port":   5000,
+    "auto_run_hour":7,
+    "auto_run_min": 30,
+
+    # CSV 欄位名稱
+    "col_txn":      "子交易序號",
+    "col_order_id": "訂單編號",
+    "col_shipping": "出貨類型",
+    "col_warehouse":"商品倉庫儲位",
+    "col_sku":      "商品編號",
+    "col_length":   "商品長",       # 單位 cm
+    "col_width":    "商品寬",       # 單位 cm
+    "col_height":   "商品高",       # 單位 cm
+    "col_weight":   "子交易總重量", # 單位 kg（整張訂單已加總）
+    "col_fee":      "運費",         # 運費欄位（0=可拆單，>0=買家已付不拆單）
+
+    # 通路判斷關鍵字
+    "kw_delivery": ["新竹物流", "嘉里", "店到家"],
+    "kw_cvs":      ["7-11", "711", "全家", "萊爾富"],
+    "kw_nextday":  ["隔日到貨"],
+    "kw_nopkg":    ["無包裝"],
+    "kw_store":    ["店到店"],
+
+    # 倉庫前綴
+    "wh_prefix": {
+        "?前": "參前",
+        "?倉": "參前",
+        "主":  "參倉",
+    },
+
+    # 超材規則（整張訂單加總後判斷）
+    "oversize_rules": {
+        # 通路key → (三邊總和上限cm, 最長邊上限cm, 重量上限kg, 說明)
+        "cvs":      (105, 45,  10, "超商"),
+        "store":    (105, 45,  10, "店到店"),
+        "nextday":  (105, 45,  10, "店到店隔日配"),
+        "nopkg":    (105, 45,  10, "無包裝"),
+        "delivery_jialy":   (200, 120, 20, "嘉里快遞"),
+        "delivery_hsinchu": (210, 150, 20, "新竹物流"),
+        "delivery_store":   (150, 100, 15, "店到家大型"),
+    },
+
+    # 新竹物流補助運費對照（三邊總和 → 買家自付運費）
+    # ≦150cm 正常補助，151~210cm 買家自付，>210cm 異常
+    "hsinchu_surcharge": [
+        (150, 0,   "正常補助"),
+        (160, 135, "買家自付135元"),
+        (170, 165, "買家自付165元"),
+        (180, 195, "買家自付195元"),
+        (190, 225, "買家自付225元"),
+        (200, 285, "買家自付285元"),
+        (210, 335, "買家自付335元"),
+    ],
+
+    # ★ 特殊可出超材品清單（SKU → 斜放後有效最長邊cm）
+    # 斜放後最長邊 = √(長²+寬²+高²)，填入計算後的值
+    # 例如：55x40x30 的商品，對角線 ≈ 74cm，但斜放進箱後最長邊可能只有 44cm
+    # 請依實際測量填入，系統會用此值取代原始最長邊判斷超材
+    "diagonal_skus": {
+        # "SKU-001": 44,   # 範例：SKU-001 斜放後有效最長邊 44cm
+        # "SKU-002": 43,
+    },
+
+    # 拆單規則（店到店/店到家超材時）
+    "split_max_units":   5,     # 最多拆幾單
+    "split_max_dim":     105,   # 每包三邊總和上限 cm
+    "split_max_side":    45,    # 每包最長邊上限 cm
+    "split_max_weight":  10,    # 每包重量上限 kg
+}
+
+# 通路顯示設定
+CHANNEL_META = {
+    "delivery": {"label": "宅配",         "icon": "🚙", "color": "#1565c0"},
+    "cvs":      {"label": "超商",         "icon": "🏪", "color": "#c85000"},
+    "store":    {"label": "店到店",       "icon": "🏬", "color": "#2e7d32"},
+    "nextday":  {"label": "店到店隔日配", "icon": "⚡",   "color": "#6a1b9a"},
+    "nopkg":    {"label": "無包裝",       "icon": "📦", "color": "#00838f"},
+}
+
+state = {
+    "groups": {}, "total": 0, "last_update": None,
+    "status": "idle", "status_msg": "請上傳 CSV 開始分單",
+    "log": [], "summary": {},
+}
+
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    state["log"].append(line)
+    if len(state["log"]) > 200:
+        state["log"] = state["log"][-200:]
+
+# ============================================================
+# 分單邏輯
+# ============================================================
+def detect_channel(val):
+    s = (val or "").strip()
+    if any(k in s for k in CONFIG["kw_delivery"]): return "delivery"
+    if any(k in s for k in CONFIG["kw_cvs"]):      return "cvs"
+    if any(k in s for k in CONFIG["kw_nextday"]):  return "nextday"
+    if any(k in s for k in CONFIG["kw_nopkg"]):    return "nopkg"
+    if any(k in s for k in CONFIG["kw_store"]):    return "store"
+    return "delivery"
+
+def parse_location(raw):
+    """儲位 → (倉庫名稱, 區域字母)"""
+    raw = (raw or "").strip()
+    wh, rest = "其他", raw
+    for prefix, name in CONFIG["wh_prefix"].items():
+        if raw.startswith(prefix):
+            wh, rest = name, raw[len(prefix):]
+            break
+    m = re.match(r"([A-Z])", rest)
+    zone = m.group(1) if m else "?"
+    return wh, zone
+
+def safe_float(val):
+    try: return float((str(val) or "0").strip())
+    except: return 0.0
+
+def parse_fee(val):
+    """解析運費，去除 $ NT$ 等符號，回傳數字"""
+    try:
+        s = str(val or "0").strip()
+        # 移除常見貨幣符號
+        s = s.replace("NT$", "").replace("$", "").replace(",", "").strip()
+        return float(s) if s else 0.0
+    except:
+        return 0.0
+
+def check_oversize(ch, ship_raw, total_dim, max_side, weight):
+    """
+    判斷是否超材。
+    回傳 (is_oversize: bool, warn_msg: str, can_split: bool, split_rules: dict)
+    split_rules: {"max_dim": int, "max_side": int, "max_weight": int} 或 None
+    """
+    if total_dim == 0 and weight == 0:
+        return False, "", False, None
+
+    # 新竹物流
+    if "新竹物流" in ship_raw:
+        if total_dim > 210 or max_side > 150 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        for limit, fee, desc in CONFIG["hsinchu_surcharge"]:
+            if total_dim <= limit:
+                if fee > 0:
+                    return True, f"新竹補助不足 {total_dim:.0f}cm → {desc}", False, None
+                return False, "", False, None
+        return True, f"超規 {total_dim:.0f}cm → 異常單", False, None
+
+    # 嘉里快遞
+    if "嘉里" in ship_raw:
+        if total_dim > 200 or max_side > 120 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        return False, "", False, None
+
+    # 店到家宅配 — 標準 or 大型
+    if "店到家" in ship_raw:
+        # 標準合規
+        if total_dim <= 105 and max_side <= 45 and weight <= 10:
+            return False, "", False, None
+        # 大型合規
+        if total_dim <= 150 and max_side <= 100 and weight <= 15:
+            return False, "", False, None
+        # 超材：先嘗試用大型規格拆，再嘗試標準規格拆
+        rules = {"max_dim": 150, "max_side": 100, "max_weight": 15, "label": "店到家大型"}
+        return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+
+    # 超商（7-11 / 全家 / 萊爾富）
+    if ch == "cvs":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "超商"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 店到店
+    if ch == "store":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "店到店"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 隔日配 / 無包裝
+    if ch in ("nextday", "nopkg"):
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", False, None
+        return False, "", False, None
+
+    return False, "", False, None
+
+def apply_diagonal(sku, L, W, H):
+    """
+    如果此 SKU 在可斜放清單內，回傳斜放後的有效最長邊。
+    否則回傳原始最長邊。
+    """
+    import math
+    diag_map = CONFIG.get("diagonal_skus", {})
+    if sku in diag_map:
+        effective = diag_map[sku]
+        return effective, True   # (有效最長邊, 是否斜放)
+    return max(L, W, H), False
+
+def suggest_split(products, weight_per_item, L, W, H, rules=None):
+    """
+    建議拆單方式。
+    rules: {"max_dim": int, "max_side": int, "max_weight": int}
+    """
+    if rules is None:
+        rules = {
+            "max_dim":    CONFIG["split_max_dim"],
+            "max_side":   CONFIG["split_max_side"],
+            "max_weight": CONFIG["split_max_weight"],
+        }
+    max_units  = CONFIG["split_max_units"]
+    max_dim    = rules["max_dim"]
+    max_side   = rules["max_side"]
+    max_weight = rules["max_weight"]
+
+    # 展開所有件數為一個清單
+    all_items = []
+    for p in products:
+        for _ in range(max(1, p.get("qty", 1))):
+            all_items.append(p["sku"])
+
+    total_items = len(all_items)
+
+    # 單件尺寸判斷
+    sides = sorted([L, W, H], reverse=True)
+    single_dim  = sum(sides)
+    single_side = sides[0]
+    single_w    = weight_per_item
+
+    # 如果單件就超規，無法拆單
+    if single_dim > max_dim or single_side > max_side or single_w > max_weight:
+        return None, "單件商品已超規，無法拆單"
+
+    # 每包最多放幾件
+    max_per_pkg_dim    = int(max_dim    // single_dim)  if single_dim  > 0 else 999
+    max_per_pkg_side   = int(max_side   // single_side) if single_side > 0 else 999
+    max_per_pkg_weight = int(max_weight // single_w)    if single_w    > 0 else 999
+    max_per_pkg = min(max_per_pkg_dim, max_per_pkg_side, max_per_pkg_weight)
+    max_per_pkg = max(1, max_per_pkg)
+
+    # 需要幾包
+    import math
+    needed = math.ceil(total_items / max_per_pkg)
+
+    if needed > max_units:
+        return None, f"需要 {needed} 包，超過最多 {max_units} 單上限，無法自動拆單"
+
+    # 建立拆單建議（同SKU盡量放同一包）
+    packages = []
+    current_pkg = []
+    current_count = 0
+
+    # 按SKU分組，同SKU連續放
+    from collections import Counter
+    sku_counts = Counter(all_items)
+    sorted_skus = sorted(sku_counts.items(), key=lambda x: -x[1])
+
+    remaining = []
+    for sku, qty in sorted_skus:
+        remaining.extend([sku] * qty)
+
+    for item in remaining:
+        if current_count >= max_per_pkg:
+            packages.append(current_pkg[:])
+            current_pkg = []
+            current_count = 0
+        current_pkg.append(item)
+        current_count += 1
+
+    if current_pkg:
+        packages.append(current_pkg)
+
+    result = []
+    for i, pkg in enumerate(packages):
+        pkg_counter = Counter(pkg)
+        items_str = ", ".join(f"{sku}×{cnt}" for sku, cnt in sorted(pkg_counter.items()))
+        pkg_dim    = single_dim * len(pkg)
+        pkg_weight = single_w   * len(pkg)
+        result.append({
+            "pkg_no":  i + 1,
+            "count":   len(pkg),
+            "items":   items_str,
+            "dim":     round(pkg_dim, 1),
+            "weight":  round(pkg_weight, 2),
+        })
+
+    return result, ""
+
+def _get_zone_label(locs):
+    """取得區域描述字串，供宅配分群用"""
+    whs   = set(wh for wh, z in locs)
+    zones = set(z  for wh, z in locs if z != "?")
+    if not zones: zones = {"?"}
+    if len(whs) == 1 and len(zones) == 1:
+        return f"{next(iter(whs))}{next(iter(zones))}區"
+    elif len(whs) == 1:
+        return f"{next(iter(whs))}混單"
+    return "混單"
+
+def get_sort_key(k):
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
+    if k == "__delivery__":     return (0,  k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
+    if k == "__nopkg__":        return (88, k, k)
+    if k == "__splittable__":   return (92, k, k)
+    if k == "__oversize__":     return (95, k, k)
+    order = {"店到店":2, "店到店隔日配":3}
+    for label, pri in order.items():
+        if k.startswith(label):
+            if "混單" in k: return (pri*10+9, "zzz", k)
+            return (pri*10, k, k)
+    return (99, k, k)
+
+def split_orders(rows):
+    # ── 以交易序號合併同一張訂單 ──────────────────────
+    order_map = {}
+    for row in rows:
+        txn = (row.get(CONFIG["col_txn"], "") or "").strip()
+        if not txn: continue
+        if txn not in order_map:
+            order_map[txn] = {
+                "txn":       txn,
+                "channel":   detect_channel(row.get(CONFIG["col_shipping"], "")),
+                "ship_raw":  (row.get(CONFIG["col_shipping"], "") or "").strip(),
+                "order_ids": [],
+                "products":  [],
+                "locations": set(),
+                "total_qty": 0,
+                # 尺寸（取該訂單最大值，因為同訂單多列尺寸應相同）
+                "length":    0.0,
+                "width":     0.0,
+                "height":    0.0,
+                "weight":    0.0,
+                "fee":       0.0,  # 運費
+            }
+        oid    = (row.get(CONFIG["col_order_id"], "") or "").strip()
+        raw_wh = (row.get(CONFIG["col_warehouse"], "") or "").strip()
+        sku    = (row.get(CONFIG["col_sku"], "") or "").strip()
+        wh, zone = parse_location(raw_wh)
+
+        # 尺寸取最大值（避免空值覆蓋有效值）
+        L = safe_float(row.get(CONFIG["col_length"], 0))
+        W = safe_float(row.get(CONFIG["col_width"],  0))
+        H = safe_float(row.get(CONFIG["col_height"], 0))
+        Wt= safe_float(row.get(CONFIG["col_weight"], 0))
+        Fe= parse_fee(row.get(CONFIG["col_fee"], 0))
+        if L > 0: order_map[txn]["length"]  = max(order_map[txn]["length"],  L)
+        if W > 0: order_map[txn]["width"]   = max(order_map[txn]["width"],   W)
+        if H > 0: order_map[txn]["height"]  = max(order_map[txn]["height"],  H)
+        if Wt> 0: order_map[txn]["weight"]  = max(order_map[txn]["weight"],  Wt)
+        if Fe> 0: order_map[txn]["fee"]     = max(order_map[txn]["fee"],     Fe)
+
+        order_map[txn]["order_ids"].append(oid)
+        order_map[txn]["products"].append({
+            "oid": oid, "sku": sku,
+            "zone_raw": raw_wh, "wh": wh, "zone": zone,
+        })
+        order_map[txn]["locations"].add((wh, zone))
+        order_map[txn]["total_qty"] += 1
+
+    # ── 計算三邊總和、最長邊，斜放判斷，超材檢查 ────────
+    for txn, o in order_map.items():
+        L, W, H = o["length"], o["width"], o["height"]
+
+        # 斜放判斷：若訂單內有可斜放 SKU，用對角線取代最長邊
+        skus_in_order = [p["sku"] for p in o["products"]]
+        diagonal_applied = False
+        effective_side = max(L, W, H)
+        for sku in skus_in_order:
+            eff, is_diag = apply_diagonal(sku, L, W, H)
+            if is_diag:
+                effective_side = eff
+                diagonal_applied = True
+                break
+
+        dims = sorted([L, W, H], reverse=True)
+        o["max_side"]       = effective_side
+        # 🎯 基於材積的智能多商品包裝計算（修復三邊和錯誤累加）
+        if len(o["products"]) > 1:
+            # 多商品：使用基於材積的智能包裝算法
+            box_L, box_W, box_H, smart_total, method, old_total = calculate_volumetric_packaging(
+                o["products"], L, W, H
+            )
+            
+            o["total_dim"] = smart_total
+            o["packaging_method"] = method
+            o["box_dimensions"] = f"{box_L:.1f}×{box_W:.1f}×{box_H:.1f}cm"
+            o["old_total_dim"] = old_total  # 保存原錯誤計算供對比
+            
+            # 診斷信息
+            improvement = ((old_total - smart_total) / old_total * 100) if old_total > 0 else 0
+            o["improvement_percent"] = f"{improvement:.1f}%"
+            
+        else:
+            # 單商品：維持原邏輯，確保向後兼容
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
+            o["box_dimensions"] = f"{L:.1f}×{W:.1f}×{H:.1f}cm"
+            o["old_total_dim"] = sum(dims)
+            o["improvement_percent"] = "0%"
+        o["diagonal_used"]  = diagonal_applied
+        o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
+            o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
+        )
+
+        # 若斜放後不超材，標示說明
+        if diagonal_applied and not o["oversize"]:
+            o["oversize_msg"] = "斜放後合規"
+
+        # 拆單建議（運費=0才可拆單）
+        o["split_suggestion"] = None
+        o["split_error"]      = ""
+        o["fee_paid"]         = o["fee"] > 0
+
+        # 運費>0 → 標示買家已付，不拆單
+        if o["oversize"] and o["fee"] > 0:
+            o["oversize_msg"] += f"｜買家已付運費 {o['fee']:.0f} 元"
+
+        can_split = o["oversize"] and o["can_split"] and o["fee"] == 0
+        if can_split and o["total_qty"] > 0:
+            weight_per = o["weight"] / o["total_qty"] if o["total_qty"] > 0 else 0
+            from collections import Counter
+            sku_count = Counter(p["sku"] for p in o["products"])
+            prods = [{"sku": sku, "qty": qty} for sku, qty in sku_count.items()]
+            suggestion, err = suggest_split(prods, weight_per, L, W, H, o["split_rules"])
+            o["split_suggestion"] = suggestion
+            o["split_error"]      = err
+
+    # ── 套用分單規則 ──────────────────────────────────
+    groups = {}
+
+    def add(key, title, icon, color, o):
+        if key not in groups:
+            groups[key] = {"title": title, "icon": icon, "color": color, "orders": []}
+        groups[key]["orders"].append(o)
+
+    summary = {}
+
+    for txn, o in order_map.items():
+        ch    = o["channel"]
+        locs  = o["locations"]
+        meta  = CHANNEL_META.get(ch, CHANNEL_META["delivery"])
+        label = meta["label"]
+        icon  = meta["icon"]
+        color = meta["color"]
+
+        # 超材處理
+        if o["oversize"]:
+            o["oversize_channel"] = label
+            if o["can_split"] and o["split_suggestion"]:
+                # 可拆單 → 獨立可拆單分類
+                add("__splittable__", "✂ 可拆單", "✂", "#e65100", o)
+                summary["✂ 可拆單"] = summary.get("✂ 可拆單", 0) + 1
+            else:
+                # 不可拆單 → 超材異常分類
+                add("__oversize__", "⚠ 超材", "⚠", "#b71c1c", o)
+                summary["⚠ 超材"] = summary.get("⚠ 超材", 0) + 1
+            continue
+
+        # 無包裝 → 全部合併成一組
+        if ch == "nopkg":
+            add("__nopkg__", "📦 無包裝", "📦", "#00838f", o)
+            summary["無包裝"] = summary.get("無包裝", 0) + 1
+            continue
+
+        # 宅配（新竹/嘉里/店到家）→ 外層一個大分類，內部依區域分群
+        if ch == "delivery":
+            o["delivery_zone"] = _get_zone_label(locs)  # 記錄區域供分群用
+            add("__delivery__", "🚚 宅配", "🚚", "#1565c0", o)
+            summary["宅配"] = summary.get("宅配", 0) + 1
+            continue
+
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
+        skus = set(p["sku"] for p in o["products"] if p["sku"])
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
+        if not zones:
+            zones = {"?"}
+
+        if len(whs) == 1 and len(zones) == 1:
+            wh    = next(iter(whs))
+            zone  = next(iter(zones))
+            key   = f"{label} - {wh}{zone}區"
+            title = f"{icon} {label} ｜ {wh} {zone} 區"
+        elif len(whs) == 1:
+            key   = f"{label} - {next(iter(whs))}混單"
+            title = f"{icon} {label} ｜ {next(iter(whs))} 混單"
+        else:
+            key   = f"{label} - 混單"
+            title = f"{icon} {label} ｜ 混單（跨倉）"
+
+        if "混單" in key:
+            color = color + "bb"
+
+        add(key, title, icon, color, o)
+        summary[label] = summary.get(label, 0) + 1
+
+    state["summary"] = summary
+    return dict(sorted(groups.items(), key=lambda x: get_sort_key(x[0])))
+
+def load_csv(source, is_text=False):
+    for enc in ["utf-8-sig", "big5", "cp950", "utf-8"]:
+        try:
+            if is_text:
+                reader = csv.DictReader(io.StringIO(source))
+            else:
+                f = open(source, encoding=enc, newline="")
+                reader = csv.DictReader(f)
+            rows = list(reader)
+            if not is_text: f.close()
+            if rows: return rows, enc
+        except Exception:
+            continue
+    return [], None
+
+def run_pipeline(rows=None):
+    state["status"] = "fetching"
+    if not rows:
+        state["status"] = "error"
+        state["status_msg"] = "無資料"
+        return
+    groups = split_orders(rows)
+    state["groups"]      = groups
+    state["total"]       = len(set((r.get(CONFIG["col_txn"]) or "") for r in rows))
+    state["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state["status"]      = "ready"
+    state["status_msg"]  = f"共 {state['total']} 張訂單，分成 {len(groups)} 組 | {state['last_update']}"
+    for k, g in groups.items():
+        log(f"  {g['title']}：{len(g['orders'])} 張")
+    log("分單完成")
+
+def scheduler():
+    while True:
+        now = datetime.now()
+        if now.hour == CONFIG["auto_run_hour"] and now.minute == CONFIG["auto_run_min"]:
+            log("定時觸發")
+            time.sleep(61)
+        time.sleep(30)
+
+# ============================================================
+# 設定檔持久化（斜放商品清單）
+# ============================================================
+def _get_base_dir():
+    """取得執行檔所在目錄（支援 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        # 打包成 exe 後，exe 所在目錄
+        return os.path.dirname(sys.executable)
+    else:
+        # 一般 Python 執行
+        return os.path.dirname(os.path.abspath(__file__))
+
+SETTINGS_FILE = os.path.join(_get_base_dir(), "settings.json")
+
+def load_settings():
+    """從 settings.json 讀取設定，啟動時呼叫"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            if "diagonal_skus" in data:
+                CONFIG["diagonal_skus"] = data["diagonal_skus"]
+                log(f"已載入特殊可出超材品設定：{len(CONFIG['diagonal_skus'])} 筆")
+    except Exception as e:
+        log(f"讀取設定檔失敗：{e}")
+
+def save_settings():
+    """將設定寫入 settings.json"""
+    try:
+        data = {"diagonal_skus": CONFIG["diagonal_skus"]}
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"儲存設定檔失敗：{e}")
+
+# ============================================================
+# Flask 網頁
+# ============================================================
+app = Flask(__name__)
+
+# -*- coding: utf-8 -*-
+"""
+4Sale 自動分單印單系統 v4
+五個通路：宅配 / 超商 / 店到店 / 店到店隔日配 / 無包裝
+區域細分：倉庫(前倉/主倉/備用倉) + 區域字母(A/B/C...)
+"""
+
+import sys, csv, io, os, re, json, threading, time
+from datetime import datetime
+from flask import Flask, render_template_string, request, jsonify
+
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# ============================================================
+# 設定區
+# ============================================================
+CONFIG = {
+    "company_name": "我的電商公司",
+    "flask_port":   5000,
+    "auto_run_hour":7,
+    "auto_run_min": 30,
+
+    # CSV 欄位名稱
+    "col_txn":      "子交易序號",
+    "col_order_id": "訂單編號",
+    "col_shipping": "出貨類型",
+    "col_warehouse":"商品倉庫儲位",
+    "col_sku":      "商品編號",
+    "col_length":   "商品長",       # 單位 cm
+    "col_width":    "商品寬",       # 單位 cm
+    "col_height":   "商品高",       # 單位 cm
+    "col_weight":   "子交易總重量", # 單位 kg（整張訂單已加總）
+    "col_fee":      "運費",         # 運費欄位（0=可拆單，>0=買家已付不拆單）
+
+    # 通路判斷關鍵字
+    "kw_delivery": ["新竹物流", "嘉里", "店到家"],
+    "kw_cvs":      ["7-11", "711", "全家", "萊爾富"],
+    "kw_nextday":  ["隔日到貨"],
+    "kw_nopkg":    ["無包裝"],
+    "kw_store":    ["店到店"],
+
+    # 倉庫前綴
+    "wh_prefix": {
+        "?前": "參前",
+        "?倉": "參前",
+        "主":  "參倉",
+    },
+
+    # 超材規則（整張訂單加總後判斷）
+    "oversize_rules": {
+        # 通路key → (三邊總和上限cm, 最長邊上限cm, 重量上限kg, 說明)
+        "cvs":      (105, 45,  10, "超商"),
+        "store":    (105, 45,  10, "店到店"),
+        "nextday":  (105, 45,  10, "店到店隔日配"),
+        "nopkg":    (105, 45,  10, "無包裝"),
+        "delivery_jialy":   (200, 120, 20, "嘉里快遞"),
+        "delivery_hsinchu": (210, 150, 20, "新竹物流"),
+        "delivery_store":   (150, 100, 15, "店到家大型"),
+    },
+
+    # 新竹物流補助運費對照（三邊總和 → 買家自付運費）
+    # ≦150cm 正常補助，151~210cm 買家自付，>210cm 異常
+    "hsinchu_surcharge": [
+        (150, 0,   "正常補助"),
+        (160, 135, "買家自付135元"),
+        (170, 165, "買家自付165元"),
+        (180, 195, "買家自付195元"),
+        (190, 225, "買家自付225元"),
+        (200, 285, "買家自付285元"),
+        (210, 335, "買家自付335元"),
+    ],
+
+    # ★ 特殊可出超材品清單（SKU → 斜放後有效最長邊cm）
+    # 斜放後最長邊 = √(長²+寬²+高²)，填入計算後的值
+    # 例如：55x40x30 的商品，對角線 ≈ 74cm，但斜放進箱後最長邊可能只有 44cm
+    # 請依實際測量填入，系統會用此值取代原始最長邊判斷超材
+    "diagonal_skus": {
+        # "SKU-001": 44,   # 範例：SKU-001 斜放後有效最長邊 44cm
+        # "SKU-002": 43,
+    },
+
+    # 拆單規則（店到店/店到家超材時）
+    "split_max_units":   5,     # 最多拆幾單
+    "split_max_dim":     105,   # 每包三邊總和上限 cm
+    "split_max_side":    45,    # 每包最長邊上限 cm
+    "split_max_weight":  10,    # 每包重量上限 kg
+}
+
+# 通路顯示設定
+CHANNEL_META = {
+    "delivery": {"label": "宅配",         "icon": "🚙", "color": "#1565c0"},
+    "cvs":      {"label": "超商",         "icon": "🏪", "color": "#c85000"},
+    "store":    {"label": "店到店",       "icon": "🏬", "color": "#2e7d32"},
+    "nextday":  {"label": "店到店隔日配", "icon": "⚡",   "color": "#6a1b9a"},
+    "nopkg":    {"label": "無包裝",       "icon": "📦", "color": "#00838f"},
+}
+
+state = {
+    "groups": {}, "total": 0, "last_update": None,
+    "status": "idle", "status_msg": "請上傳 CSV 開始分單",
+    "log": [], "summary": {},
+}
+
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    state["log"].append(line)
+    if len(state["log"]) > 200:
+        state["log"] = state["log"][-200:]
+
+# ============================================================
+# 分單邏輯
+# ============================================================
+def detect_channel(val):
+    s = (val or "").strip()
+    if any(k in s for k in CONFIG["kw_delivery"]): return "delivery"
+    if any(k in s for k in CONFIG["kw_cvs"]):      return "cvs"
+    if any(k in s for k in CONFIG["kw_nextday"]):  return "nextday"
+    if any(k in s for k in CONFIG["kw_nopkg"]):    return "nopkg"
+    if any(k in s for k in CONFIG["kw_store"]):    return "store"
+    return "delivery"
+
+def parse_location(raw):
+    """儲位 → (倉庫名稱, 區域字母)"""
+    raw = (raw or "").strip()
+    wh, rest = "其他", raw
+    for prefix, name in CONFIG["wh_prefix"].items():
+        if raw.startswith(prefix):
+            wh, rest = name, raw[len(prefix):]
+            break
+    m = re.match(r"([A-Z])", rest)
+    zone = m.group(1) if m else "?"
+    return wh, zone
+
+def safe_float(val):
+    try: return float((str(val) or "0").strip())
+    except: return 0.0
+
+def parse_fee(val):
+    """解析運費，去除 $ NT$ 等符號，回傳數字"""
+    try:
+        s = str(val or "0").strip()
+        # 移除常見貨幣符號
+        s = s.replace("NT$", "").replace("$", "").replace(",", "").strip()
+        return float(s) if s else 0.0
+    except:
+        return 0.0
+
+def check_oversize(ch, ship_raw, total_dim, max_side, weight):
+    """
+    判斷是否超材。
+    回傳 (is_oversize: bool, warn_msg: str, can_split: bool, split_rules: dict)
+    split_rules: {"max_dim": int, "max_side": int, "max_weight": int} 或 None
+    """
+    if total_dim == 0 and weight == 0:
+        return False, "", False, None
+
+    # 新竹物流
+    if "新竹物流" in ship_raw:
+        if total_dim > 210 or max_side > 150 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        for limit, fee, desc in CONFIG["hsinchu_surcharge"]:
+            if total_dim <= limit:
+                if fee > 0:
+                    return True, f"新竹補助不足 {total_dim:.0f}cm → {desc}", False, None
+                return False, "", False, None
+        return True, f"超規 {total_dim:.0f}cm → 異常單", False, None
+
+    # 嘉里快遞
+    if "嘉里" in ship_raw:
+        if total_dim > 200 or max_side > 120 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        return False, "", False, None
+
+    # 店到家宅配 — 標準 or 大型
+    if "店到家" in ship_raw:
+        # 標準合規
+        if total_dim <= 105 and max_side <= 45 and weight <= 10:
+            return False, "", False, None
+        # 大型合規
+        if total_dim <= 150 and max_side <= 100 and weight <= 15:
+            return False, "", False, None
+        # 超材：先嘗試用大型規格拆，再嘗試標準規格拆
+        rules = {"max_dim": 150, "max_side": 100, "max_weight": 15, "label": "店到家大型"}
+        return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+
+    # 超商（7-11 / 全家 / 萊爾富）
+    if ch == "cvs":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "超商"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 店到店
+    if ch == "store":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "店到店"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 隔日配 / 無包裝
+    if ch in ("nextday", "nopkg"):
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", False, None
+        return False, "", False, None
+
+    return False, "", False, None
+
+def apply_diagonal(sku, L, W, H):
+    """
+    如果此 SKU 在可斜放清單內，回傳斜放後的有效最長邊。
+    否則回傳原始最長邊。
+    """
+    import math
+    diag_map = CONFIG.get("diagonal_skus", {})
+    if sku in diag_map:
+        effective = diag_map[sku]
+        return effective, True   # (有效最長邊, 是否斜放)
+    return max(L, W, H), False
+
+def suggest_split(products, weight_per_item, L, W, H, rules=None):
+    """
+    建議拆單方式。
+    rules: {"max_dim": int, "max_side": int, "max_weight": int}
+    """
+    if rules is None:
+        rules = {
+            "max_dim":    CONFIG["split_max_dim"],
+            "max_side":   CONFIG["split_max_side"],
+            "max_weight": CONFIG["split_max_weight"],
+        }
+    max_units  = CONFIG["split_max_units"]
+    max_dim    = rules["max_dim"]
+    max_side   = rules["max_side"]
+    max_weight = rules["max_weight"]
+
+    # 展開所有件數為一個清單
+    all_items = []
+    for p in products:
+        for _ in range(max(1, p.get("qty", 1))):
+            all_items.append(p["sku"])
+
+    total_items = len(all_items)
+
+    # 單件尺寸判斷
+    sides = sorted([L, W, H], reverse=True)
+    single_dim  = sum(sides)
+    single_side = sides[0]
+    single_w    = weight_per_item
+
+    # 如果單件就超規，無法拆單
+    if single_dim > max_dim or single_side > max_side or single_w > max_weight:
+        return None, "單件商品已超規，無法拆單"
+
+    # 每包最多放幾件
+    max_per_pkg_dim    = int(max_dim    // single_dim)  if single_dim  > 0 else 999
+    max_per_pkg_side   = int(max_side   // single_side) if single_side > 0 else 999
+    max_per_pkg_weight = int(max_weight // single_w)    if single_w    > 0 else 999
+    max_per_pkg = min(max_per_pkg_dim, max_per_pkg_side, max_per_pkg_weight)
+    max_per_pkg = max(1, max_per_pkg)
+
+    # 需要幾包
+    import math
+    needed = math.ceil(total_items / max_per_pkg)
+
+    if needed > max_units:
+        return None, f"需要 {needed} 包，超過最多 {max_units} 單上限，無法自動拆單"
+
+    # 建立拆單建議（同SKU盡量放同一包）
+    packages = []
+    current_pkg = []
+    current_count = 0
+
+    # 按SKU分組，同SKU連續放
+    from collections import Counter
+    sku_counts = Counter(all_items)
+    sorted_skus = sorted(sku_counts.items(), key=lambda x: -x[1])
+
+    remaining = []
+    for sku, qty in sorted_skus:
+        remaining.extend([sku] * qty)
+
+    for item in remaining:
+        if current_count >= max_per_pkg:
+            packages.append(current_pkg[:])
+            current_pkg = []
+            current_count = 0
+        current_pkg.append(item)
+        current_count += 1
+
+    if current_pkg:
+        packages.append(current_pkg)
+
+    result = []
+    for i, pkg in enumerate(packages):
+        pkg_counter = Counter(pkg)
+        items_str = ", ".join(f"{sku}×{cnt}" for sku, cnt in sorted(pkg_counter.items()))
+        pkg_dim    = single_dim * len(pkg)
+        pkg_weight = single_w   * len(pkg)
+        result.append({
+            "pkg_no":  i + 1,
+            "count":   len(pkg),
+            "items":   items_str,
+            "dim":     round(pkg_dim, 1),
+            "weight":  round(pkg_weight, 2),
+        })
+
+    return result, ""
+
+def _get_zone_label(locs):
+    """取得區域描述字串，供宅配分群用"""
+    whs   = set(wh for wh, z in locs)
+    zones = set(z  for wh, z in locs if z != "?")
+    if not zones: zones = {"?"}
+    if len(whs) == 1 and len(zones) == 1:
+        return f"{next(iter(whs))}{next(iter(zones))}區"
+    elif len(whs) == 1:
+        return f"{next(iter(whs))}混單"
+    return "混單"
+
+def get_sort_key(k):
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→可拆單→超材"""
+    if k == "__delivery__":     return (0,  k, k)
+    if k == "__single_zone__":  return (20, k, k)   # 新：純區+單品大分類
+    if k == "__nopkg__":        return (88, k, k)
+    if k == "__splittable__":   return (92, k, k)
+    if k == "__oversize__":     return (95, k, k)
+    order = {"店到店":2, "店到店隔日配":3}
+    for label, pri in order.items():
+        if k.startswith(label):
+            if "混單" in k: return (pri*10+9, "zzz", k)
+            return (pri*10, k, k)
+    return (99, k, k)
+
+def split_orders(rows):
+    # ── 以交易序號合併同一張訂單 ──────────────────────
+    order_map = {}
+    for row in rows:
+        txn = (row.get(CONFIG["col_txn"], "") or "").strip()
+        if not txn: continue
+        if txn not in order_map:
+            order_map[txn] = {
+                "txn":       txn,
+                "channel":   detect_channel(row.get(CONFIG["col_shipping"], "")),
+                "ship_raw":  (row.get(CONFIG["col_shipping"], "") or "").strip(),
+                "order_ids": [],
+                "products":  [],
+                "locations": set(),
+                "total_qty": 0,
+                # 尺寸（取該訂單最大值，因為同訂單多列尺寸應相同）
+                "length":    0.0,
+                "width":     0.0,
+                "height":    0.0,
+                "weight":    0.0,
+                "fee":       0.0,  # 運費
+            }
+        oid    = (row.get(CONFIG["col_order_id"], "") or "").strip()
+        raw_wh = (row.get(CONFIG["col_warehouse"], "") or "").strip()
+        sku    = (row.get(CONFIG["col_sku"], "") or "").strip()
+        wh, zone = parse_location(raw_wh)
+
+        # 尺寸取最大值（避免空值覆蓋有效值）
+        L = safe_float(row.get(CONFIG["col_length"], 0))
+        W = safe_float(row.get(CONFIG["col_width"],  0))
+        H = safe_float(row.get(CONFIG["col_height"], 0))
+        Wt= safe_float(row.get(CONFIG["col_weight"], 0))
+        Fe= parse_fee(row.get(CONFIG["col_fee"], 0))
+        if L > 0: order_map[txn]["length"]  = max(order_map[txn]["length"],  L)
+        if W > 0: order_map[txn]["width"]   = max(order_map[txn]["width"],   W)
+        if H > 0: order_map[txn]["height"]  = max(order_map[txn]["height"],  H)
+        if Wt> 0: order_map[txn]["weight"]  = max(order_map[txn]["weight"],  Wt)
+        if Fe> 0: order_map[txn]["fee"]     = max(order_map[txn]["fee"],     Fe)
+
+        order_map[txn]["order_ids"].append(oid)
+        order_map[txn]["products"].append({
+            "oid": oid, "sku": sku,
+            "zone_raw": raw_wh, "wh": wh, "zone": zone,
+        })
+        order_map[txn]["locations"].add((wh, zone))
+        order_map[txn]["total_qty"] += 1
+
+    # ── 計算三邊總和、最長邊，斜放判斷，超材檢查 ────────
+    for txn, o in order_map.items():
+        L, W, H = o["length"], o["width"], o["height"]
+
+        # 斜放判斷：若訂單內有可斜放 SKU，用對角線取代最長邊
+        skus_in_order = [p["sku"] for p in o["products"]]
+        diagonal_applied = False
+        effective_side = max(L, W, H)
+        for sku in skus_in_order:
+            eff, is_diag = apply_diagonal(sku, L, W, H)
+            if is_diag:
+                effective_side = eff
+                diagonal_applied = True
+                break
+
+        dims = sorted([L, W, H], reverse=True)
+        o["max_side"]       = effective_side
+        # 🎯 基於材積的智能多商品包裝計算（修復三邊和錯誤累加）
+        if len(o["products"]) > 1:
+            # 多商品：使用基於材積的智能包裝算法
+            box_L, box_W, box_H, smart_total, method, old_total = calculate_volumetric_packaging(
+                o["products"], L, W, H
+            )
+            
+            o["total_dim"] = smart_total
+            o["packaging_method"] = method
+            o["box_dimensions"] = f"{box_L:.1f}×{box_W:.1f}×{box_H:.1f}cm"
+            o["old_total_dim"] = old_total  # 保存原錯誤計算供對比
+            
+            # 診斷信息
+            improvement = ((old_total - smart_total) / old_total * 100) if old_total > 0 else 0
+            o["improvement_percent"] = f"{improvement:.1f}%"
+            
+        else:
+            # 單商品：維持原邏輯，確保向後兼容
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
+            o["box_dimensions"] = f"{L:.1f}×{W:.1f}×{H:.1f}cm"
+            o["old_total_dim"] = sum(dims)
+            o["improvement_percent"] = "0%"
+        o["diagonal_used"]  = diagonal_applied
+        o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
+            o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"]
+        )
+
+        # 若斜放後不超材，標示說明
+        if diagonal_applied and not o["oversize"]:
+            o["oversize_msg"] = "斜放後合規"
+
+        # 拆單建議（運費=0才可拆單）
+        o["split_suggestion"] = None
+        o["split_error"]      = ""
+        o["fee_paid"]         = o["fee"] > 0
+
+        # 運費>0 → 標示買家已付，不拆單
+        if o["oversize"] and o["fee"] > 0:
+            o["oversize_msg"] += f"｜買家已付運費 {o['fee']:.0f} 元"
+
+        can_split = o["oversize"] and o["can_split"] and o["fee"] == 0
+        if can_split and o["total_qty"] > 0:
+            weight_per = o["weight"] / o["total_qty"] if o["total_qty"] > 0 else 0
+            from collections import Counter
+            sku_count = Counter(p["sku"] for p in o["products"])
+            prods = [{"sku": sku, "qty": qty} for sku, qty in sku_count.items()]
+            suggestion, err = suggest_split(prods, weight_per, L, W, H, o["split_rules"])
+            o["split_suggestion"] = suggestion
+            o["split_error"]      = err
+
+    # ── 套用分單規則 ──────────────────────────────────
+    groups = {}
+
+    def add(key, title, icon, color, o):
+        if key not in groups:
+            groups[key] = {"title": title, "icon": icon, "color": color, "orders": []}
+        groups[key]["orders"].append(o)
+
+    summary = {}
+
+    for txn, o in order_map.items():
+        ch    = o["channel"]
+        locs  = o["locations"]
+        meta  = CHANNEL_META.get(ch, CHANNEL_META["delivery"])
+        label = meta["label"]
+        icon  = meta["icon"]
+        color = meta["color"]
+
+        # 超材處理
+        if o["oversize"]:
+            o["oversize_channel"] = label
+            if o["can_split"] and o["split_suggestion"]:
+                # 可拆單 → 獨立可拆單分類
+                add("__splittable__", "✂ 可拆單", "✂", "#e65100", o)
+                summary["✂ 可拆單"] = summary.get("✂ 可拆單", 0) + 1
+            else:
+                # 不可拆單 → 超材異常分類
+                add("__oversize__", "⚠ 超材", "⚠", "#b71c1c", o)
+                summary["⚠ 超材"] = summary.get("⚠ 超材", 0) + 1
+            continue
+
+        # 無包裝 → 全部合併成一組
+        if ch == "nopkg":
+            add("__nopkg__", "📦 無包裝", "📦", "#00838f", o)
+            summary["無包裝"] = summary.get("無包裝", 0) + 1
+            continue
+
+        # 宅配（新竹/嘉里/店到家）→ 外層一個大分類，內部依區域分群
+        if ch == "delivery":
+            o["delivery_zone"] = _get_zone_label(locs)  # 記錄區域供分群用
+            add("__delivery__", "🚚 宅配", "🚚", "#1565c0", o)
+            summary["宅配"] = summary.get("宅配", 0) + 1
+            continue
+
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
+        skus = set(p["sku"] for p in o["products"] if p["sku"])
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
+        if not zones:
+            zones = {"?"}
+
+        if len(whs) == 1 and len(zones) == 1:
+            wh    = next(iter(whs))
+            zone  = next(iter(zones))
+            key   = f"{label} - {wh}{zone}區"
+            title = f"{icon} {label} ｜ {wh} {zone} 區"
+        elif len(whs) == 1:
+            key   = f"{label} - {next(iter(whs))}混單"
+            title = f"{icon} {label} ｜ {next(iter(whs))} 混單"
+        else:
+            key   = f"{label} - 混單"
+            title = f"{icon} {label} ｜ 混單（跨倉）"
+
+        if "混單" in key:
+            color = color + "bb"
+
+        add(key, title, icon, color, o)
+        summary[label] = summary.get(label, 0) + 1
+
+    state["summary"] = summary
+    return dict(sorted(groups.items(), key=lambda x: get_sort_key(x[0])))
+
+def load_csv(source, is_text=False):
+    for enc in ["utf-8-sig", "big5", "cp950", "utf-8"]:
+        try:
+            if is_text:
+                reader = csv.DictReader(io.StringIO(source))
+            else:
+                f = open(source, encoding=enc, newline="")
+                reader = csv.DictReader(f)
+            rows = list(reader)
+            if not is_text: f.close()
+            if rows: return rows, enc
+        except Exception:
+            continue
+    return [], None
+
+def run_pipeline(rows=None):
+    state["status"] = "fetching"
+    if not rows:
+        state["status"] = "error"
+        state["status_msg"] = "無資料"
+        return
+    groups = split_orders(rows)
+    state["groups"]      = groups
+    state["total"]       = len(set((r.get(CONFIG["col_txn"]) or "") for r in rows))
+    state["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state["status"]      = "ready"
+    state["status_msg"]  = f"共 {state['total']} 張訂單，分成 {len(groups)} 組 | {state['last_update']}"
+    for k, g in groups.items():
+        log(f"  {g['title']}：{len(g['orders'])} 張")
+    log("分單完成")
+
+def scheduler():
+    while True:
+        now = datetime.now()
+        if now.hour == CONFIG["auto_run_hour"] and now.minute == CONFIG["auto_run_min"]:
+            log("定時觸發")
+            time.sleep(61)
+        time.sleep(30)
+
+# ============================================================
+# 設定檔持久化（斜放商品清單）
+# ============================================================
+def _get_base_dir():
+    """取得執行檔所在目錄（支援 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        # 打包成 exe 後，exe 所在目錄
+        return os.path.dirname(sys.executable)
+    else:
+        # 一般 Python 執行
+        return os.path.dirname(os.path.abspath(__file__))
+
+SETTINGS_FILE = os.path.join(_get_base_dir(), "settings.json")
+
+def load_settings():
+    """從 settings.json 讀取設定，啟動時呼叫"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            if "diagonal_skus" in data:
+                CONFIG["diagonal_skus"] = data["diagonal_skus"]
+                log(f"已載入特殊可出超材品設定：{len(CONFIG['diagonal_skus'])} 筆")
+    except Exception as e:
+        log(f"讀取設定檔失敗：{e}")
+
+def save_settings():
+    """將設定寫入 settings.json"""
+    try:
+        data = {"diagonal_skus": CONFIG["diagonal_skus"]}
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"儲存設定檔失敗：{e}")
+
+# ============================================================
+# Flask 網頁
+# ============================================================
+app = Flask(__name__)
+
+# -*- coding: utf-8 -*-
+"""
+4Sale 自動分單印單系統 v4
+五個通路：宅配 / 超商 / 店到店 / 店到店隔日配 / 無包裝
+區域細分：倉庫(前倉/主倉/備用倉) + 區域字母(A/B/C...)
+"""
+
+import sys, csv, io, os, re, json, threading, time
+from datetime import datetime
+from flask import Flask, render_template_string, request, jsonify
+
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# ============================================================
+# 設定區
+# ============================================================
+CONFIG = {
+    "company_name": "我的電商公司",
+    "flask_port":   5000,
+    "auto_run_hour":7,
+    "auto_run_min": 30,
+
+    # CSV 欄位名稱
+    "col_txn":      "子交易序號",
+    "col_order_id": "訂單編號",
+    "col_shipping": "出貨類型",
+    "col_warehouse":"商品倉庫儲位",
+    "col_sku":      "商品編號",
+    "col_length":   "商品長",       # 單位 cm
+    "col_width":    "商品寬",       # 單位 cm
+    "col_height":   "商品高",       # 單位 cm
+    "col_weight":   "子交易總重量", # 單位 kg（整張訂單已加總）
+    "col_fee":      "運費",         # 運費欄位（0=可拆單，>0=買家已付不拆單）
+
+    # 通路判斷關鍵字
+    "kw_delivery": ["新竹物流", "嘉里", "店到家"],
+    "kw_cvs":      ["7-11", "711", "全家", "萊爾富"],
+    "kw_nextday":  ["隔日到貨"],
+    "kw_nopkg":    ["無包裝"],
+    "kw_store":    ["店到店"],
+
+    # 倉庫前綴
+    "wh_prefix": {
+        "?前": "參前",
+        "?倉": "參前",
+        "主":  "參倉",
+    },
+
+    # 超材規則（整張訂單加總後判斷）
+    "oversize_rules": {
+        # 通路key → (三邊總和上限cm, 最長邊上限cm, 重量上限kg, 說明)
+        "cvs":      (105, 45,  10, "超商"),
+        "store":    (105, 45,  10, "店到店"),
+        "nextday":  (105, 45,  10, "店到店隔日配"),
+        "nopkg":    (105, 45,  10, "無包裝"),
+        "delivery_jialy":   (200, 120, 20, "嘉里快遞"),
+        "delivery_hsinchu": (210, 150, 20, "新竹物流"),
+        "delivery_store":   (150, 100, 15, "店到家大型"),
+    },
+
+    # 新竹物流補助運費對照（三邊總和 → 買家自付運費）
+    # ≦150cm 正常補助，151~210cm 買家自付，>210cm 異常
+    "hsinchu_surcharge": [
+        (150, 0,   "正常補助"),
+        (160, 135, "買家自付135元"),
+        (170, 165, "買家自付165元"),
+        (180, 195, "買家自付195元"),
+        (190, 225, "買家自付225元"),
+        (200, 285, "買家自付285元"),
+        (210, 335, "買家自付335元"),
+    ],
+
+    # ★ 特殊可出超材品清單（SKU → 斜放後有效最長邊cm）
+    # 斜放後最長邊 = √(長²+寬²+高²)，填入計算後的值
+    # 例如：55x40x30 的商品，對角線 ≈ 74cm，但斜放進箱後最長邊可能只有 44cm
+    # 請依實際測量填入，系統會用此值取代原始最長邊判斷超材
+    "diagonal_skus": {
+        # "SKU-001": 44,   # 範例：SKU-001 斜放後有效最長邊 44cm
+        # "SKU-002": 43,
+    },
+
+    # 拆單規則（店到店/店到家超材時）
+    "split_max_units":   5,     # 最多拆幾單
+    "split_max_dim":     105,   # 每包三邊總和上限 cm
+    "split_max_side":    45,    # 每包最長邊上限 cm
+    "split_max_weight":  10,    # 每包重量上限 kg
+}
+
+# 通路顯示設定
+CHANNEL_META = {
+    "delivery": {"label": "宅配",         "icon": "🚙", "color": "#1565c0"},
+    "cvs":      {"label": "超商",         "icon": "🏪", "color": "#c85000"},
+    "store":    {"label": "店到店",       "icon": "🏬", "color": "#2e7d32"},
+    "nextday":  {"label": "店到店隔日配", "icon": "⚡",   "color": "#6a1b9a"},
+    "nopkg":    {"label": "無包裝",       "icon": "📦", "color": "#00838f"},
+}
+
+state = {
+    "groups": {}, "total": 0, "last_update": None,
+    "status": "idle", "status_msg": "請上傳 CSV 開始分單",
+    "log": [], "summary": {},
+}
+
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    state["log"].append(line)
+    if len(state["log"]) > 200:
+        state["log"] = state["log"][-200:]
+
+# ============================================================
+# 分單邏輯
+# ============================================================
+def detect_channel(val):
+    s = (val or "").strip()
+    if any(k in s for k in CONFIG["kw_delivery"]): return "delivery"
+    if any(k in s for k in CONFIG["kw_cvs"]):      return "cvs"
+    if any(k in s for k in CONFIG["kw_nextday"]):  return "nextday"
+    if any(k in s for k in CONFIG["kw_nopkg"]):    return "nopkg"
+    if any(k in s for k in CONFIG["kw_store"]):    return "store"
+    return "delivery"
+
+def parse_location(raw):
+    """儲位 → (倉庫名稱, 區域字母)"""
+    raw = (raw or "").strip()
+    wh, rest = "其他", raw
+    for prefix, name in CONFIG["wh_prefix"].items():
+        if raw.startswith(prefix):
+            wh, rest = name, raw[len(prefix):]
+            break
+    m = re.match(r"([A-Z])", rest)
+    zone = m.group(1) if m else "?"
+    return wh, zone
+
+def safe_float(val):
+    try: return float((str(val) or "0").strip())
+    except: return 0.0
+
+def parse_fee(val):
+    """解析運費，去除 $ NT$ 等符號，回傳數字"""
+    try:
+        s = str(val or "0").strip()
+        # 移除常見貨幣符號
+        s = s.replace("NT$", "").replace("$", "").replace(",", "").strip()
+        return float(s) if s else 0.0
+    except:
+        return 0.0
+
+def check_oversize(ch, ship_raw, total_dim, max_side, weight, buyer_fee=0):
+    """
+    判斷是否超材。
+    回傳 (is_oversize: bool, warn_msg: str, can_split: bool, split_rules: dict)
+    """
+    if total_dim == 0 and weight == 0:
+        return False, "", False, None
+
+    # 新竹物流
+    if "新竹物流" in ship_raw:
+        if total_dim > 210 or max_side > 150 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        for limit, required_fee, desc in CONFIG["hsinchu_surcharge"]:
+            if total_dim <= limit:
+                if required_fee == 0:
+                    return False, "", False, None
+                if buyer_fee >= required_fee:
+                    return False, "", False, None
+                return True, f"新竹補助不足 {total_dim:.0f}cm，應付 {required_fee} 元，實付 {buyer_fee:.0f} 元 → 異常單", False, None
+        return True, f"超規 {total_dim:.0f}cm → 異常單", False, None
+
+    # 嘉里快遞
+    if "嘉里" in ship_raw:
+        if total_dim > 200 or max_side > 120 or weight > 20:
+            return True, f"超規 {total_dim:.0f}cm/{weight:.1f}kg → 異常單", False, None
+        return False, "", False, None
+
+    # 店到家宅配 — 標準 or 大型
+    if "店到家" in ship_raw:
+        # 標準合規
+        if total_dim <= 105 and max_side <= 45 and weight <= 10:
+            return False, "", False, None
+        # 大型合規
+        if total_dim <= 150 and max_side <= 100 and weight <= 15:
+            return False, "", False, None
+        # 超材：先嘗試用大型規格拆，再嘗試標準規格拆
+        rules = {"max_dim": 150, "max_side": 100, "max_weight": 15, "label": "店到家大型"}
+        return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+
+    # 超商（7-11 / 全家 / 萊爾富）
+    if ch == "cvs":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "超商"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 店到店
+    if ch == "store":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "店到店"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 隔日配（支援拆單）
+    if ch == "nextday":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            rules = {"max_dim": 105, "max_side": 45, "max_weight": 10, "label": "隔日配"}
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", True, rules
+        return False, "", False, None
+
+    # 無包裝（不拆單）
+    if ch == "nopkg":
+        if total_dim > 105 or max_side > 45 or weight > 10:
+            return True, f"超材 {total_dim:.0f}cm/{weight:.1f}kg", False, None
+        return False, "", False, None
+    return False, "", False, None
+
+def apply_diagonal(sku, L, W, H):
+    """
+    如果此 SKU 在可斜放清單內，回傳斜放後的有效最長邊。
+    支援新格式 {side: float, max_qty: int} 和舊格式 float。
+    """
+    diag_map = CONFIG.get("diagonal_skus", {})
+    if sku in diag_map:
+        cfg = diag_map[sku]
+        if isinstance(cfg, dict):
+            side = cfg.get("side")
+            if side: return float(side), True
+        elif isinstance(cfg, (int, float)):
+            return float(cfg), True
+    return max(L, W, H), False
+
+def get_sku_max_qty(sku, channel=None):
+    """
+    取得 SKU 的每包最大件數限制。
+    channel: 'store'(店配類) 或 'delivery'(快遞類)
+    無設定或通路不符回傳 None。
+    """
+    diag_map = CONFIG.get("diagonal_skus", {})
+    if sku not in diag_map:
+        return None
+    cfg = diag_map[sku]
+    if not isinstance(cfg, dict):
+        return None
+    max_qty  = cfg.get("max_qty")
+    channels = cfg.get("channels", [])
+    if not max_qty:
+        return None
+    # 若沒有設定通路限制，或通路符合，才回傳
+    if not channels:
+        return max_qty
+    if channel and channel in channels:
+        return max_qty
+    return None
+
+
+def suggest_split(products, weight_per_item, L, W, H, rules=None):
+    """
+    建議拆單方式。
+    rules: {max_dim, max_side, max_weight, max_qty(optional for bulky items)}
+    """
+    if rules is None:
+        rules = {
+            "max_dim":    CONFIG["split_max_dim"],
+            "max_side":   CONFIG["split_max_side"],
+            "max_weight": CONFIG["split_max_weight"],
+        }
+    max_units     = CONFIG["split_max_units"]
+    max_dim       = rules["max_dim"]
+    max_side      = rules["max_side"]
+    max_weight    = rules["max_weight"]
+    max_qty_limit = rules.get("max_qty")
+
+    all_items = []
+    for p in products:
+        for _ in range(max(1, p.get("qty", 1))):
+            all_items.append(p["sku"])
+
+    total_items = len(all_items)
+    sides       = sorted([L, W, H], reverse=True)
+    single_dim  = sum(sides)
+    single_side = sides[0]
+    single_w    = weight_per_item
+
+    if max_qty_limit:
+        max_per_pkg = max_qty_limit
+    else:
+        if single_dim > max_dim or single_side > max_side or single_w > max_weight:
+            return None, "單件商品已超規，無法拆單"
+        max_per_pkg = min(
+            int(max_dim    // single_dim)  if single_dim  > 0 else 999,
+            int(max_side   // single_side) if single_side > 0 else 999,
+            int(max_weight // single_w)    if single_w    > 0 else 999,
+        )
+        max_per_pkg = max(1, max_per_pkg)
+
+    # 需要幾包
+    import math
+    needed = math.ceil(total_items / max_per_pkg)
+
+    if needed > max_units:
+        return None, f"需要 {needed} 包，超過最多 {max_units} 單上限，無法自動拆單"
+
+    # 建立拆單建議（同SKU盡量放同一包）
+    packages = []
+    current_pkg = []
+    current_count = 0
+
+    # 按SKU分組，同SKU連續放
+    from collections import Counter
+    sku_counts = Counter(all_items)
+    sorted_skus = sorted(sku_counts.items(), key=lambda x: -x[1])
+
+    remaining = []
+    for sku, qty in sorted_skus:
+        remaining.extend([sku] * qty)
+
+    for item in remaining:
+        if current_count >= max_per_pkg:
+            packages.append(current_pkg[:])
+            current_pkg = []
+            current_count = 0
+        current_pkg.append(item)
+        current_count += 1
+
+    if current_pkg:
+        packages.append(current_pkg)
+
+    result = []
+    for i, pkg in enumerate(packages):
+        pkg_counter = Counter(pkg)
+        items_str = ", ".join(f"{sku}×{cnt}" for sku, cnt in sorted(pkg_counter.items()))
+        pkg_dim    = single_dim * len(pkg)
+        pkg_weight = single_w   * len(pkg)
+        result.append({
+            "pkg_no":  i + 1,
+            "count":   len(pkg),
+            "items":   items_str,
+            "dim":     round(pkg_dim, 1),
+            "weight":  round(pkg_weight, 2),
+        })
+
+    return result, ""
+
+def _get_zone_label(locs):
+    """取得區域描述字串，供宅配分群用"""
+    whs   = set(wh for wh, z in locs)
+    zones = set(z  for wh, z in locs if z != "?")
+    if not zones: zones = {"?"}
+    if len(whs) == 1 and len(zones) == 1:
+        return f"{next(iter(whs))}{next(iter(zones))}區"
+    elif len(whs) == 1:
+        return f"{next(iter(whs))}混單"
+    return "混單"
+
+def get_sort_key(k):
+    """排序：宅配→純區+單品→店到店多品→隔日配→無包裝→巨無霸→可拆單→超材"""
+    if k == "__delivery__":     return (0,  k, k)
+    if k == "__single_zone__":  return (20, k, k)
+    if k == "__nopkg__":        return (88, k, k)
+    if k == "__giant__":        return (91, k, k)
+    if k == "__splittable__":   return (92, k, k)
+    if k == "__oversize__":     return (95, k, k)
+    order = {"店到店":2, "店到店隔日配":3}
+    for label, pri in order.items():
+        if k.startswith(label):
+            if "混單" in k: return (pri*10+9, "zzz", k)
+            return (pri*10, k, k)
+    return (99, k, k)
+
+def split_orders(rows):
+    # ── 以交易序號合併同一張訂單 ──────────────────────
+    order_map = {}
+    for row in rows:
+        txn = (row.get(CONFIG["col_txn"], "") or "").strip()
+        if not txn: continue
+        if txn not in order_map:
+            order_map[txn] = {
+                "txn":       txn,
+                "channel":   detect_channel(row.get(CONFIG["col_shipping"], "")),
+                "ship_raw":  (row.get(CONFIG["col_shipping"], "") or "").strip(),
+                "order_ids": [],
+                "products":  [],
+                "locations": set(),
+                "total_qty": 0,
+                # 尺寸（取該訂單最大值，因為同訂單多列尺寸應相同）
+                "length":    0.0,
+                "width":     0.0,
+                "height":    0.0,
+                "weight":    0.0,
+                "fee":       0.0,  # 運費
+            }
+        oid    = (row.get(CONFIG["col_order_id"], "") or "").strip()
+        raw_wh = (row.get(CONFIG["col_warehouse"], "") or "").strip()
+        sku    = (row.get(CONFIG["col_sku"], "") or "").strip()
+        wh, zone = parse_location(raw_wh)
+
+        # 尺寸取最大值（避免空值覆蓋有效值）
+        L = safe_float(row.get(CONFIG["col_length"], 0))
+        W = safe_float(row.get(CONFIG["col_width"],  0))
+        H = safe_float(row.get(CONFIG["col_height"], 0))
+        Wt= safe_float(row.get(CONFIG["col_weight"], 0))
+        Fe= parse_fee(row.get(CONFIG["col_fee"], 0))
+        if L > 0: order_map[txn]["length"]  = max(order_map[txn]["length"],  L)
+        if W > 0: order_map[txn]["width"]   = max(order_map[txn]["width"],   W)
+        if H > 0: order_map[txn]["height"]  = max(order_map[txn]["height"],  H)
+        if Wt> 0: order_map[txn]["weight"]  = max(order_map[txn]["weight"],  Wt)
+        if Fe> 0: order_map[txn]["fee"]     = max(order_map[txn]["fee"],     Fe)
+
+        order_map[txn]["order_ids"].append(oid)
+        order_map[txn]["products"].append({
+            "oid": oid, "sku": sku,
+            "zone_raw": raw_wh, "wh": wh, "zone": zone,
+        })
+        order_map[txn]["locations"].add((wh, zone))
+        order_map[txn]["total_qty"] += 1
+
+    # ── 計算三邊總和、最長邊，斜放判斷，超材檢查 ────────
+    for txn, o in order_map.items():
+        L, W, H = o["length"], o["width"], o["height"]
+
+        # 高度為 0 → ERP 無法輸入小數，自動補 0.2cm
+        if H == 0 and (L > 0 or W > 0):
+            H = 0.2
+            o["height"] = 0.2
+            o["height_auto"] = True
+        else:
+            o["height_auto"] = False
+
+        # 斜放判斷：若訂單內有可斜放 SKU，用對角線取代最長邊
+        dims = sorted([L, W, H], reverse=True)
+        skus_in_order = [p["sku"] for p in o["products"]]
+        diagonal_applied = False
+        effective_side = dims[0] if dims else 0
+        for sku in skus_in_order:
+            eff, is_diag = apply_diagonal(sku, L, W, H)
+            if is_diag:
+                effective_side = eff
+                diagonal_applied = True
+                break
+
+        o["max_side"]       = effective_side
+        # 🎯 基於材積的智能多商品包裝計算（修復三邊和錯誤累加）
+        if len(o["products"]) > 1:
+            # 多商品：使用基於材積的智能包裝算法
+            box_L, box_W, box_H, smart_total, method, old_total = calculate_volumetric_packaging(
+                o["products"], L, W, H
+            )
+            
+            o["total_dim"] = smart_total
+            o["packaging_method"] = method
+            o["box_dimensions"] = f"{box_L:.1f}×{box_W:.1f}×{box_H:.1f}cm"
+            o["old_total_dim"] = old_total  # 保存原錯誤計算供對比
+            
+            # 診斷信息
+            improvement = ((old_total - smart_total) / old_total * 100) if old_total > 0 else 0
+            o["improvement_percent"] = f"{improvement:.1f}%"
+            
+        else:
+            # 單商品：維持原邏輯，確保向後兼容
+            o["total_dim"] = sum(dims)
+            o["packaging_method"] = "單商品"
+            o["box_dimensions"] = f"{L:.1f}×{W:.1f}×{H:.1f}cm"
+            o["old_total_dim"] = sum(dims)
+            o["improvement_percent"] = "0%"
+        o["diagonal_used"]  = diagonal_applied
+        o["oversize"], o["oversize_msg"], o["can_split"], o["split_rules"] = check_oversize(
+            o["channel"], o["ship_raw"], o["total_dim"], o["max_side"], o["weight"], o["fee"]
+        )
+
+        # 若斜放後不超材，標示說明
+        if diagonal_applied and not o["oversize"]:
+            o["oversize_msg"] = "斜放後合規"
+
+        # 件數上限判斷：檢查訂單內的 SKU 是否有設定每包最大件數
+        if not o["oversize"]:
+            from collections import Counter
+            sku_count = Counter(p["sku"] for p in o["products"])
+            # 判斷通路群組：delivery=快遞類, store=店配類
+            ch = o["channel"]
+            ch_group = "delivery" if ch == "delivery" else "store"
+            for sku, qty in sku_count.items():
+                max_q = get_sku_max_qty(sku, ch_group)
+                if max_q and qty > max_q:
+                    o["oversize"]     = True
+                    o["can_split"]    = True
+                    o["split_rules"]  = {
+                        "max_dim":    CONFIG["split_max_dim"],
+                        "max_side":   CONFIG["split_max_side"],
+                        "max_weight": CONFIG["split_max_weight"],
+                        "label":      f"每包最多{max_q}件",
+                        "max_qty":    max_q,
+                    }
+                    o["oversize_msg"] = f"件數超限（{sku} 共{qty}件，每包上限{max_q}件）"
+                    break
+
+        # 拆單建議（運費=0才可拆單，店到店/店到家/隔日配）
+        o["split_suggestion"] = None
+        o["split_error"]      = ""
+        o["fee_paid"]         = o["fee"] > 0
+
+        # 運費>0 → 標示買家已付，不拆單
+        if o["oversize"] and o["fee"] > 0:
+            o["oversize_msg"] += f"｜買家已付運費 {o['fee']:.0f} 元"
+
+        can_split = (
+            o["oversize"] and
+            o["can_split"] and
+            o["fee"] == 0 and
+            any(k in o["ship_raw"] for k in ["店到店", "店到家", "隔日到貨"])
+        )
+        if can_split and o["total_qty"] > 0:
+            weight_per = o["weight"] / o["total_qty"] if o["total_qty"] > 0 else 0
+            from collections import Counter
+            sku_count = Counter(p["sku"] for p in o["products"])
+            prods = [{"sku": sku, "qty": qty} for sku, qty in sku_count.items()]
+            suggestion, err = suggest_split(prods, weight_per, L, W, H, o["split_rules"])
+            o["split_suggestion"] = suggestion
+            o["split_error"]      = err
+
+    # ── 套用分單規則 ──────────────────────────────────
+    groups = {}
+
+    def add(key, title, icon, color, o):
+        if key not in groups:
+            groups[key] = {"title": title, "icon": icon, "color": color, "orders": []}
+        groups[key]["orders"].append(o)
+
+    summary = {}
+
+    for txn, o in order_map.items():
+        ch    = o["channel"]
+        locs  = o["locations"]
+        meta  = CHANNEL_META.get(ch, CHANNEL_META["delivery"])
+        label = meta["label"]
+        icon  = meta["icon"]
+        color = meta["color"]
+
+        # 超材處理
+        if o["oversize"]:
+            o["oversize_channel"] = label
+            if o["can_split"] and o["split_suggestion"]:
+                # 可拆單 → 獨立可拆單分類
+                add("__splittable__", "✂ 可拆單", "✂", "#e65100", o)
+                summary["✂ 可拆單"] = summary.get("✂ 可拆單", 0) + 1
+            else:
+                # 不可拆單 → 超材異常分類
+                add("__oversize__", "⚠ 超材", "⚠", "#b71c1c", o)
+                summary["⚠ 超材"] = summary.get("⚠ 超材", 0) + 1
+            continue
+
+        # 無包裝 → 全部合併成一組
+        if ch == "nopkg":
+            add("__nopkg__", "📦 無包裝", "📦", "#00838f", o)
+            summary["無包裝"] = summary.get("無包裝", 0) + 1
+            continue
+
+        # 宅配（新竹/嘉里/店到家）→ 先判斷巨無霸，再進宅配大分類
+        if ch == "delivery":
+            is_giant = (
+                (o["total_dim"] >= 170 or o["weight"] >= 15) and
+                any(k in o["ship_raw"] for k in ["新竹物流", "嘉里"])
+            )
+            if is_giant:
+                reasons = []
+                if o["total_dim"] >= 170: reasons.append(f"三邊{o['total_dim']:.0f}cm")
+                if o["weight"] >= 15:     reasons.append(f"重量{o['weight']:.1f}kg")
+                o["oversize_channel"] = label
+                o["oversize_msg"] = "巨無霸 " + "、".join(reasons) + " → 人工確認"
+                add("__giant__", "&#129427; 巨無霸", "&#129427;", "#6a0dad", o)
+                summary["&#129427; 巨無霸"] = summary.get("&#129427; 巨無霸", 0) + 1
+                continue
+            o["delivery_zone"] = _get_zone_label(locs)
+            add("__delivery__", "&#128665; 宅配", "&#128665;", "#1565c0", o)
+            summary["宅配"] = summary.get("宅配", 0) + 1
+            continue
+
+        # ── 新分類邏輯：純區 + 超商單品 + 店到店單品 ──
+        skus = set(p["sku"] for p in o["products"] if p["sku"])
+        whs_all   = set(wh for wh, z in locs)
+        zones_all = set(z  for wh, z in locs if z != "?")
+        is_single_zone = (len(whs_all) == 1 and len(zones_all) == 1)  # 純單一區域
+        is_single_item = (o["total_qty"] == 1)                         # 只有1件商品
+
+        # 超商單品（1件）→ 進大分類
+        if ch == "cvs" and is_single_item:
+            o["single_zone_sub"] = "超商單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 店到店單品（1件）→ 進大分類
+        if ch == "store" and is_single_item:
+            o["single_zone_sub"] = "店到店單品"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 純區包裹（單一倉+單一區，任何通路）→ 進大分類
+        if is_single_zone:
+            wh_s   = next(iter(whs_all))
+            zone_s = next(iter(zones_all))
+            o["single_zone_sub"] = f"{label}｜{wh_s}{zone_s}區"
+            add("__single_zone__", "⚡ 純區 + 超商單品 + 店到店單品", "⚡", "#e65100", o)
+            summary["純區+單品"] = summary.get("純區+單品", 0) + 1
+            continue
+
+        # 其餘通路（超商多品跨區、店到店多品、隔日配）→ 依倉庫區域細分
+        whs   = whs_all
+        zones = zones_all
+        if not zones:
+            zones = {"?"}
+
+        if len(whs) == 1 and len(zones) == 1:
+            wh    = next(iter(whs))
+            zone  = next(iter(zones))
+            key   = f"{label} - {wh}{zone}區"
+            title = f"{icon} {label} ｜ {wh} {zone} 區"
+        elif len(whs) == 1:
+            key   = f"{label} - {next(iter(whs))}混單"
+            title = f"{icon} {label} ｜ {next(iter(whs))} 混單"
+        else:
+            key   = f"{label} - 混單"
+            title = f"{icon} {label} ｜ 混單（跨倉）"
+
+        if "混單" in key:
+            color = color + "bb"
+
+        add(key, title, icon, color, o)
+        summary[label] = summary.get(label, 0) + 1
+
+    state["summary"] = summary
+    return dict(sorted(groups.items(), key=lambda x: get_sort_key(x[0])))
+
+def load_csv(source, is_text=False):
+    for enc in ["utf-8-sig", "big5", "cp950", "utf-8"]:
+        try:
+            if is_text:
+                reader = csv.DictReader(io.StringIO(source))
+            else:
+                f = open(source, encoding=enc, newline="")
+                reader = csv.DictReader(f)
+            rows = list(reader)
+            if not is_text: f.close()
+            if rows: return rows, enc
+        except Exception:
+            continue
+    return [], None
+
+def run_pipeline(rows=None):
+    state["status"] = "fetching"
+    if not rows:
+        state["status"] = "error"
+        state["status_msg"] = "無資料"
+        return
+    groups = split_orders(rows)
+    state["groups"]      = groups
+    state["total"]       = len(set((r.get(CONFIG["col_txn"]) or "") for r in rows))
+    state["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state["status"]      = "ready"
+    state["status_msg"]  = f"共 {state['total']} 張訂單，分成 {len(groups)} 組 | {state['last_update']}"
+    for k, g in groups.items():
+        log(f"  {g['title']}：{len(g['orders'])} 張")
+    log("分單完成")
+
+def scheduler():
+    while True:
+        now = datetime.now()
+        if now.hour == CONFIG["auto_run_hour"] and now.minute == CONFIG["auto_run_min"]:
+            log("定時觸發")
+            time.sleep(61)
+        time.sleep(30)
 
 # ============================================================
 # 設定檔持久化（斜放商品清單）
@@ -153,6 +2796,8 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
 .card-badge{position:absolute;top:16px;right:16px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
 .badge-ready{background:rgba(46,125,50,.3);color:#81c784;border:1px solid rgba(46,125,50,.4)}
 .badge-soon{background:rgba(100,100,100,.2);color:#888;border:1px solid rgba(100,100,100,.3)}
+.card-split{border-color:rgba(26,95,168,.4)}
+.card-split:hover{border-color:rgba(26,95,168,.8);box-shadow:0 16px 40px rgba(26,95,168,.15)}
 .card-customs{border-color:rgba(244,161,0,.3)}
 .card-customs:hover{border-color:rgba(244,161,0,.7);box-shadow:0 16px 40px rgba(244,161,0,.12)}
 .card-tools{border-color:rgba(0,150,136,.3)}
@@ -212,7 +2857,6 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
       上傳 BigSeller 匯出的超材檔案，自動判斷可拆單/不可拆單，一鍵複製訂單號進行批量標記。
     </div>
     <a href="/oversize-tool" class="dl-btn">&#x1F680; 開始超材分析</a>
-    <a href="/settings/diagonal" class="dl-btn" style="margin-left:8px;background:#1a4a8a;color:#9ec5e8">&#x2699;&#xFE0F; 特殊商品白名單</a>
   </div>
 </div>
 
@@ -896,7 +3540,7 @@ def login_required(f):
 
 @app.route("/auth")
 def token_auth():
-    """Token 免登入入口：員工書籤存 /auth?token=xxx&next=/customs"""
+    """Token 免登入入口：員工書籤存 /auth?token=xxx&next=/split"""
     if not ACCESS_TOKEN:
         return redirect("/login")
     import hmac
@@ -963,11 +3607,659 @@ def logout():
 def home():
     return render_template_string(HOME_HTML)
 
+@app.route("/split")
+@login_required
+def split_page():
+    return redirect("/split_app")
+
+
+
+HTML = """<!DOCTYPE html>
+<html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<title>{{ company }} 分單系統</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"微軟正黑體","Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13px;color:#1a1a1a}
+.topbar{background:#0f1923;color:#fff;height:52px;padding:0 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:300}
+.logo{font-size:15px;font-weight:600;margin-right:auto}
+.logo span{color:#4fa3e0}
+.btn{padding:7px 16px;border-radius:5px;border:none;font-size:13px;cursor:pointer;font-weight:500}
+.btn-white{background:#fff;color:#0f1923}
+.statusbar{background:#fff;border-bottom:1px solid #e0e0e0;padding:7px 20px;display:flex;align-items:center;gap:8px;font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%}
+.dot-idle{background:#aaa}.dot-fetching{background:#f4a100}.dot-ready{background:#22c55e}.dot-error{background:#ef4444}
+
+/* 通路統計卡片 */
+.summary-bar{display:flex;gap:8px;padding:10px 20px;flex-wrap:wrap;background:#f8f8f8;border-bottom:1px solid #eee}
+.sum-card{background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:6px 14px;font-size:12px;display:flex;align-items:center;gap:6px}
+.sum-card .num{font-size:16px;font-weight:600;color:#1a1a1a}
+
+/* 上傳區 */
+.upload-center{padding:40px 20px;display:flex;justify-content:center}
+.upload-box{background:#fff;border:2px dashed #c0cfe0;border-radius:12px;padding:40px 48px;text-align:center;max-width:460px;width:100%}
+.upload-lbl{display:inline-block;background:#1a5fa8;color:#fff;padding:12px 32px;border-radius:6px;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:8px}
+
+.rebar{padding:7px 20px;background:#fff;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px}
+.re-lbl{background:#f0f0f0;color:#444;padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500}
+
+/* Tabs */
+.tabs{display:flex;gap:3px;padding:12px 20px 0;flex-wrap:wrap;background:#f0f2f5}
+.tab{padding:5px 12px;border-radius:16px 16px 0 0;border:1px solid #d0d0d0;border-bottom:none;background:#e8e8e8;cursor:pointer;font-size:11px;color:#555;white-space:nowrap}
+.tab.active{background:#fff;color:#0f1923;font-weight:500}
+.tab:hover:not(.active){background:#f0f0f0}
+.tab-sep{align-self:flex-end;color:#ccc;padding-bottom:3px;font-size:14px}
+
+/* 主內容 */
+.main{padding:0 20px 24px;background:#fff;border:1px solid #ddd;border-top:none;margin:0 20px;border-radius:0 0 8px 8px}
+.grp{padding-top:16px}
+.grp-hd{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:6px 6px 0 0;color:#fff;font-size:13px;font-weight:500}
+.gcnt{background:rgba(255,255,255,.25);padding:2px 10px;border-radius:12px;font-size:12px}
+.copy-btn{margin-left:auto;display:flex;align-items:center;gap:5px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 12px;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.copy-btn:hover{background:rgba(255,255,255,.35)}
+.copy-btn.copied{background:rgba(255,255,255,.5);color:#1a1a1a}
+table{width:100%;border-collapse:collapse;background:#fff;font-size:12px}
+thead th{background:#f5f5f5;padding:7px 10px;text-align:left;font-weight:500;color:#555;border-bottom:1.5px solid #ddd;white-space:nowrap}
+td{padding:6px 10px;border-bottom:.5px solid #efefef;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr.dr:hover td{background:#fafcff}
+.mono{font-size:11px;color:#888;font-family:monospace}
+.wh-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;margin:1px}
+.mix-tag{background:#fff3e0;color:#e65100;border-color:#ffe0b2}
+.sum-row td{background:#f9f9f9;font-size:11px;color:#888;font-weight:500}
+.oversize-row td{background:#fff8f8;}
+.oversize-row:hover td{background:#ffefef!important}
+.log-tog{margin:8px 20px;font-size:11px;color:#888;cursor:pointer}
+.log-box{margin:0 20px 16px;background:#111;color:#7ec87e;font-family:monospace;font-size:11px;padding:10px;border-radius:6px;max-height:150px;overflow-y:auto;display:none}
+.log-box.show{display:block}
+.hidden{display:none}
+@media print{
+  .topbar,.statusbar,.summary-bar,.rebar,.tabs,.log-tog,.log-box{display:none!important}
+  body,html{background:#fff!important}
+  .main{border:none!important;margin:0!important;padding:0!important}
+  .grp.hidden{display:block!important}
+  .grp-hd{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  td,th{padding:4px 7px}
+  .grp{page-break-inside:avoid;margin-bottom:10px}
+}
+</style></head><body>
+
+<div class="topbar">
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none;margin-right:8px">&#x1F3ED;</a>
+  <div class="logo"><span>分單中心</span></div>
+  <span style="font-size:11px;color:#778">{{ last_update }}</span>
+  <a href="/settings/diagonal" style="color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #444;border-radius:5px">特殊可出超材品設定</a>
+  <button class="btn btn-white" onclick="window.print()">列印全部</button>
+  <a href="/" style="color:#aaa;font-size:12px;text-decoration:none;padding:5px 10px;border:1px solid #444;border-radius:5px">&#x2302; 首頁</a>
+</div>
+
+<div class="statusbar">
+  <span class="dot dot-{{ status }}"></span>
+  <span>{{ status_msg }}</span>
+</div>
+
+{% if summary %}
+<div class="summary-bar">
+  {% for label in summary_keys %}
+  <div class="sum-card">
+    <span>{{ label }}</span>
+    <span class="num">{{ summary[label] }}</span>
+    <span style="color:#aaa;font-size:11px">張</span>
+  </div>
+  {% endfor %}
+  <div class="sum-card" style="margin-left:auto;background:#f5f5f5">
+    <span>合計</span>
+    <span class="num">{{ total }}</span>
+    <span style="color:#aaa;font-size:11px">張</span>
+  </div>
+</div>
+{% endif %}
+
+{% if not groups %}
+<div class="upload-center">
+  <div class="upload-box">
+    <div style="font-size:48px;margin-bottom:12px">&#128194;</div>
+    <div style="font-size:17px;font-weight:600;margin-bottom:6px">上傳 4Sale 訂單 CSV</div>
+    <div style="font-size:13px;color:#888;margin-bottom:24px;line-height:1.7">
+      4Sale 後台 → 訂單管理 → 篩選可出貨 → 匯出 CSV<br>
+      上傳後自動依通路及倉庫區域分單
+    </div>
+    <label class="upload-lbl" for="csv-in">選擇 CSV 檔案</label>
+    <input type="file" id="csv-in" accept=".csv" style="display:none" onchange="doUpload()">
+    <div id="up-name" style="font-size:12px;color:#aaa;margin-top:6px"></div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid #eee;font-size:12px;color:#bbb">
+      需包含欄位：子交易序號、出貨類型、商品倉庫儲位、商品編號
+    </div>
+  </div>
+</div>
+{% else %}
+
+<div class="rebar">
+  <span style="font-size:12px;color:#888">重新上傳：</span>
+  <label class="re-lbl" for="csv-in">換一份 CSV</label>
+  <input type="file" id="csv-in" accept=".csv" style="display:none" onchange="doUpload()">
+  <span id="up-name" style="font-size:12px;color:#aaa;margin-left:6px"></span>
+</div>
+
+{# 批次勾選複製工具列 #}
+<div style="padding:8px 20px;background:#f0f4ff;border-bottom:1px solid #c5cae9;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <span style="font-size:12px;font-weight:500;color:#3949ab;white-space:nowrap">批次複製：</span>
+  {% for key in group_keys %}
+  {% set g = groups[key] %}
+  <label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;white-space:nowrap;padding:2px 6px;border:1px solid #c5cae9;border-radius:12px;background:#fff">
+    <input type="checkbox" class="grp-check" data-grpkey="{{ key }}" style="cursor:pointer">
+    {% if key == '__oversize__' %}&#9888; 超材（{{ g.orders|length }}）
+    {% elif key == '__delivery__' %}&#128665; 宅配（{{ g.orders|length }}）
+    {% elif key == '__single_zone__' %}純區+單品（{{ g.orders|length }}）
+    {% elif key == '__nopkg__' %}&#128230; 無包裝（{{ g.orders|length }}）
+    {% else %}{{ key }}（{{ g.orders|length }}）{% endif %}
+  </label>
+  {# 隱藏的序號資料 #}
+  <span style="display:none" class="grp-txn-data" data-grpkey="{{ key }}">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  {% endfor %}
+  <button onclick="copySelectedGrps()" style="margin-left:auto;background:#3949ab;color:#fff;border:none;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap">&#128203; 複製已勾選</button>
+  <span id="grp-copy-msg" style="font-size:11px;color:#3949ab"></span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="showGrp('all')" data-key="all">全部（{{ total }}）</div>
+  {% set ns = namespace(prev_ch='') %}
+  {% for key in group_keys %}
+  {% set ch = key.split(' - ')[0] if ' - ' in key else key %}
+  {% if ns.prev_ch != '' and ch != ns.prev_ch %}
+  <span class="tab-sep">|</span>
+  {% endif %}
+  {% set ns.prev_ch = ch %}
+  <div class="tab" onclick="showGrp('{{ key }}')" data-key="{{ key }}">
+    {% if key == '__oversize__' %}&#9888; 超材（{{ groups[key].orders|length }}）
+    {% elif key == '__giant__' %}&#129427; 巨無霸（{{ groups[key].orders|length }}）
+    {% elif key == '__delivery__' %}&#128665; 宅配（{{ groups[key].orders|length }}）
+    {% elif key == '__single_zone__' %}&#128364; 純區+單品（{{ groups[key].orders|length }}）
+    {% elif key == '__nopkg__' %}&#128230; 無包裝（{{ groups[key].orders|length }}）
+    {% else %}{{ groups[key].icon | safe }} {{ key }}（{{ groups[key].orders|length }}）{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="main">
+{% for key in group_keys %}
+{% set g = groups[key] %}
+
+{% if key == '__delivery__' %}
+{# 宅配大分類：依區域分群顯示 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#1565c0">
+    &#x1F69A; 宅配訂單
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  {% set zones_list = [] %}
+  {% for o in g.orders %}{% if o.delivery_zone not in zones_list %}{% set _ = zones_list.append(o.delivery_zone) %}{% endif %}{% endfor %}
+
+  {# 勾選複製工具列 #}
+  <div style="padding:8px 16px;background:#e8eaf6;border-bottom:1px solid #c5cae9;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:12px;color:#3949ab;font-weight:500">勾選區域批次複製：</span>
+    {% for zone_name in zones_list | sort %}
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;color:#333">
+      <input type="checkbox" class="zone-check" data-zone="{{ zone_name }}" style="cursor:pointer">
+      {{ zone_name }}
+    </label>
+    {% endfor %}
+    <button onclick="copySelectedZones()" style="margin-left:auto;background:#3949ab;color:#fff;border:none;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500">&#128203; 複製已勾選</button>
+    <span id="zone-copy-msg" style="font-size:11px;color:#3949ab"></span>
+  </div>
+
+  {% for zone_name in zones_list | sort %}
+  {% set ns_zc = namespace(n=0) %}
+  {% for o in g.orders %}{% if o.delivery_zone==zone_name %}{% set ns_zc.n=ns_zc.n+1 %}{% endif %}{% endfor %}
+  <div style="padding:8px 16px;background:#e3f2fd;border-bottom:1px solid #bbdefb;display:flex;align-items:center;gap:10px">
+    <span style="font-size:12px;font-weight:500;color:#1565c0">{{ zone_name }}（{{ ns_zc.n }} 張）</span>
+    <button class="copy-btn" style="margin-left:auto;font-size:11px;padding:3px 10px"
+      onclick="copyZoneTxns('{{ zone_name }}', this)">&#128203; 複製此區序號</button>
+    <span style="display:none" class="zone-txn-data" data-zone="{{ zone_name }}">{% for o in g.orders %}{% if o.delivery_zone==zone_name %}{{ o.txn }}&#10;{% endif %}{% endfor %}</span>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+    <tbody>
+    {% set ns_di = namespace(i=0) %}
+    {% for o in g.orders %}{% if o.delivery_zone == zone_name %}
+    {% set ns_di.i = ns_di.i + 1 %}
+    <tr class="dr">
+      <td class="mono">{{ ns_di.i }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">{{ o.ship_raw }}{% if o.diagonal_used %}<div style="color:#1565c0;font-size:10px;margin-top:2px">特殊可出超材品</div>{% endif %}</td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">{% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}{% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}</td>
+      <td style="font-weight:600;color:#1a5fa8;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+</div>
+
+{% elif key == '__single_zone__' %}
+{# 純區 + 超商單品 + 店到店單品 大分類 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#e65100">
+    &#x26A1; 純區 + 超商單品 + 店到店單品
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製子交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  {# 依 single_zone_sub 分組顯示子分類 #}
+  {% set sub_groups = {} %}
+  {% for o in g.orders %}
+    {% set sub = o.single_zone_sub if o.single_zone_sub else '其他' %}
+    {% if sub not in sub_groups %}{% set _ = sub_groups.update({sub: []}) %}{% endif %}
+    {% set _ = sub_groups[sub].append(o) %}
+  {% endfor %}
+  {% for sub, orders in sub_groups.items() %}
+  <div style="margin:0">
+    <div style="background:#bf360c;color:#fff;font-size:12px;font-weight:700;padding:6px 14px;letter-spacing:.5px">
+      &#9656; {{ sub }} &nbsp;<span style="font-weight:400;opacity:.8">{{ orders|length }} 張</span>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>子交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+      <tr class="dr">
+        <td class="mono">{{ loop.index }}</td>
+        <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+        <td style="font-size:11px;color:#666">{{ o.ship_raw }}</td>
+        <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+        <td style="font-size:11px;color:#555;white-space:nowrap">{% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}{% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}</td>
+        <td style="font-weight:600;color:#e65100;text-align:center">{{ o.total_qty }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="sum-row"><td colspan="2">小計 {{ orders|length }} 張</td><td colspan="4">{% set ns3=namespace(t=0) %}{% for o in orders %}{% set ns3.t=ns3.t+o.total_qty %}{% endfor %}共 {{ ns3.t }} 件</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+
+{% elif key == "__giant__" %}
+{# 巨無霸分類：人工確認 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#6a0dad">
+    &#129427; 巨無霸｜人工確認
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  <div style="padding:8px 16px;background:#f3e5f5;border-bottom:1px solid #ce93d8;font-size:12px;color:#6a0dad">
+    &#9888; 三邊總和 &gt; 170cm 且重量 &gt; 15kg，請人工確認是否可出貨
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+    <tbody>
+    {% for o in g.orders %}
+    <tr class="dr" style="background:#fdf6ff">
+      <td class="mono">{{ loop.index }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">
+        {{ o.ship_raw }}
+        <div style="color:#6a0dad;font-size:11px;font-weight:500;margin-top:2px">&#129427; {{ o.oversize_msg }}</div>
+      </td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">
+        {% if o.total_dim > 0 %}<div>{{ o.length|int }}x{{ o.width|int }}x{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}
+        {% if o.weight > 0 %}<div style="color:#6a0dad;font-weight:500">{{ o.weight }}kg</div>{% endif %}
+      </td>
+      <td style="font-weight:600;color:#6a0dad;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="sum-row"><td colspan="2">小計 {{ g.orders|length }} 張</td><td colspan="4">{% set ns2=namespace(t=0) %}{% for o in g.orders %}{% set ns2.t=ns2.t+o.total_qty %}{% endfor %}共 {{ ns2.t }} 件</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{% elif key == '__nopkg__' %}
+{# 無包裝 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#00838f">
+    &#x1F4E6; 無包裝
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+    <tbody>
+    {% for o in g.orders %}
+    <tr class="dr">
+      <td class="mono">{{ loop.index }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">{{ o.ship_raw }}</td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">{% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div>{% endif %}{% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}</td>
+      <td style="font-weight:600;color:#1a5fa8;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="sum-row"><td colspan="2">小計 {{ g.orders|length }} 張</td><td colspan="4">{% set ns2=namespace(t=0) %}{% for o in g.orders %}{% set ns2.t=ns2.t+o.total_qty %}{% endfor %}共 {{ ns2.t }} 件</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{% elif key == '__splittable__' %}
+{# 可拆單分類：依通路分群顯示 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#e65100">
+    &#x2702; 可拆單訂單
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  {% set ch_list = [] %}
+  {% for o in g.orders %}{% if o.oversize_channel not in ch_list %}{% set _ = ch_list.append(o.oversize_channel) %}{% endif %}{% endfor %}
+  {% for ch_name in ch_list %}
+  <div style="padding:8px 16px 0;background:#fff8f5;border-bottom:1px solid #ffccbc">
+    <span style="font-size:12px;font-weight:500;color:#e65100">
+      {{ ch_name }}（{% set ns_s=namespace(n=0) %}{% for o in g.orders %}{% if o.oversize_channel==ch_name %}{% set ns_s.n=ns_s.n+1 %}{% endif %}{% endfor %}{{ ns_s.n }} 張）
+    </span>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>交易序號</th><th>出貨類型</th><th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th></tr></thead>
+    <tbody>
+    {% set ns_si = namespace(i=0) %}
+    {% for o in g.orders %}{% if o.oversize_channel == ch_name %}
+    {% set ns_si.i = ns_si.i + 1 %}
+    <tr class="dr oversize-row">
+      <td class="mono">{{ ns_si.i }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">
+        {{ o.ship_raw }}
+        <div style="color:#e65100;font-size:11px;font-weight:500;margin-top:2px">&#x26A0; {{ o.oversize_msg }}</div>
+        {% if o.split_suggestion %}
+        <div style="margin-top:6px;padding:6px 8px;background:#fff3e0;border-radius:4px;font-size:11px">
+          <div style="font-weight:500;color:#e65100;margin-bottom:3px">
+            建議拆成 {{ o.split_suggestion|length }} 單
+            {% if o.split_rules %}（依{{ o.split_rules.label }}規格）{% endif %}：
+          </div>
+          {% for pkg in o.split_suggestion %}
+          <div style="color:#555;padding:1px 0">第{{ pkg.pkg_no }}包：{{ pkg.items }}（{{ pkg.count }}件 / {{ pkg.dim }}cm / {{ pkg.weight }}kg）</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if o.split_error %}<div style="color:#888;font-size:10px;margin-top:3px">{{ o.split_error }}</div>{% endif %}
+      </td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">
+        {% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}
+        {% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}
+      </td>
+      <td style="font-weight:600;color:#e65100;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+</div>
+
+{% elif key == '__oversize__' %}
+{# 超材大分類：依通路分群顯示 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:#b71c1c">
+    &#x26A0; 超材訂單
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  {# 依通路分群 #}
+  {% set channels = [] %}
+  {% for o in g.orders %}
+    {% if o.oversize_channel not in channels %}{% set _ = channels.append(o.oversize_channel) %}{% endif %}
+  {% endfor %}
+  {% for ch_name in channels %}
+  <div style="padding:10px 16px 0;background:#fff3f3;border-bottom:1px solid #ffcdd2">
+    <span style="font-size:12px;font-weight:500;color:#b71c1c">{{ ch_name }}（{% set ns3=namespace(n=0) %}{% for o in g.orders %}{% if o.oversize_channel==ch_name %}{% set ns3.n=ns3.n+1 %}{% endif %}{% endfor %}{{ ns3.n }} 張）</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>交易序號</th><th>出貨類型</th>
+      <th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th>
+    </tr></thead>
+    <tbody>
+    {% set ns_idx = namespace(i=0) %}
+    {% for o in g.orders %}{% if o.oversize_channel == ch_name %}
+    {% set ns_idx.i = ns_idx.i + 1 %}
+    <tr class="dr oversize-row">
+      <td class="mono">{{ ns_idx.i }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">
+        {{ o.ship_raw }}
+        <div style="color:#b71c1c;font-size:11px;font-weight:500;margin-top:2px">&#x26A0; {{ o.oversize_msg }}</div>
+        {% if o.fee_paid %}
+        <div style="color:#e65100;font-size:11px;margin-top:2px">&#x1F4B0; 買家已付運費 {{ o.fee|int }} 元，不拆單</div>
+        {% endif %}
+        {% if o.split_suggestion %}
+        <div style="margin-top:6px;padding:6px 8px;background:#fff3e0;border-radius:4px;font-size:11px">
+          <div style="font-weight:500;color:#e65100;margin-bottom:3px">建議拆成 {{ o.split_suggestion|length }} 單：</div>
+          {% for pkg in o.split_suggestion %}
+          <div style="color:#555;padding:1px 0">第{{ pkg.pkg_no }}包：{{ pkg.items }}（{{ pkg.count }}件 / {{ pkg.dim }}cm / {{ pkg.weight }}kg）</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if o.split_error %}<div style="color:#888;font-size:10px;margin-top:3px">{{ o.split_error }}</div>{% endif %}
+      </td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">
+        {% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}
+        {% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}
+      </td>
+      <td style="font-weight:600;color:#b71c1c;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+</div>
+
+{% else %}
+{# 一般分組 #}
+<div class="grp" data-key="{{ key }}">
+  <div class="grp-hd" style="background:{{ g.color }}">
+    {{ g.title | safe }}
+    <span class="gcnt">{{ g.orders|length }} 張</span>
+    <button class="copy-btn" onclick="copyTxns(this)">&#128203; 複製交易序號</button>
+    <span style="display:none" class="txn-data">{% for o in g.orders %}{{ o.txn }}&#10;{% endfor %}</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>交易序號</th><th>出貨類型</th>
+      <th>商品 / 儲位</th><th>尺寸/重量</th><th>件數</th>
+    </tr></thead>
+    <tbody>
+    {% for o in g.orders %}
+    <tr class="dr">
+      <td class="mono">{{ loop.index }}</td>
+      <td class="mono" style="font-weight:500">{{ o.txn }}</td>
+      <td style="font-size:11px;color:#666">
+        {{ o.ship_raw }}
+        {% if o.diagonal_used and not o.oversize %}
+        <div style="color:#1565c0;font-size:10px;margin-top:2px">斜放後合規</div>
+        {% endif %}
+      </td>
+      <td>{% for p in o.products %}<div style="font-size:11px;padding:1px 0">{{ p.sku }}<span class="wh-tag">{{ p.zone_raw }}</span></div>{% endfor %}</td>
+      <td style="font-size:11px;color:#555;white-space:nowrap">
+        {% if o.total_dim > 0 %}<div>{{ o.length|int }}×{{ o.width|int }}×{{ o.height|int }}cm</div><div>三邊 {{ o.total_dim|int }}cm</div>{% endif %}
+        {% if o.weight > 0 %}<div>{{ o.weight }}kg</div>{% endif %}
+      </td>
+      <td style="font-weight:600;color:#1a5fa8;text-align:center">{{ o.total_qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="sum-row">
+      <td colspan="2">小計 {{ g.orders|length }} 張</td>
+      <td colspan="4">
+        {% set ns2 = namespace(t=0) %}
+        {% for o in g.orders %}{% set ns2.t = ns2.t + o.total_qty %}{% endfor %}
+        共 {{ ns2.t }} 件
+      </td>
+    </tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endfor %}
+</div>
+{% endif %}
+
+<div class="log-tog" onclick="document.getElementById('lg').classList.toggle('show')">顯示/隱藏記錄</div>
+<div class="log-box" id="lg">{% for l in log_lines %}<div>{{ l }}</div>{% endfor %}</div>
+
+<script>
+function showGrp(key){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.key===key));
+  document.querySelectorAll('.grp').forEach(s=>s.classList.toggle('hidden',key!=='all'&&s.dataset.key!==key));
+}
+function copySelectedGrps() {
+  var NL = String.fromCharCode(10);
+  var checked = document.querySelectorAll('.grp-check:checked');
+  if (checked.length === 0) { alert('請先勾選要複製的分組'); return; }
+  var all = [];
+  checked.forEach(function(cb) {
+    var el = document.querySelector('.grp-txn-data[data-grpkey="' + cb.dataset.grpkey + '"]');
+    if (el) {
+      var parts = el.textContent.trim().split(NL);
+      parts.forEach(function(l){ if(l.trim()) all.push(l.trim()); });
+    }
+  });
+  var text = all.join(NL);
+  navigator.clipboard.writeText(text).then(function() {
+    var msg = document.getElementById('grp-copy-msg');
+    if (msg) { msg.textContent = '已複製 ' + all.length + ' 筆（' + checked.length + ' 個分組）'; setTimeout(function(){ msg.textContent=''; }, 3000); }
+  }).catch(function() {
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    var msg = document.getElementById('grp-copy-msg');
+    if (msg) { msg.textContent = '已複製 ' + all.length + ' 筆'; setTimeout(function(){ msg.textContent=''; }, 3000); }
+  });
+}
+
+function copyZoneTxns(zone, btn) {
+  const el = document.querySelector('.zone-txn-data[data-zone="' + zone + '"]');
+  if (!el) return;
+  const txns = el.textContent.trim();
+  navigator.clipboard.writeText(txns).then(() => {
+    const orig = btn.innerHTML; btn.textContent = '已複製！'; btn.classList.add('copied');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = txns; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    btn.textContent = '已複製！';
+    setTimeout(() => { btn.innerHTML = '&#128203; 複製此區序號'; }, 2000);
+  });
+}
+
+function copySelectedZones() {
+  var NL = String.fromCharCode(10);
+  var checked = document.querySelectorAll('.zone-check:checked');
+  if (checked.length === 0) { alert('請先勾選要複製的區域'); return; }
+  var all = [];
+  checked.forEach(function(cb) {
+    var el = document.querySelector('.zone-txn-data[data-zone="' + cb.dataset.zone + '"]');
+    if (el) {
+      var parts = el.textContent.trim().split(NL);
+      parts.forEach(function(l){ if(l.trim()) all.push(l.trim()); });
+    }
+  });
+  var text = all.join(NL);
+  navigator.clipboard.writeText(text).then(function() {
+    var msg = document.getElementById('zone-copy-msg');
+    if (msg) { msg.textContent = '已複製 ' + all.length + ' 筆（' + checked.length + ' 個區域）'; setTimeout(function(){ msg.textContent=''; }, 3000); }
+  }).catch(function() {
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  });
+}
+
+function copyTxns(btn){
+  const txns = btn.parentElement.querySelector('.txn-data').textContent.trim();
+  navigator.clipboard.writeText(txns).then(()=>{
+    btn.textContent = '已複製！';
+    btn.classList.add('copied');
+    setTimeout(()=>{
+      btn.innerHTML = '&#128203; 複製交易序號';
+      btn.classList.remove('copied');
+    }, 2000);
+  }).catch(()=>{
+    // 備用方案：舊瀏覽器
+    const ta = document.createElement('textarea');
+    ta.value = txns;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = '已複製！';
+    setTimeout(()=>{ btn.innerHTML = '&#128203; 複製交易序號'; }, 2000);
+  });
+}
+function doUpload(){
+  const f=document.getElementById('csv-in').files[0];
+  if(!f)return;
+  document.getElementById('up-name').textContent='上傳中：'+f.name;
+  const fd=new FormData();fd.append('file',f);
+  fetch('/api/upload',{method:'POST',body:fd})
+    .then(r=>r.json())
+    .then(d=>{if(d.ok)location.reload();else alert('失敗：'+d.msg)});
+}
+const lg=document.getElementById('lg');
+if(lg)lg.scrollTop=lg.scrollHeight;
+</script>
+</body></html>"""
+
+@app.route("/split_app")
+@login_required
+def index():
+    try:
+        return render_template_string(HTML,
+            company     = CONFIG["company_name"],
+            groups      = state["groups"],
+            group_keys  = list(state["groups"].keys()),
+            total       = state["total"],
+            last_update = state["last_update"] or "—",
+            status      = state["status"],
+            status_msg  = state["status_msg"],
+            summary     = state["summary"],
+            summary_keys= list(state["summary"].keys()),
+            log_lines   = state["log"][-30:],
+        )
+    except Exception as e:
+        log(f"頁面渲染錯誤：{e}")
+        return f"<html><body><h2>系統啟動中，請重新整理</h2><p>{e}</p></body></html>", 500
+
+@app.route("/api/upload", methods=["POST"])
+@login_required
+def api_upload():
+    f = request.files.get("file")
+    if not f: return jsonify({"ok": False, "msg": "無檔案"})
+    content = None
+    for enc in ["utf-8-sig", "big5", "cp950", "utf-8"]:
+        try:
+            f.seek(0); content = f.read().decode(enc); break
+        except Exception: continue
+    if not content: return jsonify({"ok": False, "msg": "無法解析編碼"})
+    rows, enc = load_csv(content, is_text=True)
+    if not rows: return jsonify({"ok": False, "msg": "CSV 解析失敗"})
+    run_pipeline(rows=rows)
+    return jsonify({"ok": True})
+
+@app.route("/api/status")
+@login_required
+def api_status():
+    return jsonify({k: state[k] for k in ("status","status_msg","last_update","total")})
+
 # ── 特殊可出超材品設定頁面 ──────────────────────────────────────────
 DIAGONAL_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
 <meta charset="UTF-8">
-<title>特殊商品白名單設定</title>
+<title>特殊可出超材品設定</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13px;color:#1a1a1a}
@@ -978,226 +4270,112 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13
 .card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:20px}
 .card h2{font-size:14px;font-weight:500;color:#555;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #eee}
 .desc{font-size:12px;color:#888;margin-bottom:14px;line-height:1.8}
-.section{padding:14px;border:1px solid #e8e8e8;border-radius:6px;margin-bottom:12px;background:#fafafa}
-.section-title{font-size:12px;font-weight:600;color:#1a5fa8;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.section-title .opt{color:#888;font-weight:400;font-size:11px}
-.dim-row{display:flex;gap:8px;align-items:center}
-.dim-row input{width:80px}
-.dim-row .x{color:#888;font-weight:600}
+.form-grid{display:grid;grid-template-columns:160px 140px 1fr auto;gap:10px;align-items:end;margin-bottom:8px}
 label{font-size:12px;color:#666;display:block;margin-bottom:4px}
-input[type=text],input[type=number]{padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px;font-family:inherit}
-input[type=text]{width:100%}
+input[type=text],input[type=number]{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px;font-family:inherit}
 input:focus{outline:none;border-color:#1a5fa8}
-.ch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
-.ch-item{padding:10px 12px;background:#fff;border:1px solid #ddd;border-radius:5px;display:flex;align-items:center;gap:10px}
-.ch-item .ch-name{font-size:12px;color:#333;flex:1}
-.ch-item input[type=number]{width:70px}
-.ch-item .unit{font-size:11px;color:#888}
+.ch-group{padding:8px 12px;background:#f8f8f8;border:1px solid #ddd;border-radius:5px}
+.ch-group label{display:inline-flex;align-items:center;gap:5px;margin-right:16px;font-size:12px;color:#333;cursor:pointer}
+.ch-group label input{width:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 thead th{background:#f5f5f5;padding:8px 10px;text-align:left;font-weight:500;color:#555;border-bottom:1.5px solid #ddd}
-td{padding:8px 10px;border-bottom:.5px solid #eee;vertical-align:top}
+td{padding:8px 10px;border-bottom:.5px solid #eee}
 .tag{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#e3f2fd;color:#1565c0;border:1px solid #bbdefb}
-.tag-g{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;display:inline-block;padding:2px 6px;border-radius:10px;font-size:11px;margin:1px}
-.tag-p{background:#f3e5f5;color:#6a1b9a;border:1px solid #ce93d8;display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px}
+.tag-g{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
+.tag-o{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
 .empty{text-align:center;padding:30px;color:#aaa;font-size:12px}
 .msg{padding:8px 14px;border-radius:5px;font-size:12px;margin:0 20px 10px}
 .msg-ok{background:#e8f5e9;color:#2e7d32}.msg-err{background:#ffebee;color:#b71c1c}
-.add-btn-wrap{text-align:right;padding-top:8px}
 </style></head><body>
 <div class="topbar">
-  <div class="logo"><span>特殊商品白名單</span> 設定</div>
+  <div class="logo"><span>特殊可出超材品</span> 設定</div>
   <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#x2302; 返回首頁</a>
 </div>
 <div id="msg-area"></div>
-
 <div class="card">
-  <h2>新增 / 編輯設定</h2>
+  <h2>新增設定</h2>
   <div class="desc">
-    <b>所有欄位皆為選填</b>(SKU 必填),依商品特性勾選搭配:<br>
-    &bull; <b>實際運送尺寸</b>:折疊/壓縮商品(如收納袋),用此尺寸取代 BigSeller 標示<br>
-    &bull; <b>斜放後最長邊</b>:可斜放商品(如桌子、長棍),系統用此值取代最長邊判斷<br>
-    &bull; <b>各通路件數上限</b>:同 SKU 在不同通路上限不同(店到店嚴格、新竹寬鬆),分別填寫即可
+    <b>斜放後有效最長邊：</b>商品斜放後最長維度（cm），讓系統用此值判斷超材。<br>
+    <b>每包最大件數：</b>超過此件數視為超材，可針對不同通路群組生效。<br>
+    兩個欄位至少填一個。
   </div>
-
-  <div style="margin-bottom:14px">
-    <label>商品 SKU<span style="color:#b71c1c">*</span></label>
-    <input type="text" id="new-sku" placeholder="例:AVG002-002">
-  </div>
-
-  <div class="section">
-    <div class="section-title">📦 實際運送尺寸 <span class="opt">(選填,留空則使用 BigSeller 原始尺寸)</span></div>
-    <div class="dim-row">
-      <div><label>長 L (cm)</label><input type="number" id="new-ship-L" min="0.1" step="0.1" placeholder=""></div>
-      <span class="x" style="margin-top:18px">×</span>
-      <div><label>寬 W (cm)</label><input type="number" id="new-ship-W" min="0.1" step="0.1" placeholder=""></div>
-      <span class="x" style="margin-top:18px">×</span>
-      <div><label>高 H (cm)</label><input type="number" id="new-ship-H" min="0.1" step="0.1" placeholder=""></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🔄 斜放後最長邊 <span class="opt">(選填,留空則使用原始最長邊)</span></div>
-    <div style="display:flex;align-items:end;gap:8px">
-      <div><label>有效最長邊 (cm)</label><input type="number" id="new-side" min="1" max="200" step="0.5" placeholder="例:44" style="width:120px"></div>
-      <small style="color:#888;padding-bottom:10px">商品斜放進箱後的有效最長邊</small>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📋 各通路每包最大件數 <span class="opt">(選填,留空 = 此通路不限件數)</span></div>
-    <div class="ch-grid">
-      <div class="ch-item">
-        <span class="ch-name">蝦皮店到店</span>
-        <input type="number" id="qty-store_to_store" min="1" step="1" placeholder="不限"><span class="unit">件</span>
-      </div>
-      <div class="ch-item">
-        <span class="ch-name">蝦皮店到家</span>
-        <input type="number" id="qty-store_to_home" min="1" step="1" placeholder="不限"><span class="unit">件</span>
-      </div>
-      <div class="ch-item">
-        <span class="ch-name">超商取貨</span>
-        <input type="number" id="qty-cvs" min="1" step="1" placeholder="不限"><span class="unit">件</span>
-      </div>
-      <div class="ch-item">
-        <span class="ch-name">嘉里快遞</span>
-        <input type="number" id="qty-jiali" min="1" step="1" placeholder="不限"><span class="unit">件</span>
-      </div>
-      <div class="ch-item">
-        <span class="ch-name">新竹物流</span>
-        <input type="number" id="qty-hsinchu" min="1" step="1" placeholder="不限"><span class="unit">件</span>
+  <div class="form-grid">
+    <div><label>商品 SKU</label><input type="text" id="new-sku" placeholder="例：APB002"></div>
+    <div><label>斜放後最長邊（cm）</label><input type="number" id="new-side" placeholder="留空不設定" min="1" max="200" step="0.5"></div>
+    <div>
+      <label>每包最大件數 &amp; 適用通路</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="number" id="new-qty" placeholder="件數上限（留空不限）" min="1" step="1" style="width:180px">
+        <div class="ch-group">
+          <label><input type="checkbox" id="ch-store" checked> 店配類<small style="color:#888">（店到店/隔日/超商/店到家）</small></label>
+          <label><input type="checkbox" id="ch-delivery" checked> 快遞類<small style="color:#888">（新竹/嘉里）</small></label>
+        </div>
       </div>
     </div>
+    <div style="padding-bottom:2px"><button class="btn btn-blue" onclick="addSku()">新增</button></div>
   </div>
-
-  <div class="add-btn-wrap"><button class="btn btn-blue" onclick="addSku()">儲存設定</button></div>
 </div>
-
 <div class="card">
-  <h2>目前設定清單 (<span id="count">0</span> 筆)</h2>
+  <h2>目前設定清單</h2>
   <table>
     <thead><tr>
-      <th>商品 SKU</th>
-      <th>實際運送尺寸</th>
-      <th>斜放後最長邊</th>
-      <th>各通路件數上限</th>
-      <th style="width:60px"></th>
+      <th>商品 SKU</th><th>斜放後最長邊</th><th>每包最大件數</th><th>適用通路</th><th style="width:60px"></th>
     </tr></thead>
     <tbody id="sku-tbody"><tr><td colspan="5" class="empty">尚無設定</td></tr></tbody>
   </table>
 </div>
-
 <script>
-var CH_LABELS = {
-  store_to_store: '店到店',
-  store_to_home:  '店到家',
-  cvs:            '超商',
-  jiali:          '嘉里',
-  hsinchu:        '新竹'
-};
-var CH_KEYS = ['store_to_store','store_to_home','cvs','jiali','hsinchu'];
-
+var CH_LABELS = {store:'店配類', delivery:'快遞類'};
 function loadSkus() {
   fetch('/api/diagonal').then(function(r){return r.json();}).then(function(data) {
     var tbody = document.getElementById('sku-tbody');
     var keys = data ? Object.keys(data) : [];
-    document.getElementById('count').textContent = keys.length;
-    if (keys.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無設定</td></tr>';
-      return;
-    }
+    if (keys.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無設定</td></tr>'; return; }
     tbody.innerHTML = keys.map(function(sku) {
-      var cfg = data[sku] || {};
-      var ship = '<span style="color:#bbb">—</span>';
-      if (cfg.ship_L && cfg.ship_W && cfg.ship_H) {
-        ship = '<span class="tag-p">'+cfg.ship_L+'×'+cfg.ship_W+'×'+cfg.ship_H+' cm</span>';
-      }
-      var side = cfg.side ? '<strong>'+cfg.side+' cm</strong>' : '<span style="color:#bbb">—</span>';
-      var qmap = cfg.channel_qty || {};
-      var qtyTags = CH_KEYS.filter(function(k){ return qmap[k]; })
-                           .map(function(k){ return '<span class="tag-g">'+CH_LABELS[k]+': '+qmap[k]+'件</span>'; })
-                           .join(' ');
-      if (!qtyTags) qtyTags = '<span style="color:#bbb">—</span>';
-
-      return '<tr>'+
-        '<td><span class="tag">'+sku+'</span></td>'+
-        '<td>'+ship+'</td>'+
-        '<td>'+side+'</td>'+
-        '<td>'+qtyTags+'</td>'+
-        '<td><button class="btn btn-red" style="padding:4px 10px;font-size:11px" onclick="deleteSku(\\''+sku+'\\')">刪除</button></td>'+
-      '</tr>';
+      var cfg = data[sku];
+      var side = cfg.side ? '<strong>' + cfg.side + ' cm</strong>' : '<span style="color:#bbb">—</span>';
+      var qty  = cfg.max_qty ? '<span class="tag-o">' + cfg.max_qty + ' 件</span>' : '<span style="color:#bbb">不限</span>';
+      var chs  = (cfg.channels || []).map(function(c){ return '<span class="tag-g">' + (CH_LABELS[c]||c) + '</span>'; }).join(' ');
+      if (!chs) chs = '<span style="color:#bbb">—</span>';
+      return '<tr><td><span class="tag">' + sku + '</span></td><td>' + side + '</td><td>' + qty + '</td><td>' + chs + '</td>' +
+             '<td><button class="btn btn-red" style="padding:4px 10px;font-size:11px" onclick="deleteSku(\'' + sku + '\')">刪除</button></td></tr>';
     }).join('');
   });
 }
-
 function showMsg(msg, ok) {
   var area = document.getElementById('msg-area');
-  area.innerHTML = '<div class="msg '+(ok?'msg-ok':'msg-err')+'">'+msg+'</div>';
-  setTimeout(function(){ area.innerHTML = ''; }, 3500);
+  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '">' + msg + '</div>';
+  setTimeout(function(){ area.innerHTML = ''; }, 3000);
 }
-
-function getNum(id) {
-  var v = document.getElementById(id).value.trim();
-  return v ? parseFloat(v) : null;
-}
-
 function addSku() {
-  var sku   = document.getElementById('new-sku').value.trim();
-  var shipL = getNum('new-ship-L');
-  var shipW = getNum('new-ship-W');
-  var shipH = getNum('new-ship-H');
-  var side  = getNum('new-side');
-
-  var channel_qty = {};
-  CH_KEYS.forEach(function(k){
-    var v = getNum('qty-'+k);
-    if (v) channel_qty[k] = parseInt(v);
-  });
-
+  var sku  = document.getElementById('new-sku').value.trim();
+  var side = document.getElementById('new-side').value.trim();
+  var qty  = document.getElementById('new-qty').value.trim();
+  var chs  = [];
+  if (document.getElementById('ch-store').checked)    chs.push('store');
+  if (document.getElementById('ch-delivery').checked) chs.push('delivery');
   if (!sku) { showMsg('請輸入 SKU', false); return; }
-
-  var shipFilled = [shipL, shipW, shipH].filter(function(v){ return v != null; }).length;
-  if (shipFilled > 0 && shipFilled < 3) {
-    showMsg('實際運送尺寸:長/寬/高必須一起填,或全留空', false);
-    return;
-  }
-
-  var hasShip = shipFilled === 3;
-  var hasSide = side != null;
-  var hasQty  = Object.keys(channel_qty).length > 0;
-  if (!hasShip && !hasSide && !hasQty) {
-    showMsg('請至少填寫一個欄位:實際運送尺寸、斜放後最長邊、或任一通路件數', false);
-    return;
-  }
-
-  var payload = { sku: sku };
-  if (hasShip) { payload.ship_L = shipL; payload.ship_W = shipW; payload.ship_H = shipH; }
-  if (hasSide) { payload.side = side; }
-  if (hasQty)  { payload.channel_qty = channel_qty; }
-
+  if (!side && !qty) { showMsg('請至少填入斜放最長邊或件數上限', false); return; }
+  if (qty && chs.length === 0) { showMsg('請至少勾選一個通路群組', false); return; }
   fetch('/api/diagonal', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(payload)
+    body: JSON.stringify({sku:sku, side:side?parseFloat(side):null, max_qty:qty?parseInt(qty):null, channels:chs})
   }).then(function(r){return r.json();}).then(function(d) {
     if (d.ok) {
-      showMsg('已儲存 '+sku, true);
-      ['new-sku','new-ship-L','new-ship-W','new-ship-H','new-side'].forEach(function(id){
-        document.getElementById(id).value = '';
-      });
-      CH_KEYS.forEach(function(k){ document.getElementById('qty-'+k).value = ''; });
+      showMsg('已新增 ' + sku, true);
+      document.getElementById('new-sku').value = '';
+      document.getElementById('new-side').value = '';
+      document.getElementById('new-qty').value = '';
       loadSkus();
-    } else { showMsg('儲存失敗:'+d.msg, false); }
+    } else { showMsg('新增失敗：' + d.msg, false); }
   });
 }
-
 function deleteSku(sku) {
-  if (!confirm('確定刪除 '+sku+' 的白名單設定?')) return;
-  fetch('/api/diagonal/'+encodeURIComponent(sku), {method:'DELETE'})
-    .then(function(r){return r.json();})
-    .then(function(d) {
-      if (d.ok) { showMsg('已刪除 '+sku, true); loadSkus(); }
-    });
+  if (!confirm('確定刪除 ' + sku + '？')) return;
+  fetch('/api/diagonal/' + sku, {method:'DELETE'}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) { showMsg('已刪除 ' + sku, true); loadSkus(); }
+  });
 }
-
 loadSkus();
 </script>
 </body></html>"""
@@ -1210,59 +4388,28 @@ def settings_diagonal():
 @app.route("/api/diagonal", methods=["GET"])
 @login_required
 def api_diagonal_get():
-    """回傳白名單。若資料是舊格式,自動轉成新格式回傳。"""
-    raw = CONFIG.get("diagonal_skus", {}) or {}
-    out = {}
-    for sku, cfg in raw.items():
-        out[sku] = _normalize_diag_cfg(cfg)
-    return jsonify(out)
+    return jsonify(CONFIG["diagonal_skus"])
 
 @app.route("/api/diagonal", methods=["POST"])
 @login_required
 def api_diagonal_post():
-    """新增/更新白名單設定(新格式)。"""
-    data = request.get_json() or {}
-    sku  = (data.get("sku") or "").strip()
+    data     = request.get_json()
+    sku      = (data.get("sku") or "").strip()
+    side     = data.get("side")
+    max_qty  = data.get("max_qty")
+    channels = data.get("channels", [])
     if not sku:
         return jsonify({"ok": False, "msg": "SKU 不可為空"})
-
-    ship_L = data.get("ship_L")
-    ship_W = data.get("ship_W")
-    ship_H = data.get("ship_H")
-    side   = data.get("side")
-    channel_qty = data.get("channel_qty") or {}
-
-    # 三個尺寸必須一起填或全空
-    ship_filled = sum(1 for v in (ship_L, ship_W, ship_H) if v is not None)
-    if 0 < ship_filled < 3:
-        return jsonify({"ok": False, "msg": "實際運送尺寸:長/寬/高必須一起填,或全留空"})
-
-    has_ship = ship_filled == 3
-    has_side = side is not None
-    has_qty  = bool(channel_qty)
-    if not (has_ship or has_side or has_qty):
-        return jsonify({"ok": False, "msg": "請至少填寫一個欄位"})
-
+    if not side and not max_qty:
+        return jsonify({"ok": False, "msg": "請至少填入一個設定"})
     try:
-        cfg = {}
-        if has_ship:
-            cfg["ship_L"] = float(ship_L)
-            cfg["ship_W"] = float(ship_W)
-            cfg["ship_H"] = float(ship_H)
-        if has_side:
-            cfg["side"] = float(side)
-        if has_qty:
-            valid_chs = {"store_to_store", "store_to_home", "cvs", "jiali", "hsinchu"}
-            cleaned = {}
-            for k, v in channel_qty.items():
-                if k in valid_chs and v:
-                    cleaned[k] = int(v)
-            if cleaned:
-                cfg["channel_qty"] = cleaned
-
-        CONFIG["diagonal_skus"][sku] = cfg
+        CONFIG["diagonal_skus"][sku] = {
+            "side":     float(side) if side else None,
+            "max_qty":  int(max_qty) if max_qty else None,
+            "channels": channels,  # ["store", "delivery"]
+        }
         save_settings()
-        log(f"白名單儲存:{sku} = {cfg}")
+        log(f"新增特殊可出超材品：{sku} side={side} max_qty={max_qty} channels={channels}")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
@@ -1273,49 +4420,8 @@ def api_diagonal_delete(sku):
     if sku in CONFIG["diagonal_skus"]:
         del CONFIG["diagonal_skus"][sku]
         save_settings()
-        log(f"白名單刪除:{sku}")
+        log(f"刪除特殊可出超材品設定：{sku}")
     return jsonify({"ok": True})
-
-
-def _normalize_diag_cfg(cfg):
-    """
-    把白名單設定統一成新格式,讓舊資料可以無縫運作。
-    舊格式:{"side": float, "max_qty": int, "channels": ["store"|"delivery"]}
-    新格式:{"ship_L":..., "ship_W":..., "ship_H":..., "side":...,
-           "channel_qty": {"store_to_store":int, ...}}
-    """
-    if not isinstance(cfg, dict):
-        try:
-            return {"side": float(cfg)}
-        except (TypeError, ValueError):
-            return {}
-
-    out = {}
-    for k in ("ship_L", "ship_W", "ship_H", "side"):
-        if cfg.get(k) is not None:
-            out[k] = cfg[k]
-    if isinstance(cfg.get("channel_qty"), dict) and cfg["channel_qty"]:
-        out["channel_qty"] = cfg["channel_qty"]
-
-    # 舊格式相容
-    if "max_qty" in cfg and cfg["max_qty"] and "channel_qty" not in out:
-        max_qty = int(cfg["max_qty"])
-        channels = cfg.get("channels") or []
-        ch_qty = {}
-        # 舊「store」群組 = 店到店+店到家+超商
-        # 舊「delivery」群組 = 嘉里+新竹
-        if "store" in channels:
-            ch_qty["store_to_store"] = max_qty
-            ch_qty["store_to_home"]  = max_qty
-            ch_qty["cvs"]            = max_qty
-        if "delivery" in channels:
-            ch_qty["jiali"]   = max_qty
-            ch_qty["hsinchu"] = max_qty
-        if ch_qty:
-            out["channel_qty"] = ch_qty
-
-    return out
-
 
 # ============================================================
 # 報關模組
@@ -2879,24 +5985,16 @@ def api_extract_cell_images():
     try:
         import requests as req_lib, re as _re
 
-        # 取得 Google Sheets client（與其他 customs API 一致）
-        client, err = get_sheets_client()
-        if err:
-            return jsonify({"ok": False, "msg": f"Google Sheets 連線失敗：{err}"})
-
-        # 取得 OAuth token（gspread client 的 auth 屬性帶有 google credentials）
-        creds = client.auth
+        # 取得 Google OAuth token
+        creds = get_gspread_client().auth
         token = creds.token
 
-        ss_id = os.environ.get("GOOGLE_SHEETS_ID", "")
-        if not ss_id:
-            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID 環境變數"})
-
+        ss_id = GOOGLE_SHEETS_ID
         sheet_name = "商品報關資料庫"
         img_col_index = 9  # J 欄 = index 9 (0-based)
 
         # 用 Sheets API v4 取得完整試算表資料（含圖片）
-        url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?includeGridData=true&ranges={req_lib.utils.quote(sheet_name)}&fields=sheets.data.rowData.values.userEnteredValue,sheets.data.rowData.values.effectiveValue"
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?includeGridData=true&ranges={requests.utils.quote(sheet_name)}&fields=sheets.data.rowData.values.userEnteredValue,sheets.data.rowData.values.effectiveValue"
         headers = {"Authorization": f"Bearer {token}"}
         resp = req_lib.get(url, headers=headers, timeout=30)
         data = resp.json()
@@ -2912,7 +6010,7 @@ def api_extract_cell_images():
         skipped = 0
         img_urls = []
 
-        sheet = client.open_by_key(ss_id).worksheet(sheet_name)
+        sheet = get_gspread_client().open_by_key(ss_id).worksheet(sheet_name)
 
         for row_idx, row in enumerate(rows[1:], start=2):  # 從第 2 列開始（跳過標題）
             values = row.get("values", [])
@@ -6757,9 +9855,9 @@ def superman_glasses_scheduler_health():
         # 也檢查全域 flag
         bg_initialized = _BG_WORKERS_STARTED
         
-        # 從 _ad_scheduler_store 讀取最近執行記錄
-        last_daily = _ad_scheduler_store.get("last_daily", "從未執行")
-        last_hourly = _ad_scheduler_store.get("last_hourly", "從未執行")
+        # 從 _ad_scheduler_store 讀取最近執行記錄（注意：可能是 None 而不是缺鍵）
+        last_daily = _ad_scheduler_store.get("last_daily") or "從未執行"
+        last_hourly = _ad_scheduler_store.get("last_hourly") or "從未執行"
         cost_count = _ad_scheduler_store.get("cost_count", 0)
         
         result = {
@@ -8011,29 +11109,14 @@ def oversize_analyze_api():
             elif len(order_map) == 6:
                 print(f"[重量轉換] ...（省略後續SKU）")
 
-            # ────────── 套用白名單(新格式) ──────────
-            # 白名單可以覆寫:1) 實際運送尺寸 L×W×H  2) 斜放後最長邊  3) 各通路件數上限
-            diag_cfg = _normalize_diag_cfg(diag_map.get(sku, {}))
-
-            # 1) 實際運送尺寸覆寫(折疊/壓縮商品)
-            ship_overridden = False
-            if diag_cfg.get("ship_L") and diag_cfg.get("ship_W") and diag_cfg.get("ship_H"):
-                L = float(diag_cfg["ship_L"])
-                W = float(diag_cfg["ship_W"])
-                H = float(diag_cfg["ship_H"])
-                ship_overridden = True
-
-            # 2) 斜放後最長邊
+            # 斜放判斷
             original_max = max(L, W, H)
-            if diag_cfg.get("side"):
-                eff_side = float(diag_cfg["side"])
+            if sku in diag_map:
+                eff_side = float(diag_map[sku])
                 diagonal = True
             else:
                 eff_side = original_max
                 diagonal = False
-
-            # 3) 各通路件數上限(留給訂單級檢查用)
-            channel_qty_map = diag_cfg.get("channel_qty", {})
 
             order_map[row["订单号"]].append({
                 "sku": sku,
@@ -8045,8 +11128,6 @@ def oversize_analyze_api():
                 "effective_side": eff_side,
                 "diagonal": diagonal,
                 "original_max": original_max,
-                "ship_overridden": ship_overridden,
-                "channel_qty_map": channel_qty_map,
             })
             order_channel[row["订单号"]] = channel
             # 記錄訂單運費（免運才能拆單）。Excel 裡「運費」=買家支付的運費，=0 代表免運。
@@ -8098,74 +11179,81 @@ def oversize_analyze_api():
             # 訂單層級總和檢查（多 SKU 合箱情境）—— 使用智能包裝邏輯
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
-
-            # 🎯 修法3.2:基於真實體積守恆的智能裝箱演算法(等比例擴張版)
-            #
-            # 設計原則:
-            #   1. 以「最大商品形狀」為基準箱(箱子最少要這麼大才裝得下最大件)
-            #   2. 單件訂單(qty 總和=1):直接用商品本身尺寸,不加鬆散係數
-            #      → 解決「曬被架 45×45×2 被加成 49×49×2」的誤判
-            #   3. 多件訂單:用「總體積 × 鬆散係數」決定箱子總體積,
-            #      然後從基準箱「等比例擴張」到容納所需體積
-            #      → 解決「100 個玻璃瓶被算成 8×6×780cm」的單向加高 bug
-            #   4. 不再用「+2 包材厚度」「扁平/厚實 if-else」這類拍腦袋公式
-            import math as _math
-
-            total_qty_in_order = sum(it["qty"] for it in items)
-
-            # 基準箱:必須容納最大那件商品的每一邊
-            box_L = float(max(it["L"] for it in items))
-            box_W = float(max(it["W"] for it in items))
-            box_H = float(max(it["H"] for it in items))
-
-            if total_qty_in_order <= 1:
-                # 單件:直接用商品本身尺寸,不加鬆散
-                pass
+            
+            # 🎯 使用智能包裝邏輯計算實際包裝尺寸
+            if len(items) == 1 and items[0]["qty"] > 1:
+                # 單SKU多件：使用智能疊加邏輯
+                it = items[0]
+                L, W, H = it["L"], it["W"], it["H"]
+                qty = it["qty"]
+                
+                if H <= 2.0:  # 扁平商品（如保冷袋、貼紙）
+                    # 可疊加包裝
+                    package_L = L + 2  # 包材厚度
+                    package_W = W + 2
+                    
+                    # 智能疊加高度（考慮壓縮）- 區分極扁平和一般扁平商品
+                    if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
+                        if qty <= 10:
+                            compression_factor = 0.4   # 高壓縮60%
+                        elif qty <= 50:
+                            compression_factor = 0.3   # 更高壓縮70%
+                        else:
+                            compression_factor = 0.25  # 極高壓縮75%
+                    else:  # 一般扁平商品（貼紙、薄片等）
+                        if qty <= 5:
+                            compression_factor = 0.9   # 輕微壓縮
+                        elif qty <= 10:
+                            compression_factor = 0.7   # 中度壓縮  
+                        else:
+                            compression_factor = 0.6   # 較大壓縮
+                        
+                    stacking_height = H * qty * compression_factor
+                    package_H = stacking_height + 2  # 包材厚度
+                    
+                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                    total_sum = sum(smart_dims)
+                    max_eff_side = smart_dims[0]
+                    
+                else:
+                    # 厚實商品：並排或立體擺放
+                    # 估算最優包裝箱
+                    import math
+                    item_volume = L * W * H
+                    total_volume = item_volume * qty
+                    optimal_cube_side = math.pow(total_volume * 1.2, 1/3)  # 20% 填充損失
+                    
+                    package_L = max(optimal_cube_side, L + 2)
+                    package_W = max(optimal_cube_side, W + 2) 
+                    package_H = max(optimal_cube_side, H + 2)
+                    
+                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                    total_sum = sum(smart_dims)
+                    max_eff_side = smart_dims[0]
+                    
             else:
-                # 多件:商品總體積 × 鬆散係數
-                PACK_DENSITY = 1.3  # 留 30% 空隙給包材與不規則形狀
-                total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
-                required_volume = total_volume * PACK_DENSITY
-
-                base_volume = box_L * box_W * box_H
-                if base_volume > 0 and base_volume < required_volume:
-                    # 等比例擴張:三邊一起膨脹(像吹氣球),
-                    # 比「全部往高度加」更接近真實裝箱物理
-                    scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
-                    box_L *= scale
-                    box_W *= scale
-                    box_H *= scale
-
-            smart_dims = sorted([box_L, box_W, box_H], reverse=True)
-            total_sum = sum(smart_dims)
-            max_eff_side = smart_dims[0]
-
-            # ────────── 通路件數上限檢查(白名單套用) ──────────
-            # 同 SKU 在不同通路的件數上限可能不同(店到店嚴格、新竹寬鬆)
-            # 白名單裡若有設定當前通路的件數上限 → 訂單該 SKU 件數超過 → 視為超材
-            ch_key_map = {
-                "蝦皮店到店": "store_to_store",
-                "蝦皮店到家": "store_to_home",
-                "超商取貨":   "cvs",
-                "嘉里快遞":   "jiali",
-                "新竹物流":   "hsinchu",
-            }
-            current_ch_key = ch_key_map.get(channel)
-            qty_over = False
-            for it in items:
-                qmap = it.get("channel_qty_map") or {}
-                if current_ch_key and current_ch_key in qmap:
-                    limit = qmap[current_ch_key]
-                    if it["qty"] > limit:
-                        qty_over = True
-                        reasons.append(
-                            f"{it['sku']}×{it['qty']}:超過{channel}每包上限 {limit} 件(白名單設定)"
-                        )
-
+                # 多SKU或傳統邏輯：使用改進的計算方式
+                package_L = max(it["L"] for it in items) + 2
+                package_W = max(it["W"] for it in items) + 2
+                
+                # 高度採用最佳擺放策略
+                total_height = 0
+                for it in items:
+                    qty = it["qty"]
+                    if it["H"] <= 2.0:  # 扁平商品可疊加
+                        total_height += it["H"] * qty * 0.8  # 壓縮疊加
+                    else:  # 厚實商品並排，高度取最大值
+                        total_height = max(total_height, it["H"])
+                        
+                package_H = total_height + 2  # 包材厚度
+                
+                smart_dims = sorted([package_L, package_W, package_H], reverse=True)
+                total_sum = sum(smart_dims)
+                max_eff_side = smart_dims[0]
+            
             order_level_over = (total_weight > spec["max_weight"]
                               or total_sum > spec["max_sum"]
-                              or max_eff_side > spec["max_single"]
-                              or qty_over)
+                              or max_eff_side > spec["max_single"])
 
             # 只有在訂單整體超材時才列入
             is_order_oversize = len(reasons) > 0 or order_level_over
@@ -8690,6 +11778,10 @@ def init_background_workers(port_for_log=None):
         _read_schedule_state()
     threading.Thread(target=_restore_schedule_state, daemon=True).start()
 
+    # 主排程器（定時任務）
+    threading.Thread(target=scheduler, daemon=True).start()
+    print("✅ 主排程器（scheduler）已啟動")
+    
     # 廣告自動排程（戰情室核心）
     threading.Thread(target=ad_scheduler_thread, daemon=True).start()
     print("✅ 廣告自動排程（ad_scheduler_thread）已啟動 - 每分鐘檢查、台灣時間 9 點觸發每日任務、每小時觸發預算任務")
@@ -8733,7 +11825,12 @@ def init_background_workers(port_for_log=None):
         scheduler_thread.start()
         print("✅ 超人眼鏡自動化排程（schedule lib）已啟動 - 每小時呼叫 check-and-execute")
     
-    setup_automation_scheduler()
+    # ⚠️ 已停用：Railway IP 被 BigSeller 封鎖（code=2001），永遠失敗
+    # 真正的廣告自動化由辦公室主機 Extension v4.0.2 執行（透過 ad_scheduler_thread 分散式鎖）
+    # 函式定義保留，/api/superman-glasses/check-and-execute 端點也保留可手動 curl 測試
+    # 如未來有代理伺服器繞過 IP 封鎖，可恢復下行
+    # setup_automation_scheduler()
+    print("⏸️  setup_automation_scheduler 已停用（Railway IP 被 BigSeller 封鎖，由主機 Extension 接手）")
     print("=" * 60)
     print("[背景工作] 全部啟動完成")
     print("=" * 60)
