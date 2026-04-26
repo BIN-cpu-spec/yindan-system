@@ -9837,6 +9837,68 @@ def superman_glasses_ad_run_now():
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
 
+@app.route("/api/superman-glasses/scheduler-health", methods=["GET"])
+def superman_glasses_scheduler_health():
+    """Scheduler 健康檢查 - 確認所有背景 thread 是否正在運行
+    
+    用法：直接瀏覽器打開 https://yindan-system-production.up.railway.app/api/superman-glasses/scheduler-health
+    """
+    try:
+        # 找出所有活著的 thread
+        all_threads = threading.enumerate()
+        thread_names = [t.name for t in all_threads if t.is_alive()]
+        
+        # 我們關心的關鍵 thread（用函式名稱找）
+        scheduler_running = any("scheduler" in n.lower() for n in thread_names)
+        ad_scheduler_running = any("ad_scheduler" in n.lower() or "ad-scheduler" in n.lower() for n in thread_names)
+        
+        # 也檢查全域 flag
+        bg_initialized = _BG_WORKERS_STARTED
+        
+        # 從 _ad_scheduler_store 讀取最近執行記錄
+        last_daily = _ad_scheduler_store.get("last_daily", "從未執行")
+        last_hourly = _ad_scheduler_store.get("last_hourly", "從未執行")
+        cost_count = _ad_scheduler_store.get("cost_count", 0)
+        
+        result = {
+            "ok": True,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "bg_workers_initialized": bg_initialized,
+            "active_thread_count": len(thread_names),
+            "active_thread_names": thread_names,
+            "ad_scheduler_store": {
+                "last_daily_run": last_daily,
+                "last_hourly_run": last_hourly,
+                "cost_records_loaded": cost_count,
+            },
+            "diagnosis": [],
+        }
+        
+        # 簡易診斷
+        if not bg_initialized:
+            result["diagnosis"].append("❌ 背景工作未初始化！init_background_workers() 沒被呼叫")
+        else:
+            result["diagnosis"].append("✅ 背景工作已初始化")
+        
+        if cost_count == 0:
+            result["diagnosis"].append("⚠️ 成本資料未載入（可能影響 ROAS 判斷）")
+        else:
+            result["diagnosis"].append(f"✅ 已載入 {cost_count} 筆成本資料")
+        
+        if last_daily == "從未執行":
+            result["diagnosis"].append("⚠️ 每日任務從未執行（如果現在是 9 點之後且機器啟動超過 1 分鐘，這是異常）")
+        else:
+            result["diagnosis"].append(f"✅ 上次每日任務執行：{last_daily}")
+        
+        resp = jsonify(result)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+    except Exception as e:
+        import traceback
+        resp = jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()[-500:]})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+
 @app.route("/api/superman-glasses/test-automation", methods=["GET"])
 def superman_glasses_test_automation():
     """測試自動化API - 檢查所有組件是否正常"""
@@ -11653,7 +11715,35 @@ function copyOrders(type) {
 </body></html>''')
 
 
-if __name__ == "__main__":
+# ============================================================
+# 背景工作初始化（模組層級，gunicorn import 時即執行）
+# ============================================================
+# 多 worker 防護：使用環境變數 + 全域 flag 確保只有第一個 worker 啟動 scheduler
+_BG_WORKERS_STARTED = False
+_BG_WORKERS_LOCK = threading.Lock()
+
+
+def init_background_workers(port_for_log=None):
+    """
+    初始化所有背景工作（Sheets 還原、排程器、自動化）。
+    
+    呼叫時機：
+    - 雲端（gunicorn）：模組 import 完成後立即呼叫一次
+    - 本地（python app.py）：if __name__ == "__main__" 區塊內呼叫
+    
+    多 worker 防護：透過 _BG_WORKERS_STARTED 確保即使 gunicorn 開多 worker 也只會啟動一次。
+    """
+    global _BG_WORKERS_STARTED
+    with _BG_WORKERS_LOCK:
+        if _BG_WORKERS_STARTED:
+            print("[背景工作] 已啟動過，略過重複初始化")
+            return
+        _BG_WORKERS_STARTED = True
+
+    print("=" * 60)
+    print("[背景工作] 開始啟動所有 scheduler 與背景任務")
+    print("=" * 60)
+
     load_settings()
 
     # 啟動時從 Google Sheets 讀回成本備份（Railway 重啟後恢復）
@@ -11688,60 +11778,43 @@ if __name__ == "__main__":
         _read_schedule_state()
     threading.Thread(target=_restore_schedule_state, daemon=True).start()
 
+    # 主排程器（定時任務）
     threading.Thread(target=scheduler, daemon=True).start()
-    threading.Thread(target=ad_scheduler_thread, daemon=True).start()  # 廣告自動排程
-    # Railway 會設定 PORT 環境變數
-    port = int(os.environ.get("PORT", CONFIG["flask_port"]))
+    print("✅ 主排程器（scheduler）已啟動")
+    
+    # 廣告自動排程（戰情室核心）
+    threading.Thread(target=ad_scheduler_thread, daemon=True).start()
+    print("✅ 廣告自動排程（ad_scheduler_thread）已啟動 - 每分鐘檢查、台灣時間 9 點觸發每日任務、每小時觸發預算任務")
 
-    is_cloud = "PORT" in os.environ
-    if not is_cloud:
-        try:
-            import socket
-            local_ip = socket.gethostbyname(socket.gethostname())
-        except Exception:
-            local_ip = "127.0.0.1"
-        print("=" * 50)
-        print("  印單系統已啟動！")
-        print("=" * 50)
-        print(f"  本機使用：http://127.0.0.1:{port}")
-        print(f"  區域網路：http://{local_ip}:{port}")
-        print("=" * 50)
-        print("  請勿關閉此視窗，關閉後系統停止運作")
-        print("=" * 50)
-        try:
-            import webbrowser
-            threading.Timer(2.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
-        except Exception:
-            pass
-    else:
-        print(f"[雲端模式] 系統啟動 port={port}")
-
-    # === 超人眼鏡自動化排程 ===
+    # === 超人眼鏡自動化排程（雙重保險） ===
     def setup_automation_scheduler():
-        """設置自動化排程"""
-        import schedule
-        import threading
-        
+        """設置自動化排程（每小時呼叫 check-and-execute API）"""
+        import schedule as _schedule_lib
+
         def run_automation():
             """執行自動化任務"""
             try:
                 import requests
-                # 調用自己的API執行自動化
-                base_url = f"http://localhost:{port}" if 'railway' not in os.environ.get('RAILWAY_PROJECT_NAME', '') else "https://yindan-system-production.up.railway.app"
+                port_env = int(os.environ.get("PORT", CONFIG.get("flask_port", 5000)))
+                # 雲端用 Railway 公開 URL，本地用 localhost
+                if "PORT" in os.environ:
+                    base_url = "https://yindan-system-production.up.railway.app"
+                else:
+                    base_url = f"http://localhost:{port_env}"
                 response = requests.get(f'{base_url}/api/superman-glasses/check-and-execute', timeout=30)
                 result = response.json()
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 自動化執行: {result}")
             except Exception as e:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 自動化執行錯誤: {e}")
         
-        # 每小時執行一次（工作時間9:00-18:00）
-        schedule.every().hour.do(run_automation)
+        # 每小時執行一次
+        _schedule_lib.every().hour.do(run_automation)
         
         def scheduler_worker():
             """排程工作線程"""
             while True:
                 try:
-                    schedule.run_pending()
+                    _schedule_lib.run_pending()
                     time.sleep(60)  # 每分鐘檢查一次
                 except Exception as e:
                     print(f"排程器錯誤: {e}")
@@ -11750,10 +11823,50 @@ if __name__ == "__main__":
         # 啟動排程線程
         scheduler_thread = threading.Thread(target=scheduler_worker, daemon=True)
         scheduler_thread.start()
-        print("✅ 超人眼鏡自動化排程已啟動 - 每小時執行一次")
+        print("✅ 超人眼鏡自動化排程（schedule lib）已啟動 - 每小時呼叫 check-and-execute")
     
-    # 啟動定時任務
     setup_automation_scheduler()
+    print("=" * 60)
+    print("[背景工作] 全部啟動完成")
+    print("=" * 60)
+
+
+# ============================================================
+# 模組層級啟動：雲端（gunicorn）import 時自動執行
+# ============================================================
+# 偵測雲端環境：Railway / Render / Heroku 等都會設 PORT 環境變數
+if "PORT" in os.environ:
+    print(f"[雲端模式] 偵測到 PORT 環境變數，gunicorn 將啟動背景工作")
+    init_background_workers()
+
+
+# ============================================================
+# 本地開發啟動：python app.py
+# ============================================================
+if __name__ == "__main__":
+    # 本地模式才會走到這裡（雲端 gunicorn 不會執行此區塊）
+    init_background_workers()
+    
+    port = int(os.environ.get("PORT", CONFIG["flask_port"]))
+    
+    try:
+        import socket
+        local_ip = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        local_ip = "127.0.0.1"
+    print("=" * 50)
+    print("  印單系統已啟動！")
+    print("=" * 50)
+    print(f"  本機使用：http://127.0.0.1:{port}")
+    print(f"  區域網路：http://{local_ip}:{port}")
+    print("=" * 50)
+    print("  請勿關閉此視窗，關閉後系統停止運作")
+    print("=" * 50)
+    try:
+        import webbrowser
+        threading.Timer(2.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+    except Exception:
+        pass
 
     app.run(host="0.0.0.0", port=port, debug=False)
 
