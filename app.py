@@ -3317,7 +3317,7 @@ function updateShopLogFilter() {
   const shops = new Set();
   _adLogData.forEach(log => {
     const msg = log.msg || '';
-    const match = msg.match(/\[([^\]]+)\]/);
+    const match = msg.match(/\\[([^\\]]+)\\]/);
     if (match) shops.add(match[1]);
   });
   
@@ -11491,7 +11491,7 @@ function handleDrop(e) {
     console.log('檔案名稱:', file.name, '檔案類型:', file.type);
     
     // 檢查檔案類型
-    if (file.name.match(/\.(xlsx|xls|csv)$/i)) {
+    if (file.name.match(/\\.(xlsx|xls|csv)$/i)) {
       processFile(file);
     } else {
       alert('請選擇 Excel (.xlsx, .xls) 或 CSV 格式的檔案\\n\\n目前檔案: ' + file.name);
