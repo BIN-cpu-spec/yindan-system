@@ -9699,14 +9699,43 @@ def superman_glasses_schedule_lock():
             lock = _ad_scheduler_store.get(lock_key)
             now_ts = time.time()
             last_hourly = _ad_scheduler_store.get("last_hourly") or 0
+            last_daily = _ad_scheduler_store.get("last_daily") or ""  # 新增：回傳今日是否跑過
             if lock and now_ts - lock < lock_ttl:
-                resp = jsonify({"ok": False, "msg": "鎖定中", "last_hourly": last_hourly})
+                resp = jsonify({"ok": False, "msg": "鎖定中", "last_hourly": last_hourly, "last_daily": last_daily})
             else:
                 _ad_scheduler_store[lock_key] = now_ts
-                resp = jsonify({"ok": True, "msg": "取得鎖", "last_hourly": last_hourly})
+                resp = jsonify({"ok": True, "msg": "取得鎖", "last_hourly": last_hourly, "last_daily": last_daily})
         else:  # release
             _ad_scheduler_store.pop(lock_key, None)
             resp = jsonify({"ok": True, "msg": "釋放鎖"})
+    except Exception as e:
+        resp = jsonify({"ok": False, "msg": str(e)})
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+@app.route("/api/superman-glasses/mark-daily-done", methods=["POST", "OPTIONS"])
+def superman_glasses_mark_daily_done():
+    """Extension 跑完每日任務後通知 Railway 更新 last_daily
+    
+    避免多台主機在 9 點重複執行每日任務（Railway 端原本只有 5 分鐘鎖 TTL，
+    但 daily 可能跑超過 5 分鐘，鎖過期後其他機器會重複執行）。
+    
+    Extension 跑完後呼叫此端點，Railway 寫入 last_daily=今日台灣日期。
+    其他機器取鎖時看到 last_daily=今天 → 直接跳過，不重複執行。
+    """
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    try:
+        from datetime import timezone, timedelta
+        tw_tz = timezone(timedelta(hours=8))
+        today = datetime.now(tw_tz).strftime("%Y-%m-%d")
+        _ad_scheduler_store["last_daily"] = today
+        # 持久化到 Sheets（背景寫入，避免阻塞回應）
+        threading.Thread(target=_write_schedule_state, daemon=True).start()
+        resp = jsonify({"ok": True, "last_daily": today, "msg": f"已標記 {today} 每日任務完成"})
     except Exception as e:
         resp = jsonify({"ok": False, "msg": str(e)})
     resp.headers['Access-Control-Allow-Origin'] = '*'
