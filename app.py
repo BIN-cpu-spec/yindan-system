@@ -5,7 +5,7 @@
 區域細分：倉庫(前倉/主倉/備用倉) + 區域字母(A/B/C...)
 """
 
-import sys, csv, io, os, re, json, threading, time, hashlib, secrets
+import sys, csv, io, os, re, json, threading, time, hashlib, secrets, schedule
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
 
@@ -9436,6 +9436,14 @@ def superman_glasses_save_cookie():
         change_info = "更新" if cookie != old_cookie else "重複上傳"
         _ad_log(f"Cookie 已{change_info} [{source}] 長度 {len(cookie)}")
         
+        # 💾 保存到本地檔案供自動化使用
+        try:
+            with open('bigseller_cookie.txt', 'w', encoding='utf-8') as f:
+                f.write(cookie)
+            print(f"✅ Cookie已保存到檔案")
+        except Exception as file_error:
+            print(f"⚠️ 保存Cookie到檔案失敗: {file_error}")
+        
         # 寫入 Sheets 持久化（Railway 重啟後可讀回）
         def _persist_cookie():
             try:
@@ -9828,6 +9836,335 @@ def superman_glasses_ad_run_now():
     resp = jsonify({"ok": True, "msg": f"已觸發 {task} 任務"})
     resp.headers['Access-Control-Allow-Origin'] = '*'
     return resp
+
+@app.route("/api/superman-glasses/test-automation", methods=["GET"])
+def superman_glasses_test_automation():
+    """測試自動化API - 檢查所有組件是否正常"""
+    try:
+        results = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "cookie_status": "unknown",
+            "bigseller_api_status": "unknown", 
+            "automation_ready": False,
+            "error_details": []
+        }
+        
+        # 1. 檢查Cookie狀態
+        cookie_data = get_latest_bigseller_cookie()
+        if cookie_data:
+            results["cookie_status"] = "available"
+            results["cookie_length"] = len(cookie_data)
+        else:
+            results["cookie_status"] = "missing"
+            results["error_details"].append("缺少BigSeller認證Cookie")
+        
+        # 2. 如果有Cookie，測試BigSeller API
+        if cookie_data:
+            import requests
+            headers = {
+                'Content-Type': 'application/json',
+                'Cookie': cookie_data,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+            
+            try:
+                response = requests.post(
+                    'https://www.bigseller.com/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json',
+                    json={"pageNum": 1, "pageSize": 5, "timezone": 8},
+                    headers=headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    api_result = response.json()
+                    if api_result.get('code') == 0:
+                        results["bigseller_api_status"] = "working"
+                        results["ad_count"] = len(api_result.get('data', {}).get('records', []))
+                        results["automation_ready"] = True
+                    elif api_result.get('code') == 2001:
+                        results["bigseller_api_status"] = "auth_failed"
+                        results["error_details"].append("BigSeller API認證失敗(2001)")
+                    else:
+                        results["bigseller_api_status"] = f"error_{api_result.get('code')}"
+                        results["error_details"].append(f"BigSeller API錯誤: {api_result.get('code')}")
+                else:
+                    results["bigseller_api_status"] = f"http_error_{response.status_code}"
+                    results["error_details"].append(f"HTTP錯誤: {response.status_code}")
+                    
+            except Exception as api_error:
+                results["bigseller_api_status"] = "network_error"
+                results["error_details"].append(f"網路錯誤: {str(api_error)}")
+        
+        # 3. 檢查定時任務狀態
+        try:
+            import schedule
+            results["scheduler_jobs"] = len(schedule.jobs)
+            results["scheduler_status"] = "active" if schedule.jobs else "no_jobs"
+        except Exception as scheduler_error:
+            results["scheduler_status"] = "error"
+            results["error_details"].append(f"排程器錯誤: {str(scheduler_error)}")
+        
+        return jsonify({
+            "ok": True,
+            "results": results,
+            "ready_for_automation": results["automation_ready"]
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "ready_for_automation": False
+        })
+
+@app.route("/api/superman-glasses/auto-execute", methods=["POST", "OPTIONS"])
+def superman_glasses_auto_execute():
+    """自動化廣告執行API - 不依賴Extension"""
+    if request.method == "OPTIONS":
+        resp = jsonify({"ok": True})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+    
+    try:
+        data = request.get_json(force=True)
+        cookies = data.get("cookies", "")
+        
+        if not cookies:
+            return jsonify({"ok": False, "error": "缺少認證Cookie"}), 400
+        
+        # 執行自動化廣告調整
+        result = execute_bigseller_automation(cookies)
+        
+        resp = jsonify({"ok": True, "result": result})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+        
+    except Exception as e:
+        resp = jsonify({"ok": False, "error": str(e)})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp
+
+@app.route("/api/superman-glasses/check-and-execute", methods=["GET", "POST"])
+def superman_glasses_check_and_execute():
+    """檢查排程並自動執行 - 定時任務調用"""
+    import requests
+    from datetime import timezone, timedelta
+    
+    try:
+        tw_tz = timezone(timedelta(hours=8))
+        now_tw = datetime.now(tw_tz)
+        current_hour = now_tw.hour
+        
+        # 檢查是否在執行時間（每天09:00-18:00之間每小時執行）
+        if not (9 <= current_hour <= 18):
+            return jsonify({"ok": True, "message": "不在執行時間內"})
+        
+        # 讀取最新的BigSeller Cookie
+        cookie_data = get_latest_bigseller_cookie()
+        if not cookie_data:
+            return jsonify({"ok": False, "error": "無法獲取BigSeller認證"})
+        
+        # 執行自動化
+        execution_result = execute_bigseller_automation(cookie_data)
+        
+        # 記錄執行結果
+        log_execution_result(execution_result)
+        
+        return jsonify({
+            "ok": True, 
+            "executed": True,
+            "result": execution_result,
+            "timestamp": now_tw.isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+def execute_bigseller_automation(cookies):
+    """實際執行BigSeller廣告自動化邏輯"""
+    import requests
+    
+    results = {
+        "roas_adjustments": 0,
+        "budget_increases": 0,
+        "paused_ads": 0,
+        "restarted_ads": 0,
+        "errors": []
+    }
+    
+    try:
+        # 設置請求headers
+        headers = {
+            'Content-Type': 'application/json',
+            'Cookie': cookies,
+            'X-Requested-With': 'XMLHttpRequest',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
+        
+        # 1. 獲取廣告列表
+        ad_data = {
+            "pageNum": 1,
+            "pageSize": 100,
+            "timezone": 8
+        }
+        
+        response = requests.post(
+            'https://www.bigseller.com/api/v1/product/listing/shopee/queryAdCampaignShopInfoPage.json',
+            json=ad_data,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API請求失敗: {response.status_code}")
+        
+        api_result = response.json()
+        
+        if api_result.get('code') == 2001:
+            raise Exception("BigSeller API認證失敗 (2001) - Cookie已過期")
+        
+        if api_result.get('code') != 0:
+            raise Exception(f"BigSeller API錯誤: {api_result.get('code')} - {api_result.get('msg')}")
+        
+        ads = api_result.get('data', {}).get('records', [])
+        
+        # 2. 分析每個廣告並執行調整
+        for ad in ads:
+            try:
+                adjustment_result = analyze_and_adjust_ad(ad, headers)
+                if adjustment_result:
+                    if adjustment_result['action'] == 'roas':
+                        results['roas_adjustments'] += 1
+                    elif adjustment_result['action'] == 'budget':
+                        results['budget_increases'] += 1
+                    elif adjustment_result['action'] == 'pause':
+                        results['paused_ads'] += 1
+                    elif adjustment_result['action'] == 'restart':
+                        results['restarted_ads'] += 1
+                        
+            except Exception as ad_error:
+                results['errors'].append(f"廣告 {ad.get('id', 'unknown')} 處理失敗: {str(ad_error)}")
+        
+        return results
+        
+    except Exception as e:
+        results['errors'].append(f"執行失敗: {str(e)}")
+        return results
+
+def analyze_and_adjust_ad(ad, headers):
+    """分析單個廣告並執行調整"""
+    import requests
+    
+    # 基本條件檢查
+    if ad.get('status') != '进行中':
+        return None
+    
+    # 獲取廣告性能數據
+    roas = float(ad.get('roas', 0))
+    budget_utilization = float(ad.get('budgetUtilization', 0))
+    
+    # 調整邏輯（降低條件使其更容易執行）
+    if roas < 1.5 and budget_utilization > 80:
+        # ROAS太低且預算用完 - 暫停
+        return execute_ad_adjustment(ad['id'], 'pause', headers)
+    elif roas > 2.5 and budget_utilization > 70:
+        # ROAS高且預算使用率高 - 增加預算
+        return execute_ad_adjustment(ad['id'], 'budget_increase', headers)
+    elif roas > 2.0:
+        # ROAS良好 - 調整ROAS目標
+        return execute_ad_adjustment(ad['id'], 'roas_adjust', headers)
+    elif ad.get('status') == '已暂停' and roas > 1.8:
+        # 已暫停但ROAS回升 - 重啟
+        return execute_ad_adjustment(ad['id'], 'restart', headers)
+    
+    return None
+
+def execute_ad_adjustment(ad_id, action, headers):
+    """執行具體的廣告調整"""
+    import requests
+    
+    try:
+        if action == 'pause':
+            edit_data = {
+                "editAction": 2,  # 暫停
+                "adCampaignId": ad_id
+            }
+            action_type = 'pause'
+        elif action == 'restart':
+            edit_data = {
+                "editAction": 3,  # 重啟
+                "adCampaignId": ad_id
+            }
+            action_type = 'restart'
+        elif action == 'budget_increase':
+            edit_data = {
+                "editAction": 6,  # 調整預算
+                "adCampaignId": ad_id,
+                "dailyBudget": 150  # 增加到150
+            }
+            action_type = 'budget'
+        elif action == 'roas_adjust':
+            edit_data = {
+                "editAction": 11,  # 調整ROAS
+                "adCampaignId": ad_id,
+                "targetRoas": 3.0  # 調整ROAS目標
+            }
+            action_type = 'roas'
+        
+        response = requests.post(
+            'https://www.bigseller.com/api/v1/product/listing/shopee/editSingleShopeeProductAds.json',
+            json=edit_data,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('code') == 0:
+                return {"action": action_type, "success": True, "ad_id": ad_id}
+        
+        return {"action": action_type, "success": False, "ad_id": ad_id}
+        
+    except Exception as e:
+        return {"action": action_type, "success": False, "ad_id": ad_id, "error": str(e)}
+
+def get_latest_bigseller_cookie():
+    """獲取最新的BigSeller Cookie"""
+    try:
+        # 從檔案或環境變數讀取最新同步的Cookie
+        cookie_file = 'bigseller_cookie.txt'
+        
+        # 嘗試從檔案讀取
+        if os.path.exists(cookie_file):
+            with open(cookie_file, 'r', encoding='utf-8') as f:
+                cookie_data = f.read().strip()
+                if cookie_data:
+                    return cookie_data
+        
+        # 嘗試從環境變數讀取
+        cookie_data = os.environ.get('BIGSELLER_COOKIE', '')
+        if cookie_data:
+            return cookie_data
+        
+        # 如果都沒有，返回None
+        return None
+        
+    except Exception as e:
+        print(f"獲取Cookie失敗: {e}")
+        return None
+
+def log_execution_result(result):
+    """記錄執行結果到日誌"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] 自動化執行: ROAS調整{result['roas_adjustments']}筆, 預算增加{result['budget_increases']}筆, 暫停{result['paused_ads']}筆, 重啟{result['restarted_ads']}筆"
+    
+    # 寫入日誌檔案（或資料庫）
+    try:
+        with open('superman_automation.log', 'a', encoding='utf-8') as f:
+            f.write(log_entry + "\n")
+    except:
+        pass
 
 @app.route("/api/superman-glasses/scheduler-status", methods=["GET"])
 def superman_glasses_scheduler_status():
@@ -11379,4 +11716,44 @@ if __name__ == "__main__":
     else:
         print(f"[雲端模式] 系統啟動 port={port}")
 
+    # === 超人眼鏡自動化排程 ===
+    def setup_automation_scheduler():
+        """設置自動化排程"""
+        import schedule
+        import threading
+        
+        def run_automation():
+            """執行自動化任務"""
+            try:
+                import requests
+                # 調用自己的API執行自動化
+                base_url = f"http://localhost:{port}" if 'railway' not in os.environ.get('RAILWAY_PROJECT_NAME', '') else "https://yindan-system-production.up.railway.app"
+                response = requests.get(f'{base_url}/api/superman-glasses/check-and-execute', timeout=30)
+                result = response.json()
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 自動化執行: {result}")
+            except Exception as e:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 自動化執行錯誤: {e}")
+        
+        # 每小時執行一次（工作時間9:00-18:00）
+        schedule.every().hour.do(run_automation)
+        
+        def scheduler_worker():
+            """排程工作線程"""
+            while True:
+                try:
+                    schedule.run_pending()
+                    time.sleep(60)  # 每分鐘檢查一次
+                except Exception as e:
+                    print(f"排程器錯誤: {e}")
+                    time.sleep(300)  # 錯誤時等5分鐘再試
+        
+        # 啟動排程線程
+        scheduler_thread = threading.Thread(target=scheduler_worker, daemon=True)
+        scheduler_thread.start()
+        print("✅ 超人眼鏡自動化排程已啟動 - 每小時執行一次")
+    
+    # 啟動定時任務
+    setup_automation_scheduler()
+
     app.run(host="0.0.0.0", port=port, debug=False)
+
