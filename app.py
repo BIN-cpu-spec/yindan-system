@@ -2857,6 +2857,7 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#0f1923;min-height:1
       上傳 BigSeller 匯出的超材檔案，自動判斷可拆單/不可拆單，一鍵複製訂單號進行批量標記。
     </div>
     <a href="/oversize-tool" class="dl-btn">&#x1F680; 開始超材分析</a>
+    <a href="/settings/diagonal" class="dl-btn" style="margin-left:8px;background:#1a4a8a;color:#9ec5e8">&#x2699;&#xFE0F; 特殊商品白名單</a>
   </div>
 </div>
 
@@ -4259,7 +4260,7 @@ def api_status():
 DIAGONAL_HTML = """<!DOCTYPE html>
 <html lang="zh-TW"><head>
 <meta charset="UTF-8">
-<title>特殊可出超材品設定</title>
+<title>特殊商品白名單設定</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13px;color:#1a1a1a}
@@ -4270,112 +4271,226 @@ body{font-family:"Microsoft JhengHei",sans-serif;background:#f0f2f5;font-size:13
 .card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:20px}
 .card h2{font-size:14px;font-weight:500;color:#555;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #eee}
 .desc{font-size:12px;color:#888;margin-bottom:14px;line-height:1.8}
-.form-grid{display:grid;grid-template-columns:160px 140px 1fr auto;gap:10px;align-items:end;margin-bottom:8px}
+.section{padding:14px;border:1px solid #e8e8e8;border-radius:6px;margin-bottom:12px;background:#fafafa}
+.section-title{font-size:12px;font-weight:600;color:#1a5fa8;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.section-title .opt{color:#888;font-weight:400;font-size:11px}
+.dim-row{display:flex;gap:8px;align-items:center}
+.dim-row input{width:80px}
+.dim-row .x{color:#888;font-weight:600}
 label{font-size:12px;color:#666;display:block;margin-bottom:4px}
-input[type=text],input[type=number]{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px;font-family:inherit}
+input[type=text],input[type=number]{padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px;font-family:inherit}
+input[type=text]{width:100%}
 input:focus{outline:none;border-color:#1a5fa8}
-.ch-group{padding:8px 12px;background:#f8f8f8;border:1px solid #ddd;border-radius:5px}
-.ch-group label{display:inline-flex;align-items:center;gap:5px;margin-right:16px;font-size:12px;color:#333;cursor:pointer}
-.ch-group label input{width:auto}
+.ch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.ch-item{padding:10px 12px;background:#fff;border:1px solid #ddd;border-radius:5px;display:flex;align-items:center;gap:10px}
+.ch-item .ch-name{font-size:12px;color:#333;flex:1}
+.ch-item input[type=number]{width:70px}
+.ch-item .unit{font-size:11px;color:#888}
 table{width:100%;border-collapse:collapse;font-size:12px}
 thead th{background:#f5f5f5;padding:8px 10px;text-align:left;font-weight:500;color:#555;border-bottom:1.5px solid #ddd}
-td{padding:8px 10px;border-bottom:.5px solid #eee}
+td{padding:8px 10px;border-bottom:.5px solid #eee;vertical-align:top}
 .tag{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#e3f2fd;color:#1565c0;border:1px solid #bbdefb}
-.tag-g{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
-.tag-o{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
+.tag-g{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;display:inline-block;padding:2px 6px;border-radius:10px;font-size:11px;margin:1px}
+.tag-p{background:#f3e5f5;color:#6a1b9a;border:1px solid #ce93d8;display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px}
 .empty{text-align:center;padding:30px;color:#aaa;font-size:12px}
 .msg{padding:8px 14px;border-radius:5px;font-size:12px;margin:0 20px 10px}
 .msg-ok{background:#e8f5e9;color:#2e7d32}.msg-err{background:#ffebee;color:#b71c1c}
+.add-btn-wrap{text-align:right;padding-top:8px}
 </style></head><body>
 <div class="topbar">
-  <div class="logo"><span>特殊可出超材品</span> 設定</div>
+  <div class="logo"><span>特殊商品白名單</span> 設定</div>
   <a href="/" style="color:#aaa;font-size:12px;text-decoration:none">&#x2302; 返回首頁</a>
 </div>
 <div id="msg-area"></div>
+
 <div class="card">
-  <h2>新增設定</h2>
+  <h2>新增 / 編輯設定</h2>
   <div class="desc">
-    <b>斜放後有效最長邊：</b>商品斜放後最長維度（cm），讓系統用此值判斷超材。<br>
-    <b>每包最大件數：</b>超過此件數視為超材，可針對不同通路群組生效。<br>
-    兩個欄位至少填一個。
+    <b>所有欄位皆為選填</b>(SKU 必填),依商品特性勾選搭配:<br>
+    &bull; <b>實際運送尺寸</b>:折疊/壓縮商品(如收納袋),用此尺寸取代 BigSeller 標示<br>
+    &bull; <b>斜放後最長邊</b>:可斜放商品(如桌子、長棍),系統用此值取代最長邊判斷<br>
+    &bull; <b>各通路件數上限</b>:同 SKU 在不同通路上限不同(店到店嚴格、新竹寬鬆),分別填寫即可
   </div>
-  <div class="form-grid">
-    <div><label>商品 SKU</label><input type="text" id="new-sku" placeholder="例：APB002"></div>
-    <div><label>斜放後最長邊（cm）</label><input type="number" id="new-side" placeholder="留空不設定" min="1" max="200" step="0.5"></div>
-    <div>
-      <label>每包最大件數 &amp; 適用通路</label>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="number" id="new-qty" placeholder="件數上限（留空不限）" min="1" step="1" style="width:180px">
-        <div class="ch-group">
-          <label><input type="checkbox" id="ch-store" checked> 店配類<small style="color:#888">（店到店/隔日/超商/店到家）</small></label>
-          <label><input type="checkbox" id="ch-delivery" checked> 快遞類<small style="color:#888">（新竹/嘉里）</small></label>
-        </div>
+
+  <div style="margin-bottom:14px">
+    <label>商品 SKU<span style="color:#b71c1c">*</span></label>
+    <input type="text" id="new-sku" placeholder="例:AVG002-002">
+  </div>
+
+  <div class="section">
+    <div class="section-title">📦 實際運送尺寸 <span class="opt">(選填,留空則使用 BigSeller 原始尺寸)</span></div>
+    <div class="dim-row">
+      <div><label>長 L (cm)</label><input type="number" id="new-ship-L" min="0.1" step="0.1" placeholder=""></div>
+      <span class="x" style="margin-top:18px">×</span>
+      <div><label>寬 W (cm)</label><input type="number" id="new-ship-W" min="0.1" step="0.1" placeholder=""></div>
+      <span class="x" style="margin-top:18px">×</span>
+      <div><label>高 H (cm)</label><input type="number" id="new-ship-H" min="0.1" step="0.1" placeholder=""></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔄 斜放後最長邊 <span class="opt">(選填,留空則使用原始最長邊)</span></div>
+    <div style="display:flex;align-items:end;gap:8px">
+      <div><label>有效最長邊 (cm)</label><input type="number" id="new-side" min="1" max="200" step="0.5" placeholder="例:44" style="width:120px"></div>
+      <small style="color:#888;padding-bottom:10px">商品斜放進箱後的有效最長邊</small>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📋 各通路每包最大件數 <span class="opt">(選填,留空 = 此通路不限件數)</span></div>
+    <div class="ch-grid">
+      <div class="ch-item">
+        <span class="ch-name">蝦皮店到店</span>
+        <input type="number" id="qty-store_to_store" min="1" step="1" placeholder="不限"><span class="unit">件</span>
+      </div>
+      <div class="ch-item">
+        <span class="ch-name">蝦皮店到家</span>
+        <input type="number" id="qty-store_to_home" min="1" step="1" placeholder="不限"><span class="unit">件</span>
+      </div>
+      <div class="ch-item">
+        <span class="ch-name">超商取貨</span>
+        <input type="number" id="qty-cvs" min="1" step="1" placeholder="不限"><span class="unit">件</span>
+      </div>
+      <div class="ch-item">
+        <span class="ch-name">嘉里快遞</span>
+        <input type="number" id="qty-jiali" min="1" step="1" placeholder="不限"><span class="unit">件</span>
+      </div>
+      <div class="ch-item">
+        <span class="ch-name">新竹物流</span>
+        <input type="number" id="qty-hsinchu" min="1" step="1" placeholder="不限"><span class="unit">件</span>
       </div>
     </div>
-    <div style="padding-bottom:2px"><button class="btn btn-blue" onclick="addSku()">新增</button></div>
   </div>
+
+  <div class="add-btn-wrap"><button class="btn btn-blue" onclick="addSku()">儲存設定</button></div>
 </div>
+
 <div class="card">
-  <h2>目前設定清單</h2>
+  <h2>目前設定清單 (<span id="count">0</span> 筆)</h2>
   <table>
     <thead><tr>
-      <th>商品 SKU</th><th>斜放後最長邊</th><th>每包最大件數</th><th>適用通路</th><th style="width:60px"></th>
+      <th>商品 SKU</th>
+      <th>實際運送尺寸</th>
+      <th>斜放後最長邊</th>
+      <th>各通路件數上限</th>
+      <th style="width:60px"></th>
     </tr></thead>
     <tbody id="sku-tbody"><tr><td colspan="5" class="empty">尚無設定</td></tr></tbody>
   </table>
 </div>
+
 <script>
-var CH_LABELS = {store:'店配類', delivery:'快遞類'};
+var CH_LABELS = {
+  store_to_store: '店到店',
+  store_to_home:  '店到家',
+  cvs:            '超商',
+  jiali:          '嘉里',
+  hsinchu:        '新竹'
+};
+var CH_KEYS = ['store_to_store','store_to_home','cvs','jiali','hsinchu'];
+
 function loadSkus() {
   fetch('/api/diagonal').then(function(r){return r.json();}).then(function(data) {
     var tbody = document.getElementById('sku-tbody');
     var keys = data ? Object.keys(data) : [];
-    if (keys.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無設定</td></tr>'; return; }
+    document.getElementById('count').textContent = keys.length;
+    if (keys.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無設定</td></tr>';
+      return;
+    }
     tbody.innerHTML = keys.map(function(sku) {
-      var cfg = data[sku];
-      var side = cfg.side ? '<strong>' + cfg.side + ' cm</strong>' : '<span style="color:#bbb">—</span>';
-      var qty  = cfg.max_qty ? '<span class="tag-o">' + cfg.max_qty + ' 件</span>' : '<span style="color:#bbb">不限</span>';
-      var chs  = (cfg.channels || []).map(function(c){ return '<span class="tag-g">' + (CH_LABELS[c]||c) + '</span>'; }).join(' ');
-      if (!chs) chs = '<span style="color:#bbb">—</span>';
-      return '<tr><td><span class="tag">' + sku + '</span></td><td>' + side + '</td><td>' + qty + '</td><td>' + chs + '</td>' +
-             '<td><button class="btn btn-red" style="padding:4px 10px;font-size:11px" onclick="deleteSku(\'' + sku + '\')">刪除</button></td></tr>';
+      var cfg = data[sku] || {};
+      var ship = '<span style="color:#bbb">—</span>';
+      if (cfg.ship_L && cfg.ship_W && cfg.ship_H) {
+        ship = '<span class="tag-p">'+cfg.ship_L+'×'+cfg.ship_W+'×'+cfg.ship_H+' cm</span>';
+      }
+      var side = cfg.side ? '<strong>'+cfg.side+' cm</strong>' : '<span style="color:#bbb">—</span>';
+      var qmap = cfg.channel_qty || {};
+      var qtyTags = CH_KEYS.filter(function(k){ return qmap[k]; })
+                           .map(function(k){ return '<span class="tag-g">'+CH_LABELS[k]+': '+qmap[k]+'件</span>'; })
+                           .join(' ');
+      if (!qtyTags) qtyTags = '<span style="color:#bbb">—</span>';
+
+      return '<tr>'+
+        '<td><span class="tag">'+sku+'</span></td>'+
+        '<td>'+ship+'</td>'+
+        '<td>'+side+'</td>'+
+        '<td>'+qtyTags+'</td>'+
+        '<td><button class="btn btn-red" style="padding:4px 10px;font-size:11px" onclick="deleteSku(\\''+sku+'\\')">刪除</button></td>'+
+      '</tr>';
     }).join('');
   });
 }
+
 function showMsg(msg, ok) {
   var area = document.getElementById('msg-area');
-  area.innerHTML = '<div class="msg ' + (ok?'msg-ok':'msg-err') + '">' + msg + '</div>';
-  setTimeout(function(){ area.innerHTML = ''; }, 3000);
+  area.innerHTML = '<div class="msg '+(ok?'msg-ok':'msg-err')+'">'+msg+'</div>';
+  setTimeout(function(){ area.innerHTML = ''; }, 3500);
 }
+
+function getNum(id) {
+  var v = document.getElementById(id).value.trim();
+  return v ? parseFloat(v) : null;
+}
+
 function addSku() {
-  var sku  = document.getElementById('new-sku').value.trim();
-  var side = document.getElementById('new-side').value.trim();
-  var qty  = document.getElementById('new-qty').value.trim();
-  var chs  = [];
-  if (document.getElementById('ch-store').checked)    chs.push('store');
-  if (document.getElementById('ch-delivery').checked) chs.push('delivery');
+  var sku   = document.getElementById('new-sku').value.trim();
+  var shipL = getNum('new-ship-L');
+  var shipW = getNum('new-ship-W');
+  var shipH = getNum('new-ship-H');
+  var side  = getNum('new-side');
+
+  var channel_qty = {};
+  CH_KEYS.forEach(function(k){
+    var v = getNum('qty-'+k);
+    if (v) channel_qty[k] = parseInt(v);
+  });
+
   if (!sku) { showMsg('請輸入 SKU', false); return; }
-  if (!side && !qty) { showMsg('請至少填入斜放最長邊或件數上限', false); return; }
-  if (qty && chs.length === 0) { showMsg('請至少勾選一個通路群組', false); return; }
+
+  var shipFilled = [shipL, shipW, shipH].filter(function(v){ return v != null; }).length;
+  if (shipFilled > 0 && shipFilled < 3) {
+    showMsg('實際運送尺寸:長/寬/高必須一起填,或全留空', false);
+    return;
+  }
+
+  var hasShip = shipFilled === 3;
+  var hasSide = side != null;
+  var hasQty  = Object.keys(channel_qty).length > 0;
+  if (!hasShip && !hasSide && !hasQty) {
+    showMsg('請至少填寫一個欄位:實際運送尺寸、斜放後最長邊、或任一通路件數', false);
+    return;
+  }
+
+  var payload = { sku: sku };
+  if (hasShip) { payload.ship_L = shipL; payload.ship_W = shipW; payload.ship_H = shipH; }
+  if (hasSide) { payload.side = side; }
+  if (hasQty)  { payload.channel_qty = channel_qty; }
+
   fetch('/api/diagonal', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({sku:sku, side:side?parseFloat(side):null, max_qty:qty?parseInt(qty):null, channels:chs})
+    body: JSON.stringify(payload)
   }).then(function(r){return r.json();}).then(function(d) {
     if (d.ok) {
-      showMsg('已新增 ' + sku, true);
-      document.getElementById('new-sku').value = '';
-      document.getElementById('new-side').value = '';
-      document.getElementById('new-qty').value = '';
+      showMsg('已儲存 '+sku, true);
+      ['new-sku','new-ship-L','new-ship-W','new-ship-H','new-side'].forEach(function(id){
+        document.getElementById(id).value = '';
+      });
+      CH_KEYS.forEach(function(k){ document.getElementById('qty-'+k).value = ''; });
       loadSkus();
-    } else { showMsg('新增失敗：' + d.msg, false); }
+    } else { showMsg('儲存失敗:'+d.msg, false); }
   });
 }
+
 function deleteSku(sku) {
-  if (!confirm('確定刪除 ' + sku + '？')) return;
-  fetch('/api/diagonal/' + sku, {method:'DELETE'}).then(function(r){return r.json();}).then(function(d) {
-    if (d.ok) { showMsg('已刪除 ' + sku, true); loadSkus(); }
-  });
+  if (!confirm('確定刪除 '+sku+' 的白名單設定?')) return;
+  fetch('/api/diagonal/'+encodeURIComponent(sku), {method:'DELETE'})
+    .then(function(r){return r.json();})
+    .then(function(d) {
+      if (d.ok) { showMsg('已刪除 '+sku, true); loadSkus(); }
+    });
 }
+
 loadSkus();
 </script>
 </body></html>"""
@@ -4388,28 +4503,59 @@ def settings_diagonal():
 @app.route("/api/diagonal", methods=["GET"])
 @login_required
 def api_diagonal_get():
-    return jsonify(CONFIG["diagonal_skus"])
+    """回傳白名單。若資料是舊格式,自動轉成新格式回傳。"""
+    raw = CONFIG.get("diagonal_skus", {}) or {}
+    out = {}
+    for sku, cfg in raw.items():
+        out[sku] = _normalize_diag_cfg(cfg)
+    return jsonify(out)
 
 @app.route("/api/diagonal", methods=["POST"])
 @login_required
 def api_diagonal_post():
-    data     = request.get_json()
-    sku      = (data.get("sku") or "").strip()
-    side     = data.get("side")
-    max_qty  = data.get("max_qty")
-    channels = data.get("channels", [])
+    """新增/更新白名單設定(新格式)。"""
+    data = request.get_json() or {}
+    sku  = (data.get("sku") or "").strip()
     if not sku:
         return jsonify({"ok": False, "msg": "SKU 不可為空"})
-    if not side and not max_qty:
-        return jsonify({"ok": False, "msg": "請至少填入一個設定"})
+
+    ship_L = data.get("ship_L")
+    ship_W = data.get("ship_W")
+    ship_H = data.get("ship_H")
+    side   = data.get("side")
+    channel_qty = data.get("channel_qty") or {}
+
+    # 三個尺寸必須一起填或全空
+    ship_filled = sum(1 for v in (ship_L, ship_W, ship_H) if v is not None)
+    if 0 < ship_filled < 3:
+        return jsonify({"ok": False, "msg": "實際運送尺寸:長/寬/高必須一起填,或全留空"})
+
+    has_ship = ship_filled == 3
+    has_side = side is not None
+    has_qty  = bool(channel_qty)
+    if not (has_ship or has_side or has_qty):
+        return jsonify({"ok": False, "msg": "請至少填寫一個欄位"})
+
     try:
-        CONFIG["diagonal_skus"][sku] = {
-            "side":     float(side) if side else None,
-            "max_qty":  int(max_qty) if max_qty else None,
-            "channels": channels,  # ["store", "delivery"]
-        }
+        cfg = {}
+        if has_ship:
+            cfg["ship_L"] = float(ship_L)
+            cfg["ship_W"] = float(ship_W)
+            cfg["ship_H"] = float(ship_H)
+        if has_side:
+            cfg["side"] = float(side)
+        if has_qty:
+            valid_chs = {"store_to_store", "store_to_home", "cvs", "jiali", "hsinchu"}
+            cleaned = {}
+            for k, v in channel_qty.items():
+                if k in valid_chs and v:
+                    cleaned[k] = int(v)
+            if cleaned:
+                cfg["channel_qty"] = cleaned
+
+        CONFIG["diagonal_skus"][sku] = cfg
         save_settings()
-        log(f"新增特殊可出超材品：{sku} side={side} max_qty={max_qty} channels={channels}")
+        log(f"白名單儲存:{sku} = {cfg}")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
@@ -4420,8 +4566,49 @@ def api_diagonal_delete(sku):
     if sku in CONFIG["diagonal_skus"]:
         del CONFIG["diagonal_skus"][sku]
         save_settings()
-        log(f"刪除特殊可出超材品設定：{sku}")
+        log(f"白名單刪除:{sku}")
     return jsonify({"ok": True})
+
+
+def _normalize_diag_cfg(cfg):
+    """
+    把白名單設定統一成新格式,讓舊資料可以無縫運作。
+    舊格式:{"side": float, "max_qty": int, "channels": ["store"|"delivery"]}
+    新格式:{"ship_L":..., "ship_W":..., "ship_H":..., "side":...,
+           "channel_qty": {"store_to_store":int, ...}}
+    """
+    if not isinstance(cfg, dict):
+        try:
+            return {"side": float(cfg)}
+        except (TypeError, ValueError):
+            return {}
+
+    out = {}
+    for k in ("ship_L", "ship_W", "ship_H", "side"):
+        if cfg.get(k) is not None:
+            out[k] = cfg[k]
+    if isinstance(cfg.get("channel_qty"), dict) and cfg["channel_qty"]:
+        out["channel_qty"] = cfg["channel_qty"]
+
+    # 舊格式相容
+    if "max_qty" in cfg and cfg["max_qty"] and "channel_qty" not in out:
+        max_qty = int(cfg["max_qty"])
+        channels = cfg.get("channels") or []
+        ch_qty = {}
+        # 舊「store」群組 = 店到店+店到家+超商
+        # 舊「delivery」群組 = 嘉里+新竹
+        if "store" in channels:
+            ch_qty["store_to_store"] = max_qty
+            ch_qty["store_to_home"]  = max_qty
+            ch_qty["cvs"]            = max_qty
+        if "delivery" in channels:
+            ch_qty["jiali"]   = max_qty
+            ch_qty["hsinchu"] = max_qty
+        if ch_qty:
+            out["channel_qty"] = ch_qty
+
+    return out
+
 
 # ============================================================
 # 報關模組
@@ -5985,16 +6172,24 @@ def api_extract_cell_images():
     try:
         import requests as req_lib, re as _re
 
-        # 取得 Google OAuth token
-        creds = get_gspread_client().auth
+        # 取得 Google Sheets client（與其他 customs API 一致）
+        client, err = get_sheets_client()
+        if err:
+            return jsonify({"ok": False, "msg": f"Google Sheets 連線失敗：{err}"})
+
+        # 取得 OAuth token（gspread client 的 auth 屬性帶有 google credentials）
+        creds = client.auth
         token = creds.token
 
-        ss_id = GOOGLE_SHEETS_ID
+        ss_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+        if not ss_id:
+            return jsonify({"ok": False, "msg": "未設定 GOOGLE_SHEETS_ID 環境變數"})
+
         sheet_name = "商品報關資料庫"
         img_col_index = 9  # J 欄 = index 9 (0-based)
 
         # 用 Sheets API v4 取得完整試算表資料（含圖片）
-        url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?includeGridData=true&ranges={requests.utils.quote(sheet_name)}&fields=sheets.data.rowData.values.userEnteredValue,sheets.data.rowData.values.effectiveValue"
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{ss_id}?includeGridData=true&ranges={req_lib.utils.quote(sheet_name)}&fields=sheets.data.rowData.values.userEnteredValue,sheets.data.rowData.values.effectiveValue"
         headers = {"Authorization": f"Bearer {token}"}
         resp = req_lib.get(url, headers=headers, timeout=30)
         data = resp.json()
@@ -6010,7 +6205,7 @@ def api_extract_cell_images():
         skipped = 0
         img_urls = []
 
-        sheet = get_gspread_client().open_by_key(ss_id).worksheet(sheet_name)
+        sheet = client.open_by_key(ss_id).worksheet(sheet_name)
 
         for row_idx, row in enumerate(rows[1:], start=2):  # 從第 2 列開始（跳過標題）
             values = row.get("values", [])
@@ -11138,14 +11333,29 @@ def oversize_analyze_api():
             elif len(order_map) == 6:
                 print(f"[重量轉換] ...（省略後續SKU）")
 
-            # 斜放判斷
+            # ────────── 套用白名單(新格式) ──────────
+            # 白名單可以覆寫:1) 實際運送尺寸 L×W×H  2) 斜放後最長邊  3) 各通路件數上限
+            diag_cfg = _normalize_diag_cfg(diag_map.get(sku, {}))
+
+            # 1) 實際運送尺寸覆寫(折疊/壓縮商品)
+            ship_overridden = False
+            if diag_cfg.get("ship_L") and diag_cfg.get("ship_W") and diag_cfg.get("ship_H"):
+                L = float(diag_cfg["ship_L"])
+                W = float(diag_cfg["ship_W"])
+                H = float(diag_cfg["ship_H"])
+                ship_overridden = True
+
+            # 2) 斜放後最長邊
             original_max = max(L, W, H)
-            if sku in diag_map:
-                eff_side = float(diag_map[sku])
+            if diag_cfg.get("side"):
+                eff_side = float(diag_cfg["side"])
                 diagonal = True
             else:
                 eff_side = original_max
                 diagonal = False
+
+            # 3) 各通路件數上限(留給訂單級檢查用)
+            channel_qty_map = diag_cfg.get("channel_qty", {})
 
             order_map[row["订单号"]].append({
                 "sku": sku,
@@ -11157,6 +11367,8 @@ def oversize_analyze_api():
                 "effective_side": eff_side,
                 "diagonal": diagonal,
                 "original_max": original_max,
+                "ship_overridden": ship_overridden,
+                "channel_qty_map": channel_qty_map,
             })
             order_channel[row["订单号"]] = channel
             # 記錄訂單運費（免運才能拆單）。Excel 裡「運費」=買家支付的運費，=0 代表免運。
@@ -11208,81 +11420,74 @@ def oversize_analyze_api():
             # 訂單層級總和檢查（多 SKU 合箱情境）—— 使用智能包裝邏輯
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
-            
-            # 🎯 使用智能包裝邏輯計算實際包裝尺寸
-            if len(items) == 1 and items[0]["qty"] > 1:
-                # 單SKU多件：使用智能疊加邏輯
-                it = items[0]
-                L, W, H = it["L"], it["W"], it["H"]
-                qty = it["qty"]
-                
-                if H <= 2.0:  # 扁平商品（如保冷袋、貼紙）
-                    # 可疊加包裝
-                    package_L = L + 2  # 包材厚度
-                    package_W = W + 2
-                    
-                    # 智能疊加高度（考慮壓縮）- 區分極扁平和一般扁平商品
-                    if H <= 1.0:  # 極扁平商品（保冷袋、夾鏈袋等）
-                        if qty <= 10:
-                            compression_factor = 0.4   # 高壓縮60%
-                        elif qty <= 50:
-                            compression_factor = 0.3   # 更高壓縮70%
-                        else:
-                            compression_factor = 0.25  # 極高壓縮75%
-                    else:  # 一般扁平商品（貼紙、薄片等）
-                        if qty <= 5:
-                            compression_factor = 0.9   # 輕微壓縮
-                        elif qty <= 10:
-                            compression_factor = 0.7   # 中度壓縮  
-                        else:
-                            compression_factor = 0.6   # 較大壓縮
-                        
-                    stacking_height = H * qty * compression_factor
-                    package_H = stacking_height + 2  # 包材厚度
-                    
-                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                    total_sum = sum(smart_dims)
-                    max_eff_side = smart_dims[0]
-                    
-                else:
-                    # 厚實商品：並排或立體擺放
-                    # 估算最優包裝箱
-                    import math
-                    item_volume = L * W * H
-                    total_volume = item_volume * qty
-                    optimal_cube_side = math.pow(total_volume * 1.2, 1/3)  # 20% 填充損失
-                    
-                    package_L = max(optimal_cube_side, L + 2)
-                    package_W = max(optimal_cube_side, W + 2) 
-                    package_H = max(optimal_cube_side, H + 2)
-                    
-                    smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                    total_sum = sum(smart_dims)
-                    max_eff_side = smart_dims[0]
-                    
+
+            # 🎯 修法3.2:基於真實體積守恆的智能裝箱演算法(等比例擴張版)
+            #
+            # 設計原則:
+            #   1. 以「最大商品形狀」為基準箱(箱子最少要這麼大才裝得下最大件)
+            #   2. 單件訂單(qty 總和=1):直接用商品本身尺寸,不加鬆散係數
+            #      → 解決「曬被架 45×45×2 被加成 49×49×2」的誤判
+            #   3. 多件訂單:用「總體積 × 鬆散係數」決定箱子總體積,
+            #      然後從基準箱「等比例擴張」到容納所需體積
+            #      → 解決「100 個玻璃瓶被算成 8×6×780cm」的單向加高 bug
+            #   4. 不再用「+2 包材厚度」「扁平/厚實 if-else」這類拍腦袋公式
+            import math as _math
+
+            total_qty_in_order = sum(it["qty"] for it in items)
+
+            # 基準箱:必須容納最大那件商品的每一邊
+            box_L = float(max(it["L"] for it in items))
+            box_W = float(max(it["W"] for it in items))
+            box_H = float(max(it["H"] for it in items))
+
+            if total_qty_in_order <= 1:
+                # 單件:直接用商品本身尺寸,不加鬆散
+                pass
             else:
-                # 多SKU或傳統邏輯：使用改進的計算方式
-                package_L = max(it["L"] for it in items) + 2
-                package_W = max(it["W"] for it in items) + 2
-                
-                # 高度採用最佳擺放策略
-                total_height = 0
-                for it in items:
-                    qty = it["qty"]
-                    if it["H"] <= 2.0:  # 扁平商品可疊加
-                        total_height += it["H"] * qty * 0.8  # 壓縮疊加
-                    else:  # 厚實商品並排，高度取最大值
-                        total_height = max(total_height, it["H"])
-                        
-                package_H = total_height + 2  # 包材厚度
-                
-                smart_dims = sorted([package_L, package_W, package_H], reverse=True)
-                total_sum = sum(smart_dims)
-                max_eff_side = smart_dims[0]
-            
+                # 多件:商品總體積 × 鬆散係數
+                PACK_DENSITY = 1.3  # 留 30% 空隙給包材與不規則形狀
+                total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
+                required_volume = total_volume * PACK_DENSITY
+
+                base_volume = box_L * box_W * box_H
+                if base_volume > 0 and base_volume < required_volume:
+                    # 等比例擴張:三邊一起膨脹(像吹氣球),
+                    # 比「全部往高度加」更接近真實裝箱物理
+                    scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
+                    box_L *= scale
+                    box_W *= scale
+                    box_H *= scale
+
+            smart_dims = sorted([box_L, box_W, box_H], reverse=True)
+            total_sum = sum(smart_dims)
+            max_eff_side = smart_dims[0]
+
+            # ────────── 通路件數上限檢查(白名單套用) ──────────
+            # 同 SKU 在不同通路的件數上限可能不同(店到店嚴格、新竹寬鬆)
+            # 白名單裡若有設定當前通路的件數上限 → 訂單該 SKU 件數超過 → 視為超材
+            ch_key_map = {
+                "蝦皮店到店": "store_to_store",
+                "蝦皮店到家": "store_to_home",
+                "超商取貨":   "cvs",
+                "嘉里快遞":   "jiali",
+                "新竹物流":   "hsinchu",
+            }
+            current_ch_key = ch_key_map.get(channel)
+            qty_over = False
+            for it in items:
+                qmap = it.get("channel_qty_map") or {}
+                if current_ch_key and current_ch_key in qmap:
+                    limit = qmap[current_ch_key]
+                    if it["qty"] > limit:
+                        qty_over = True
+                        reasons.append(
+                            f"{it['sku']}×{it['qty']}:超過{channel}每包上限 {limit} 件(白名單設定)"
+                        )
+
             order_level_over = (total_weight > spec["max_weight"]
                               or total_sum > spec["max_sum"]
-                              or max_eff_side > spec["max_single"])
+                              or max_eff_side > spec["max_single"]
+                              or qty_over)
 
             # 只有在訂單整體超材時才列入
             is_order_oversize = len(reasons) > 0 or order_level_over
