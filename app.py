@@ -8099,29 +8099,42 @@ def oversize_analyze_api():
             # 可疑重量的 SKU 不計入合計（避免被錯誤資料拉爆）
             total_weight = sum(it["weight_g"] * it["qty"] for it in items if not it.get("weight_suspect"))
 
-            # 🎯 修法3:基於真實體積守恆的智能裝箱演算法
+            # 🎯 修法3.2:基於真實體積守恆的智能裝箱演算法(等比例擴張版)
+            #
             # 設計原則:
             #   1. 以「最大商品形狀」為基準箱(箱子最少要這麼大才裝得下最大件)
-            #   2. 用「商品總體積 × 鬆散係數」決定箱子需要多大
-            #   3. 基準箱裝得下 → 直接用基準尺寸(其他商品塞縫)
-            #      基準箱裝不下 → 把高度方向加長(模擬往上堆疊)
+            #   2. 單件訂單(qty 總和=1):直接用商品本身尺寸,不加鬆散係數
+            #      → 解決「曬被架 45×45×2 被加成 49×49×2」的誤判
+            #   3. 多件訂單:用「總體積 × 鬆散係數」決定箱子總體積,
+            #      然後從基準箱「等比例擴張」到容納所需體積
+            #      → 解決「100 個玻璃瓶被算成 8×6×780cm」的單向加高 bug
             #   4. 不再用「+2 包材厚度」「扁平/厚實 if-else」這類拍腦袋公式
-            PACK_DENSITY = 1.3  # 鬆散係數:留 30% 空隙給包材與不規則形狀
+            import math as _math
+
+            total_qty_in_order = sum(it["qty"] for it in items)
 
             # 基準箱:必須容納最大那件商品的每一邊
-            box_L = max(it["L"] for it in items)
-            box_W = max(it["W"] for it in items)
-            box_H = max(it["H"] for it in items)
+            box_L = float(max(it["L"] for it in items))
+            box_W = float(max(it["W"] for it in items))
+            box_H = float(max(it["H"] for it in items))
 
-            # 商品總體積(可疑重量的 SKU 也照算體積,因為體積資料通常正確)
-            total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
-            required_volume = total_volume * PACK_DENSITY
+            if total_qty_in_order <= 1:
+                # 單件:直接用商品本身尺寸,不加鬆散
+                pass
+            else:
+                # 多件:商品總體積 × 鬆散係數
+                PACK_DENSITY = 1.3  # 留 30% 空隙給包材與不規則形狀
+                total_volume = sum(it["L"] * it["W"] * it["H"] * it["qty"] for it in items)
+                required_volume = total_volume * PACK_DENSITY
 
-            base_volume = box_L * box_W * box_H
-            if base_volume < required_volume and box_L * box_W > 0:
-                # 基準箱裝不下 → 把箱子加高(往上堆疊)
-                shortage = required_volume - base_volume
-                box_H = box_H + shortage / (box_L * box_W)
+                base_volume = box_L * box_W * box_H
+                if base_volume > 0 and base_volume < required_volume:
+                    # 等比例擴張:三邊一起膨脹(像吹氣球),
+                    # 比「全部往高度加」更接近真實裝箱物理
+                    scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
+                    box_L *= scale
+                    box_W *= scale
+                    box_H *= scale
 
             smart_dims = sorted([box_L, box_W, box_H], reverse=True)
             total_sum = sum(smart_dims)
