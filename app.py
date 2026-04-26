@@ -11005,7 +11005,7 @@ def check_oversize_single_item(length, width, height, weight, sku, channel_spec)
 
 
 def smart_pack_box(items):
-    """共用的真實裝箱演算法（修法 3.4：以最大件為基準箱 + 容積守恆 + 形狀合理化）
+    """共用的真實裝箱演算法（修法 3.5：用「合理紙箱比例」判斷疊高是否離譜）
 
     輸入：items = [{"L":..., "W":..., "H":..., "qty":...}, ...]
     回傳：(box_L, box_W, box_H) 真實裝箱後的箱子三邊（已含 30% 鬆散包材空間）
@@ -11016,12 +11016,18 @@ def smart_pack_box(items):
       3. 多件訂單：算需要的容積（總體積 × 1.3）
          - 基準箱已經夠大 → 用基準箱
          - 不夠 → 優先往 H 軸疊高（符合真實裝箱直覺）
-         - 疊太高（超過長邊）→ 改用三邊等比例擴張（避免變超長條）
+         - 疊高比例離譜（高 / 短邊 > 5 倍）→ 改用三邊等比例擴張
 
-    為什麼這樣設計：
-      - 6 片滑鼠墊 23×18×1 → 疊高為 23×18×8（合理，員工真的這樣裝）
-      - 100 個 8×6×6 玻璃瓶 → 立方擴張為 40×30×30（合理）
-      - 不會出現「23+18+1 × 4件 = 99cm 三邊和」這種死碼公式錯誤
+    為什麼「比例上限 = 5」：
+      - 一般紙箱（30×20×40）長寬高比例約 2 倍
+      - 偏長紙箱（30×20×100）比例約 5 倍（已經偏長）
+      - 超過 5 倍就是超長條，員工不會這樣裝
+
+    實例驗證：
+      - 6 片滑鼠墊 23×18×1 → 疊高 23×18×8cm（合理）
+      - 4 件 31×26×7 矽膠隔熱墊 → 疊高 31×26×36cm（合理，不會誤判超材）
+      - 100 個 8×6×6 玻璃瓶 → needed_H 過長，立方擴張為 40×30×30
+      - 不會出現「+2 包材厚度」「壓縮係數」這類拍腦袋公式
     """
     import math as _math
     if not items:
@@ -11048,13 +11054,18 @@ def smart_pack_box(items):
 
     # 策略 A：優先往 H 軸疊高
     needed_H = required_volume / (L_base * W_base)
-    longest_LW = max(L_base, W_base)
 
-    if needed_H <= longest_LW:
-        # 疊高合理（高度不會超過長邊）→ 採用
+    # 「合理紙箱比例」判斷：高度 / 短邊 ≤ 5 倍
+    # 一般紙箱比例約 2-3 倍，5 倍是偏長型紙箱的上限
+    # 超過 5 倍才視為「超長條」，改用立方擴張
+    shortest_LW = min(L_base, W_base)
+    MAX_ASPECT_RATIO = 5.0
+
+    if shortest_LW > 0 and (needed_H / shortest_LW) <= MAX_ASPECT_RATIO:
+        # 疊高比例合理 → 採用
         return L_base, W_base, needed_H
 
-    # 策略 B：疊太高 → 改用三邊等比例擴張
+    # 策略 B：疊太高（比例離譜）→ 改用三邊等比例擴張
     scale = _math.pow(required_volume / base_volume, 1.0 / 3.0)
     return L_base * scale, W_base * scale, H_base * scale
 
