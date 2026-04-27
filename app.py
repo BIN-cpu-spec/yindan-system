@@ -9545,49 +9545,65 @@ def run_hourly_budget_task(force=False):
         _ad_log(f"--- 預算任務檢查完成，本次無符合加碼條件 ({skip}筆檢查)")
 
 def ad_scheduler_thread():
-    """廣告排程背景執行緒"""
+    """廣告排程背景執行緒（修法 v9.1：Railway 不再執行廣告任務）
+
+    狀態變更（2026-04-27）：
+      - Railway IP 被 BigSeller 封鎖（code=2001），廣告任務改由辦公室主機 Extension 執行
+      - 此 thread 仍保留為「心跳檢查」用途，每 5 分鐘記錄一次運作狀態
+      - 不再呼叫 run_daily_ad_tasks() 或 run_hourly_budget_task()
+      - 主機 Extension 透過 schedule-lock + mark-daily-done API 自行協調
+
+    若需測試 Railway 端執行：
+      - 用 /api/superman-glasses/ad-run-now 端點手動觸發（POST）
+      - 或臨時把 RAILWAY_AD_DISABLED 環境變數設為 false
+    """
     time.sleep(30)  # 啟動後等30秒再開始
-    _ad_log(f"廣告排程啟動 - 伺服器時間: {datetime.now().isoformat()}")
-    
+    _ad_log(f"廣告排程啟動 - 伺服器時間: {datetime.now().isoformat()} (Railway 模式：心跳檢查)")
+
+    # 環境變數開關（預設 Railway 不執行廣告任務）
+    railway_ad_disabled = os.environ.get("RAILWAY_AD_DISABLED", "true").lower() != "false"
+
+    heartbeat_counter = 0
     while True:
         try:
-            # 用 UTC+8 台灣時間判斷（修正版 - 更嚴格的時區處理）
             from datetime import timezone, timedelta
             import pytz
-            
-            # 方法1: pytz（更可靠）
+
             try:
                 taiwan_tz = pytz.timezone('Asia/Taipei')
                 now_tw = datetime.now(taiwan_tz)
                 timezone_method = "pytz"
             except:
-                # 方法2: 手動 UTC+8 fallback
                 utc_now = datetime.utcnow()
                 tw_offset = timedelta(hours=8)
                 now_tw = utc_now + tw_offset
                 timezone_method = "manual_utc+8"
-            
+
             current_hour = now_tw.hour
             current_date = now_tw.strftime("%Y-%m-%d")
-            
-            # 詳細時區 debug（每小時記錄一次）
-            if now_tw.minute == 0:
-                _ad_log(f"[時區檢查] 台灣時間: {now_tw.strftime('%Y-%m-%d %H:%M:%S')} | 方法: {timezone_method} | 小時: {current_hour}")
-            
-            # 每天台灣時間9點跑每日任務（寬鬆檢查：9-10點間都可以跑）
-            if 9 <= current_hour <= 10:
-                last_daily = _ad_scheduler_store.get("last_daily")
-                if last_daily != current_date:  # 今天還沒跑過
-                    _ad_log(f"觸發每日任務 - 台灣時間 {current_hour}:00")
-                    run_daily_ad_tasks()
-            
-            # 每小時跑預算任務（每小時都執行，與每日任務並行不衝突）
-            run_hourly_budget_task()
-                
+
+            # 心跳：每 5 分鐘記錄一次（避免日誌爆量）
+            heartbeat_counter += 1
+            if heartbeat_counter >= 5:
+                heartbeat_counter = 0
+                if not railway_ad_disabled:
+                    _ad_log(f"[排程心跳] 台灣時間 {now_tw.strftime('%H:%M:%S')} | Railway 廣告模式：啟用")
+                # 心跳預設不寫 log，避免每 5 分鐘一筆塞滿戰情室
+
+            if not railway_ad_disabled:
+                # 若有人手動把 RAILWAY_AD_DISABLED=false 啟用 Railway 模式才會跑
+                if 9 <= current_hour <= 10:
+                    last_daily = _ad_scheduler_store.get("last_daily")
+                    if last_daily != current_date:
+                        _ad_log(f"觸發每日任務 - 台灣時間 {current_hour}:00")
+                        run_daily_ad_tasks()
+                run_hourly_budget_task()
+            # 預設情況（railway_ad_disabled=True）：什麼都不做，由主機 Extension 接手
+
         except Exception as e:
             _ad_log(f"排程錯誤: {e}")
-        
-        time.sleep(60)  # 每分鐘檢查一次
+
+        time.sleep(60)
 
 # ── 廣告排程 API（查看執行記錄）──────────────────────────────
 @app.route("/api/superman-glasses/save-cookie", methods=["POST", "OPTIONS"])
@@ -12299,7 +12315,7 @@ def init_background_workers(port_for_log=None):
     
     # 廣告自動排程（戰情室核心）
     threading.Thread(target=ad_scheduler_thread, daemon=True).start()
-    print("✅ 廣告自動排程（ad_scheduler_thread）已啟動 - 每分鐘檢查、台灣時間 9 點觸發每日任務、每小時觸發預算任務")
+    print("✅ 廣告排程心跳執行緒（ad_scheduler_thread）已啟動 - Railway 不執行廣告，由主機 Extension 接手（環境變數 RAILWAY_AD_DISABLED=true）")
 
     # === 超人眼鏡自動化排程（雙重保險） ===
     def setup_automation_scheduler():
