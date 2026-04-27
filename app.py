@@ -10638,7 +10638,40 @@ def superman_glasses_restore_cost_options():
 
 @app.route("/api/superman-glasses/cost", methods=["GET"])
 def superman_glasses_cost_get():
-    """所有 Extension 來這裡取得成本資料"""
+    """所有 Extension 來這裡取得成本資料
+
+    修法 v9.2：加 fallback 機制
+      - 若記憶體 _cost_store 為空（Railway 重啟後啟動還原可能還沒跑完）
+      - 自動從 Google Sheets「💾 成本備份」讀回
+      - 避免 v4.0.4 主機拉到 0 筆成本導致 daily 跑空
+    """
+    # 若記憶體沒有成本，嘗試從 Sheets 讀回
+    if not _cost_store.get("map"):
+        try:
+            sheet_id = os.environ.get("GOOGLE_SHEETS_ID", "")
+            if sheet_id:
+                client, err = get_sheets_client()
+                if not err:
+                    ws = client.open_by_key(sheet_id).worksheet("💾 成本備份")
+                    rows = ws.get_all_values()
+                    if len(rows) > 1:
+                        cost_map = {}
+                        for row in rows[1:]:
+                            if len(row) >= 2 and row[0] and row[1]:
+                                try:
+                                    cost_map[row[0]] = float(row[1])
+                                except (ValueError, TypeError):
+                                    pass
+                        if cost_map:
+                            _cost_store["map"] = cost_map
+                            _cost_store["count"] = len(cost_map)
+                            _cost_store["ts"] = int(time.time() * 1000)
+                            _cost_store["uploader"] = "auto-restore-from-sheets"
+                            _ad_scheduler_store["cost_count"] = len(cost_map)
+                            print(f"[GET /cost fallback] 從 Sheets 自動還原 {len(cost_map)} 筆成本")
+        except Exception as e:
+            print(f"[GET /cost fallback] 還原失敗：{e}")
+
     resp = jsonify({
         "ok": True,
         "map": _cost_store["map"],
